@@ -2,7 +2,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("-s", "-subjects", nargs="*",
+parser.add_argument("-s", "-subjects", nargs="*", dest="subjects",
                     help="subject ids or path to text file")
 parser.add_argument("-plugin", default="multiproc",
                     choices=["linear", "multiproc", "ipython", "torque"],
