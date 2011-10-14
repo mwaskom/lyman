@@ -1,3 +1,4 @@
+import re
 import sys
 import os.path as op
 import numpy as np

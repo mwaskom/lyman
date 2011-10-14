@@ -12,8 +12,7 @@ def main(arglist):
     subject_list = util.determine_subjects(args.subjects)
     project_info = util.gather_project_info()
 
-    normalize = normalization.create_normalize_workflow(subject_list, 
-                                                        project_info['data_dir'])
+    normalize = normalization.create_normalization_workflow(project_info['data_dir'], subject_list)
     
     plugin, plugin_args = util.determine_engine(args)
 
