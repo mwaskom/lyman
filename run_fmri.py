@@ -65,7 +65,7 @@ def main(arglist):
     preprocsinksubs = util.get_mapnode_substitutions(preproc, exp["nruns"])
 
     # Preproc Datasink nodes
-    preprocsink = pe.Node(nio.DataSink(op.join(base_directory=project["analysis_dir"], args.experiment),
+    preprocsink = pe.Node(nio.DataSink(base_directory=op.join(project["analysis_dir"], args.experiment),
                                        substitutions=preprocsinksubs),
                           name="preprocsink")
 
