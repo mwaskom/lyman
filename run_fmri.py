@@ -2,6 +2,7 @@
 import os
 import re
 import sys
+import os.path as op
 
 import matplotlib as mpl
 mpl.use("Agg")
