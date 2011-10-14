@@ -81,12 +81,20 @@ def get_output_substitutions(workflow, outputnode, mergenode):
     for i, field in enumerate(outputs):
         workflow.connect(outputnode, (field, substitute, field), mergenode, "in%d"%(i+1))
     
-def get_mapnode_substitutions(workflow, output_node, nruns):
+def get_mapnode_substitutions(workflow, nruns):
     import networkx as nx
-    from nipype.pipeline.engine import MapNode
+    from nipype.pipeline.engine import Workflow, MapNode
     substitutions = []
-    mapnodes = [e[0].name for e in nx.edges(workflow._graph) \
-                    if e[1] is output_node and isinstance(e[0],MapNode)]
+    find_mapnodes = lambda wf : [n.name for n in nx.nodes(wf._graph) \
+                                if isinstance(n, MapNode)]
+
+    sub_workflows = [n for n in nx.nodes(workflow._graph) if isinstance(n, Workflow)]
+
+    mapnodes = find_mapnodes(workflow)
+
+    for wf in sub_workflows:
+        mapnodes.extend(find_mapnodes(wf))
+
     for r in range(nruns):
         for node in mapnodes:
             substitutions.append(("_%s%d"%(node, r), "run_%d"%(r+1)))

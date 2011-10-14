@@ -10,9 +10,9 @@ import nipype.pipeline.engine as pe
 
 import nipype.interfaces.io as nio
 from nipype.interfaces import fsl
-import nipype.interfaces.utility as util
+from nipype.interfaces import utility 
 
-from workflows.preproc import create_preproc_workflow
+from workflows.preproc import create_preprocessing_workflow
 
 import util
 from util.commandline import parser
@@ -26,17 +26,19 @@ def main(arglist):
     
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
 
+    sys.path.insert(0, os.path.abspath("."))
 
-    subject_list = util.determine_subjects(args)
+
+    subject_list = util.determine_subjects(args.subjects)
     
     # Subject source node
     # -------------------
-    subjectsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
+    subjectsource = pe.Node(utility.IdentityInterface(fields=["subject_id"]),
                             iterables = ("subject_id", subject_list),
                             overwrite=True,
                             name = "subjectsource")
 
-    preproc, preproc_input, preproc_output = create_preproc_workflow(
+    preproc, preproc_input, preproc_output = create_preprocessing_workflow(
                                       do_slice_time_cor=exp["slice_time_correction"],
                                       frames_to_toss=exp["frames_to_toss"],
                                       interleaved=exp["interleaved"],
@@ -60,7 +62,7 @@ def main(arglist):
     preprocsource.inputs.template_args = exp["template_args"]
 
     # Preproc node substitutions
-    preprocsinksubs = util.get_mapnode_substitutions(preproc, preproc_output, exp.nruns)
+    preprocsinksubs = util.get_mapnode_substitutions(preproc, exp["nruns"])
 
     # Preproc Datasink nodes
     preprocsink = pe.Node(nio.DataSink(base_directory=project["analysis_dir"],

@@ -715,7 +715,7 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
     import time
     from subprocess import call
     from nibabel import load
-    from .reporting import preproc_report_template
+    from workflows.reporting import preproc_report_template
 
     input_image = load(input_timeseries)
     image_dimensions = "%dx%dx%dx" % input_image.get_shape()[:3]

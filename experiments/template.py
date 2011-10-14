@@ -6,6 +6,8 @@ template_args = dict(timeseries=[["subject_id", "bold", ["DK_run?"]]])
 
 source_template = "%s/%s/%s.nii.gz"
 
+smooth_fwhm = 6
+
 highpass_sigma = 128
 TR = 2.
 units = "secs"
