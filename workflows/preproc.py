@@ -31,14 +31,15 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
                            name="img2float")
     
     # Correct for slice-time acquisition differences
-    slicetime = pe.MapNode(fsl.SliceTimer(interleaved=interleaved,
-                                          time_repetition=TR),
+    slicetime = pe.MapNode(fsl.SliceTimer(time_repetition=TR),
                            iterfield=["in_file"],
                            name="slicetime")
     if slice_order == "down":
         slicetime.inputs.index_dir = True
     elif slice_order != "up":
         raise ValueError("slice_order must be 'up' or 'down'")
+    if interleaved:
+        slicetime.inputs.interleaved = True
 
     # Realign each timeseries to the middle volume of that run
     realign = create_realignment_workflow()
