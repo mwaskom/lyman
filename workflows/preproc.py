@@ -10,8 +10,8 @@ from nipype.workflows.fsl import create_susan_smooth
 from .interfaces import TimeSeriesMovie
 
 def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True, 
-                                  frames_to_toss=6, interleaved=True, TR=2,
-                                  smooth_fwhm=6, highpass_sigma=32):
+                                  frames_to_toss=6, interleaved=True, slice_order="up", 
+                                  TR=2, smooth_fwhm=6, highpass_sigma=32):
      
     preproc = pe.Workflow(name=name)
 
@@ -35,6 +35,10 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
                                           time_repetition=TR),
                            iterfield=["in_file"],
                            name="slicetime")
+    if slice_order == "down":
+        slicetime.inputs.index_dir = True
+    elif slice_order != "up":
+        raise ValueError("slice_order must be 'up' or 'down'")
 
     # Realign each timeseries to the middle volume of that run
     realign = create_realignment_workflow()
