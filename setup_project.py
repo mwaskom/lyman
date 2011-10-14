@@ -25,11 +25,11 @@ PROJECT_CONF = """\
 # Data directory is where the input data lives
 data_dir = '%(data_dir)s'
 
-# Analysis directory is where anything written by these scritps will live
+# Analysis directory is where anything written by these scripts will live
 analysis_dir = '%(analysis_dir)s'
 
 # Working directory is where data lives during workflow execution
-working_dir = '%(analysis_dir)s'
+working_dir = '%(working_dir)s'
 
 # Set this to True to remove the working directory after each excecution
 rm_working_dir = %(rm_work_dir)s
