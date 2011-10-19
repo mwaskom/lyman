@@ -604,7 +604,7 @@ def write_realign_report(realign_params, rms_files):
     # Open up the RMS files and get the max motion
     displace = map(np.loadtxt, rms_files)
     motion = map(max, displace)
-    motion.extend(sum(displace[1]))
+    motion.extend(displace[1].sum())
     displace[1] = np.concatenate(([0], displace[1]))
     motion_file = abspath("max_motion.txt")
     with open(motion_file, "w") as f:
