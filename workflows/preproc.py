@@ -767,7 +767,7 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
 
     open(report_html_rst_file, "w").write(report_rst_text)
 
-    call(["rst2html.py", report_html_rst_file, "-o", report_html_file])
+    call(["rst2html.py", report_html_rst_file, report_html_file])
 
     out_files = [report_pdf_file, report_html_file]
 
