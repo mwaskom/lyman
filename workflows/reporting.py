@@ -3,7 +3,7 @@
 
 
 
-preproc_report_template = """\
+preproc_report_template - """\
 ********************
 Preprocessing Report
 ********************
@@ -13,7 +13,7 @@ Preprocessing Report
 **Subject ID:** %(subject_id)s
 
 Input Timeseries
-================
+----------------
 
 **Source file:**
 
@@ -28,34 +28,36 @@ Input Timeseries
 **Timepoints:** %(image_timepoints)d
 
 Motion Correction Target
-========================
+------------------------
 
 .. image:: %(example_func_slices)s
     :width: 6.5in
 
 Mean Functional Image and Brain Mask
-====================================
+------------------------------------
 
 .. image:: %(mean_func_slices)s
     :width: 6.5in
 
 Whole-brain Intensity and Outliers
-==================================
+----------------------------------
 
 .. image:: %(intensity_plot)s
     :width: 6.5in
 
 **Total outliers frames:** %(n_outliers)d
 
-Maximum RMS Motion
-------------------
+RMS Motion
+^^^^^^^^^^
 
-**Absolute:** %(max_abs_motion)s mm
+**Max Absolute:** %(max_abs_motion)s mm
 
-**Relative:** %(max_rel_motion)s mm
+**Max Relative:** %(max_rel_motion)s mm
+
+**Total Motion:** %(total_motion)s mm
 
 Motion Plots
-============
+------------
 
 .. image:: %(displacement_plot)s
     :width: 6.5in
@@ -67,7 +69,7 @@ Motion Plots
     :width: 6.5in
 
 Functional to Structural Coregistration
-=======================================
+---------------------------------------
 
 .. image:: %(func_to_anat_slices)s
     :width: 5.5in

@@ -225,7 +225,7 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
                           iterfield = ["in_file", "ref_file"])
   
     report_inputs = ["realign_params", "rms_files"]
-    report_outputs = ["max_motion_file", "disp_plot", "rot_plot", "trans_plot"]
+    report_outputs = ["motion_file", "disp_plot", "rot_plot", "trans_plot"]
     mcreport = pe.MapNode(util.Function(input_names=report_inputs,
                                         output_names=report_outputs,
                                         function=write_realign_report),
@@ -270,7 +270,7 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
         (mcflirt,       mcreport,         [("par_file", "realign_params"),
                                            ("rms_files", "rms_files")]),
         (exampleslice,  exslicename,      [("out_file", "in_file")]),
-        (mcreport,      mergereport,      [("max_motion_file", "in1"),
+        (mcreport,      mergereport,      [("motion_file", "in1"),
                                            ("rot_plot", "in2"),
                                            ("disp_plot", "in3"),
                                            ("trans_plot", "in4")]),
@@ -603,11 +603,12 @@ def write_realign_report(realign_params, rms_files):
 
     # Open up the RMS files and get the max motion
     displace = map(np.loadtxt, rms_files)
-    maxima = map(max, displace)
+    motion = map(max, displace)
+    motion.extend(sum(displace[1]))
     displace[1] = np.concatenate(([0], displace[1]))
-    max_motion_file = abspath("max_motion.txt")
-    with open(max_motion_file, "w") as f:
-       f.write("#Absolute:\n%.4f\n#Relative\n%.4f"%tuple(maxima))
+    motion_file = abspath("max_motion.txt")
+    with open(motion_file, "w") as f:
+       f.write("#Absolute:\n%.4f\n#Relative\n%.4f\nTotal\n%.4f"%tuple(motion))
 
     # Write the displacement plot
     fig = plt.figure()
@@ -652,7 +653,7 @@ def write_realign_report(realign_params, rms_files):
     
     plt.close()
     
-    return max_motion_file, disp_plot, rot_plot, trans_plot
+    return motion_file, disp_plot, rot_plot, trans_plot
 
 def write_art_plot(intensity_file, outlier_file):
     from os.path import abspath
@@ -718,14 +719,19 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
     from nibabel import load
     from workflows.reporting import preproc_report_template
 
+    # Gather some attributes of the input timeseries
     input_image = load(input_timeseries)
-    image_dimensions = "%dx%dx%dx" % input_image.get_shape()[:3]
+    image_dimensions = "%dx%dx%d" % input_image.get_shape()[:3]
     image_timepoints = input_image.get_shape()[-1]
 
-    max_motion_file = realign_report[0]
-    motion_info = [l.strip() for l in open(max_motion_file).readlines()]
-    max_abs_motion, max_rel_motion = motion_info[1], motion_info[3]
+    # Read in motion statistics
+    motion_file = realign_report[0]
+    motion_info = [l.strip() for l in open(motion_file).readlines()]
+    max_abs_motion, max_rel_motion, total_motion = (motion_info[1],
+                                                    motion_info[3],
+                                                    motion_info[5])
 
+    # Fill in the report template dictionary
     report_dict = dict(now=time.asctime(),
                        subject_id=subject_id, 
                        timeseries_file=input_timeseries,
@@ -738,39 +744,41 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
                        n_outliers=len(open(outlier_volumes).readlines()),
                        max_abs_motion=max_abs_motion,
                        max_rel_motion=max_rel_motion,
+                       total_motion=total_motion,
                        displacement_plot=realign_report[2],
                        rotation_plot=realign_report[1],
                        translation_plot=realign_report[3],
                        func_to_anat_cost=open(coreg_report[0]).read().split()[0],
                        func_to_anat_slices=coreg_report[1])
 
+    # Plug the values into the template for the pdf file
     report_rst_text = preproc_report_template % report_dict
 
+
+    # Write the rst file and convert to pdf
     report_pdf_rst_file = "preproc_pdf.rst"
     report_pdf_file = op.abspath("preproc_report.pdf")
-
     open(report_pdf_rst_file, "w").write(report_rst_text)
-
     call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
 
+    # For images going into the html report, we want the path to be relative
+    # (We expect to read the html page from within the datasink directory
+    # containing the images.  So iteratate through and chop off the leading path.
     html_images = ["example_func_slices", "mean_func_slices", "intensity_plot",
                    "displacement_plot", "rotation_plot", "translation_plot",
                    "func_to_anat_slices"]
-
     for img in html_images:
         report_dict[img] = op.split(report_dict[img])[1]
 
+    # Write the another rst file and convert it to html
     report_html_rst_file = "preproc_html.rst"
     report_html_file = op.abspath("preproc_report.html")
-
     report_rst_text = preproc_report_template % report_dict
-
     open(report_html_rst_file, "w").write(report_rst_text)
-
     call(["rst2html.py", report_html_rst_file, report_html_file])
 
+    # Return both report files as a list
     out_files = [report_pdf_file, report_html_file]
-
     return out_files 
 
 def scale_timeseries(in_file, mask, statistic="median", target=10000):
