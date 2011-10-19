@@ -3,7 +3,7 @@
 
 
 
-preproc_report_template - """\
+preproc_report_template = """\
 ********************
 Preprocessing Report
 ********************
