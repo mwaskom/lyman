@@ -1,15 +1,15 @@
 
 import nipype.interfaces.io as io
-import nipype.interfaces.fsl as fsl       
+import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
-import nipype.interfaces.utility as util   
-import nipype.pipeline.engine as pe         
-import nipype.algorithms.rapidart as ra      
+import nipype.interfaces.utility as util
+import nipype.pipeline.engine as pe
+import nipype.algorithms.rapidart as ra
 
 from nipype.workflows.fsl import create_susan_smooth
 from .interfaces import TimeSeriesMovie
 
-def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True, 
+def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
                                   frames_to_toss=6, interleaved=True, slice_order="up", 
                                   TR=2, smooth_fwhm=6, highpass_sigma=32):
      
@@ -135,7 +135,7 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
                                                    "intensity_plot",
                                                    "outlier_volumes",
                                                    "coreg_report"],
-                                      output_names=["report_pdf"],
+                                      output_names=["out_files"],
                                       function=write_preproc_report),
                         iterfield=["input_timeseries",
                                    "realign_report",
@@ -170,7 +170,7 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
                      "flirt_affine",
                      "tkreg_affine",
                      "coreg_report",
-                     "report_pdf"]
+                     "report_files"]
 
 
     outputnode = pe.Node(util.IdentityInterface(fields=output_fields),
@@ -191,7 +191,7 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
                                           ("outputs.report", "coreg_report")]),
         (rename_smooth,  outputnode,     [("out_file", "smoothed_timeseries")]),
         (rename_rough,   outputnode,     [("out_file", "unsmoothed_timeseries")]),
-        (report,         outputnode,     [("report_pdf", "report_pdf")]),
+        (report,         outputnode,     [("out_files", "report_files")]),
         ])
 
     return preproc, inputnode, outputnode
@@ -298,9 +298,9 @@ def create_skullstrip_workflow(name="skullstrip"):
                            name="meanfunc1")
 
     # Skullstrip the mean functional image
-    stripmean = pe.MapNode(fsl.BET(mask = True,
+    stripmean = pe.MapNode(fsl.BET(mask=True,
                                    no_output=True,
-                                   frac = 0.3),
+                                   frac=0.3),
                            iterfield = ["in_file"],
                            name = "stripmean")
 
@@ -746,14 +746,32 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
 
     report_rst_text = preproc_report_template % report_dict
 
-    report_rst_file = "preproc_report.rst"
+    report_pdf_rst_file = "preproc_pdf.rst"
     report_pdf_file = op.abspath("preproc_report.pdf")
 
-    open(report_rst_file, "w").write(report_rst_text)
+    open(report_pdf_rst_file, "w").write(report_rst_text)
 
-    call(["rst2pdf", report_rst_file, "-o", report_pdf_file])
+    call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
 
-    return report_pdf_file
+    html_images = ["example_func_slices", "mean_func_slices", "intensity_plot",
+                   "displacement_plot", "rotation_plot", "translation_plot",
+                   "func_to_anat_slices"]
+
+    for img in html_images:
+        report_dict[img] = op.split(report_dict[img])[1]
+
+    report_html_rst_file = "preproc_html.rst"
+    report_html_file = op.abspath("preproc_report.html")
+
+    report_rst_text = preproc_report_template % report_dict
+
+    open(report_html_rst_file, "w").write(report_rst_text)
+
+    call(["rst2html", report_html_rst_file, "-o", report_html_file])
+
+    out_files = [report_pdf_file, report_html_file]
+
+    return out_files 
 
 def scale_timeseries(in_file, mask, statistic="median", target=10000):
     
