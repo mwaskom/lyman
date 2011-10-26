@@ -18,7 +18,7 @@ slice_time_correction = True
 interleaved = False
 slice_order = "up"
 
-nruns = 6
+n_runs = 6
 
 fsl_bases = {"dgamma":{"derivs":False}}
 spm_bases = {"hrf":[0,0]}
