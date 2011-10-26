@@ -22,7 +22,7 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
 
     # Remove early frames to account for T1 stabalization
     trimmer = pe.MapNode(fsl.ExtractROI(t_min=frames_to_toss),
-                         iterfield=["in_file"],
+                         iterfield=["in_file", "t_size"],
                          name="trimmer")
 
     # Convert functional images to float representation
@@ -103,7 +103,7 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
 
     preproc.connect([
         (inputnode,     trimmer,       [("timeseries", "in_file"),
-                                        (("timeseries", get_trimmed_length), "t_size")]),
+            (("timeseries", get_trimmed_length, frames_to_toss), "t_size")]),
         (trimmer,       img2float,     [("roi_file", "in_file")]),
         (img2float,     slicetime,     [("out_file", "in_file")]),
         (slicetime,     realign,       [("slice_time_corrected_file", "inputs.timeseries")]),
@@ -567,14 +567,12 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2"):
 # Main interface functions
 # ------------------------
 
-def get_trimmed_length(func):
-    """Return the desired length after removing two frames."""
+def get_trimmed_length(in_files, frames_to_toss):
     from nibabel import load
-    funcfile = func
-    if isinstance(func, list):
-        funcfile = func[0]
-    _,_,_,timepoints = load(funcfile).get_shape()
-    return timepoints-2
+    lengths = []
+    for f in in_files:
+        lengths.append(load(f).shape[-1] - frames_to_toss)
+    return lengths
 
 def max_motion_func(rms_files):
     """Determine the maximum absolute and relative motion values."""
