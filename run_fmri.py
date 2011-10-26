@@ -2,21 +2,21 @@
 import os
 import re
 import sys
+import shutil
 import os.path as op
 
 import matplotlib as mpl
 mpl.use("Agg")
 
-import nipype.pipeline.engine as pe
+from nipype.pipeline.engine import Node
 
-import nipype.interfaces.io as nio
-from nipype.interfaces import fsl
-from nipype.interfaces import utility 
+from nipype.interfaces.io import DataGrabber, DataSink
 
 from workflows.preproc import create_preprocessing_workflow
 
 import util
 from util.commandline import parser
+
 
 def main(arglist):
 
@@ -24,76 +24,63 @@ def main(arglist):
 
     project = util.gather_project_info()
     exp = gather_experiment_info(args.experiment)
-    
+
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
 
     sys.path.insert(0, os.path.abspath("."))
 
-
     subject_list = util.determine_subjects(args.subjects)
-    
-    # Subject source node
-    # -------------------
-    subjectsource = pe.Node(utility.IdentityInterface(fields=["subject_id"]),
-                            iterables = ("subject_id", subject_list),
-                            overwrite=True,
-                            name = "subjectsource")
+
+    subj_source = util.make_subject_source(subject_list)
 
     preproc, preproc_input, preproc_output = create_preprocessing_workflow(
-                                      do_slice_time_cor=exp["slice_time_correction"],
-                                      frames_to_toss=exp["frames_to_toss"],
-                                      interleaved=exp["interleaved"],
-                                      slice_order=exp["slice_order"],
-                                      TR=exp["TR"],
-                                      smooth_fwhm=exp["smooth_fwhm"],
-                                      highpass_sigma=exp["highpass_sigma"])
+                              do_slice_time_cor=exp["slice_time_correction"],
+                              frames_to_toss=exp["frames_to_toss"],
+                              interleaved=exp["interleaved"],
+                              slice_order=exp["slice_order"],
+                              TR=exp["TR"],
+                              smooth_fwhm=exp["smooth_fwhm"],
+                              highpass_sigma=exp["highpass_sigma"])
 
+    preproc_source = Node(DataGrabber(infields=["subject_id"],
+                                      outfields=["timeseries"],
+                                      base_directory=project["data_dir"],
+                                      template=exp["source_template"],
+                                      sort_filelist=True),
+                          name="preproc_source")
 
-    # Preprocessing
-    # =============
+    preproc_source.inputs.template_args = dict(timeseries=[["subject_id"]])
 
-    # Preproc datasource node
-    preprocsource = pe.Node(nio.DataGrabber(infields=["subject_id"],
-                                            outfields=["timeseries"],
-                                            base_directory=project["data_dir"],
-                                            template=exp["source_template"],
-                                            sort_filelist=True),
-                            name="preprocsource")
+    preproc_inwrap = util.InputWrapper(preproc, subj_source,
+                                       preproc_source, preproc_input)
 
-    preprocsource.inputs.template_args = exp["template_args"]
+    preproc_inwrap.connect_inputs()
 
-    # Preproc node substitutions
-    preprocsinksubs = util.get_mapnode_substitutions(preproc, exp["nruns"])
+    preproc_sink = Node(DataSink(base_directory=op.join(
+                            project["analysis_dir"], args.experiment)),
+                        name="preproc_sink")
 
-    # Preproc Datasink nodes
-    preprocsink = pe.Node(nio.DataSink(base_directory=op.join(project["analysis_dir"], args.experiment),
-                                       substitutions=preprocsinksubs),
-                          name="preprocsink")
+    preproc_outwrap = util.OutputWrapper(preproc, subj_source,
+                                         preproc_sink, preproc_output)
 
-    # Preproc connections
-    preproc.connect(subjectsource, "subject_id", preprocsource, "subject_id")
-    preproc.connect(subjectsource, "subject_id", preproc_input, "subject_id")
+    preproc_outwrap.set_subject_container()
+    preproc_outwrap.set_mapnode_substitutions(exp["n_runs"])
+    preproc_outwrap.sink_outputs("preproc")
 
-    # Input connections
-    util.connect_inputs(preproc, preprocsource, preproc_input)
+    preproc.base_dir = op.join(project["working_dir"], args.experiment)
 
-    # Set up the subject containers
-    util.subject_container(preproc, subjectsource, preprocsink)
-
-    # Connect the heuristic outputs to the datainks
-    util.sink_outputs(preproc, preproc_output, preprocsink, "preproc")
-
-    # Set up the working output
-    preproc.base_dir = project["working_dir"]
-
-    # Archive crashdumps
-    util.archive_crashdumps(preproc)
+    preproc.config = dict(crashdump_dir="/tmp")
 
     run_workflow(preproc, "preproc", args)
 
+    if project["rm_working_dir"]:
+        shutil.rmtree(
+            op.join(project["working_dir"], args.experiment, "preproc"))
+
+
 def gather_experiment_info(experiment_name, altmodel=None):
 
-    try:   
+    try:
         if altmodel is not None:
             experiment_name = "%s-%s" % (experiment_name, altmodel)
         exp = __import__("experiments." + experiment_name,
@@ -103,13 +90,15 @@ def gather_experiment_info(experiment_name, altmodel=None):
         sys.exit()
 
     return dict(
-        [(k,v) for k,v in exp.__dict__.items() if not re.match("__.*__", k)])
+        [(k, v) for k, v in exp.__dict__.items() if not re.match("__.*__", k)])
+
 
 def run_workflow(wf, name, args):
 
     plugin, plugin_args = util.determine_engine(args)
     if name in args.workflows:
         wf.run(plugin, plugin_args)
+
 
 def parse_args(arglist):
 

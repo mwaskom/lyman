@@ -1,32 +1,151 @@
+import os
 import re
 import sys
 import os.path as op
-import numpy as np
 from datetime import datetime
+
+import numpy as np
+import networkx as nx
+
+from nipype.pipeline.engine import Workflow, MapNode, Node
+from nipype.interfaces.base import isdefined
+from nipype.interfaces.utility import IdentityInterface
+
+
+class InputWrapper(object):
+
+    def __init__(self, workflow, subject_node, grabber_node, input_node):
+
+        self.wf = workflow
+        self.subj_node = subject_node
+        self.grab_node = grabber_node
+        self.in_node = input_node
+
+    def connect_inputs(self):
+        """Connect stereotyped inputs to the input IdentityInterface."""
+
+        # Connect subject_id to input and grabber nodes
+        self.wf.connect(self.subj_node, "subject_id",
+                        self.grab_node, "subject_id")
+        if hasattr(self.in_node.inputs, "subject_id"):
+            self.wf.connect(self.subj_node, "subject_id",
+                            self.in_node, "subject_id")
+
+        # Connect the datagrabber outputs to the workflow inputs
+        grabbed = self.grab_node.outputs.get()
+        inputs = self.in_node.inputs.get()
+        for field in grabbed:
+            if field in inputs:
+                self.wf.connect(self.grab_node, field,
+                                self.in_node, field)
+
+
+class OutputWrapper(object):
+
+    def __init__(self, workflow, subject_node, sink_node, output_node):
+
+        self.wf = workflow
+        self.subj_node = subject_node
+        self.sink_node = sink_node
+        self.out_node = output_node
+
+    def set_mapnode_substitutions(self, n_runs):
+        """Find mapnode names and add datasink substitutions to sort by run."""
+
+        # First determine top-level mapnode names
+        mapnode_names = find_mapnodes(self.wf)
+
+        # Then determine mapnode names for each nested workflow
+        # Note that this currently only works for one level of nesting
+        nested_workflows = find_nested_workflows(self.wf)
+        for wf in nested_workflows:
+            mapnode_names.extend(find_mapnodes(wf))
+
+        # Build a list of substitution tuples
+        substitutions = []
+        for r in range(n_runs):
+            for name in mapnode_names:
+                substitutions.append(("_%s%d" % (name, r), "run_%d" % (r + 1)))
+
+        # Set the substitutions attribute on the DataSink node
+        if isdefined(self.sink_node.inputs.substitutions):
+            self.sink_node.inputs.substitutions.extend(substitutions)
+        else:
+            self.sink_node.inputs.substitutions = substitutions
+
+    def set_subject_container(self):
+
+        # Connect the subject_id value as the container and string to remove
+        self.wf.connect([
+            (self.subj_node, self.sink_node, [("subject_id", "container"),
+                                              ("subject_id", "strip_dir")]),
+            ])
+
+        # Strip the _subject_id_ component from the path as well
+        if isdefined(self.sink_node.inputs.substitutions):
+            self.sink_node.inputs.substitutions.append(("_subject_id_", ""))
+        else:
+            self.sink_node.inputs.substitutions = [("_subject_id_", "")]
+
+    def sink_outputs(self, dir_name):
+        """Connect the outputs of a workflow to a datasink."""
+
+        outputs = self.out_node.outputs.get()
+        for field in outputs:
+            self.wf.connect(self.out_node, field,
+                            self.sink_node, dir_name + ".@" + field)
+
+
+def find_mapnodes(workflow):
+    """Given a workflow, return a list of MapNode names."""
+
+    mapnode_names = []
+    wf_nodes = nx.nodes(workflow._graph)
+    for node in wf_nodes:
+        if isinstance(node, MapNode):
+            mapnode_names.append(node.name)
+
+    return mapnode_names
+
+
+def find_nested_workflows(workflow):
+    """Given a workflow, find nested workflow objects."""
+
+    nested_workflows = []
+    wf_nodes = nx.nodes(workflow._graph)
+    for node in wf_nodes:
+        if isinstance(node, Workflow):
+            nested_workflows.append(node)
+
+    return nested_workflows
+
 
 def gather_project_info():
 
     # This seems safer than just catching an import error, since maybe
-    # someone will copy another set of scripts and just delete the 
+    # someone will copy another set of scripts and just delete the
     # project.py without knowing anything about .pyc files
     if op.exists("project.py"):
         import project
         return dict(
-            [(k,v) for k,v in project.__dict__.items() if not re.match("__.*__", k)])
+            [(k, v) for k, v in project.__dict__.items()
+                if not re.match("__.*__", k)])
 
     print "ERROR: Did not find a project.py file in this directory."
     print "You must run setup_project.py before using the analysis scripts."
     sys.exit()
 
+
 def determine_subjects(subject_arg):
-    
+
     if op.isfile(subject_arg[0]):
         return np.loadtxt(subject_arg[0], str).tolist()
     return subject_arg
 
+
 def determine_engine(args):
 
-    plugin_dict = dict(linear="Linear", multiproc="MultiProc", 
+    plugin_dict = dict(linear="Linear", multiproc="MultiProc",
                        ipython="IPython", torque="PBS")
 
     plugin = plugin_dict[args.plugin]
@@ -37,123 +156,23 @@ def determine_engine(args):
 
     return plugin, plugin_args
 
-def subject_container(workflow, subjectsource, datasinknode, stripstring=None):
-    
-    if stripstring is None:
-        outputs = subjectsource.outputs.get()
-        stripstring = "_%s_"%outputs.keys()[0]
-    workflow.connect([
-        (subjectsource, datasinknode, 
-            [("subject_id", "container"),
-            (("subject_id", join_strings, stripstring), "strip_dir")]),
-            ])
 
-def join_strings(x, y):
-    return "".join([y, x])
+def make_subject_source(subject_list):
 
+    return Node(IdentityInterface(fields=["subject_id"]),
+                iterables=("subject_id", subject_list),
+                overwrite=True,
+                name="subj_source")
 
-def substitute(origpath, subname):
-    """Generate a list of substitution tuples."""
-    import os
-    from nipype.utils.filemanip import split_filename
-    if not isinstance(origpath, list):
-        origpath = [origpath]
-    substitutes = []
-    for path in origpath:
-        ext = split_filename(path)[2]
-        # Text files (from ART, etc.) tend to have an image 
-        # filename hanging around, so this solution is a bit
-        # messier in code but gets us better filenames.
-        if ext.startswith(".nii.gz") and not ext == ".nii.gz":
-            ext = ext[7:]
-        elif ext.endswith(".txt"):
-            ext = ".txt"
-        # .mincost is a dumb extension
-        elif ext.endswith(".mincost"):
-            ext = ".dat"
-        substitutes.append((os.path.basename(path), "".join([subname,ext])))
-    return substitutes
-
-def get_output_substitutions(workflow, outputnode, mergenode):
-    """Substitute the output field name for the filename for all outputs from a node
-    and send into a mergenode."""
-    outputs = outputnode.outputs.get()
-    for i, field in enumerate(outputs):
-        workflow.connect(outputnode, (field, substitute, field), mergenode, "in%d"%(i+1))
-    
-def get_mapnode_substitutions(workflow, nruns):
-    import networkx as nx
-    from nipype.pipeline.engine import Workflow, MapNode
-    substitutions = []
-    find_mapnodes = lambda wf : [n.name for n in nx.nodes(wf._graph) \
-                                if isinstance(n, MapNode)]
-
-    sub_workflows = [n for n in nx.nodes(workflow._graph) if isinstance(n, Workflow)]
-
-    mapnodes = find_mapnodes(workflow)
-
-    for wf in sub_workflows:
-        mapnodes.extend(find_mapnodes(wf))
-
-    for r in range(nruns):
-        for node in mapnodes:
-            substitutions.append(("_%s%d"%(node, r), "run_%d"%(r+1)))
-    return substitutions
-
-def set_substitutions(workflow, sinknode, mergenode, substitutions):
-
-    workflow.connect(
-    	mergenode, ("out", build_sub_list, substitutions), sinknode, "substitutions")
-
-def build_sub_list(merged_subs, additional_subs):
-
-    full_subs = merged_subs + additional_subs
-    return full_subs
-
-def connect_inputs(workflow, datagrabber, inputnode, makelist=[], listlength=None):
-    """Connect the outputs of a Datagrabber to an inputnode.
-
-    The names of the datagrabber outfields and the inputnode fields must match.
-
-    The makelist parameter can be used to wrap certain inputs in a list.
-    """
-    inputs = inputnode.inputs.get()
-    outputs = datagrabber.outputs.get()
-    fields = [f for f in inputs if f in outputs]
-    for field in fields:
-        if field in makelist:
-            workflow.connect(datagrabber, (field, make_list, listlength), inputnode, field)
-        else:
-            workflow.connect(datagrabber, field, inputnode, field)
-
-def make_list(inputs, listlength):
-    
-    if listlength is not None and len(inputs) != listlength:
-        listlength = [inputs for i in range(listlength)]
-    elif not isinstance(inputs, list):
-        inputs = [inputs]
-    return inputs
-
-def sink_outputs(workflow, outputnode, datasinknode, pathstr):
-    
-    if pathstr.endswith("."):
-        pathstr = pathstr + "@"
-    elif not pathstr.endswith(".@"):
-        pathstr = pathstr + ".@"
-    
-    outputs = outputnode.outputs.get()
-    for field in outputs:
-        workflow.connect(outputnode, field, datasinknode, pathstr + field)
 
 def archive_crashdumps(workflow):
-    """Archive crashdumps by date to Nipype_Code directory"""
-    import os
+    """Archive crashdumps by date to the code directory"""
     datestamp = str(datetime.now())[:10]
-    codepath = os.path.split(os.path.abspath(__file__))[0]
-    crashdir = os.path.abspath("%s/crashdumps/%s" % (codepath, datestamp))
-    if not os.path.isdir(crashdir):    
+    codepath = op.split(op.abspath(__file__))[0]
+    crashdir = op.abspath("%s/../crashdumps/%s" % (codepath, datestamp))
+    if not op.isdir(crashdir):
         os.makedirs(crashdir)
-    workflow.config = dict(crashdump_dir=crashdir) 
+    workflow.config = dict(crashdump_dir=crashdir)
 
 
 def parse_par_file(parfile):
@@ -166,4 +185,3 @@ def parse_par_file(parfile):
         durations.append(float(line[1]))
         amplitudes.append(float(line[2]))
     return onsets, durations, amplitudes
-
