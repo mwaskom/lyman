@@ -31,15 +31,18 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
                            name="img2float")
     
     # Correct for slice-time acquisition differences
-    slicetime = pe.MapNode(fsl.SliceTimer(time_repetition=TR),
-                           iterfield=["in_file"],
-                           name="slicetime")
-    if slice_order == "down":
-        slicetime.inputs.index_dir = True
-    elif slice_order != "up":
-        raise ValueError("slice_order must be 'up' or 'down'")
-    if interleaved:
-        slicetime.inputs.interleaved = True
+    # We handle the logic of slice timing and realignment order
+    # below in the connections
+    if do_slice_time_cor:
+        slicetime = pe.MapNode(fsl.SliceTimer(time_repetition=TR),
+                               iterfield=["in_file"],
+                               name="slicetime")
+        if slice_order == "down":
+            slicetime.inputs.index_dir = True
+        elif slice_order != "up":
+            raise ValueError("slice_order must be 'up' or 'down'")
+        if interleaved:
+            slicetime.inputs.interleaved = True
 
     # Realign each timeseries to the middle volume of that run
     realign = create_realignment_workflow()
@@ -105,11 +108,8 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
         (inputnode,     trimmer,       [("timeseries", "in_file"),
             (("timeseries", get_trimmed_length, frames_to_toss), "t_size")]),
         (trimmer,       img2float,     [("roi_file", "in_file")]),
-        (img2float,     slicetime,     [("out_file", "in_file")]),
-        (slicetime,     realign,       [("slice_time_corrected_file", "inputs.timeseries")]),
-        (realign,       skullstrip,    [("outputs.timeseries", "inputs.timeseries")]),
-
-        (realign,       art,           [("outputs.realign_parameters", "inputs.realignment_parameters")]),
+        (realign,       art,
+            [("outputs.realign_parameters", "inputs.realignment_parameters")]),
         (img2float,     art,           [("out_file", "inputs.raw_timeseries")]),
         (skullstrip,    art,           [("outputs.timeseries", "inputs.realigned_timeseries"),
                                         ("outputs.mask_file", "inputs.mask_file")]),
@@ -122,11 +122,30 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
         (skullstrip,    scale_rough,   [("outputs.timeseries", "in_file")]),
         (skullstrip,    scale_rough,   [("outputs.mask_file", "mask")]),
         (scale_smooth,  hpfilt_smooth, [("out_file", "in_file")]),
-        (scale_rough,   hpfilt_rough,  [("out_file", "in_file")]),
+        (scale_rough,
+            hpfilt_rough,  [("out_file", "in_file")]),
         (hpfilt_smooth, rename_smooth, [("out_file", "in_file")]),
         (hpfilt_rough,  rename_rough,  [("out_file", "in_file")]),
         ])
 
+    # Do slicetime/realignment connections here to handle slice timing logic
+    if do_slice_time_cor and interleaved:
+        preproc.connect([
+            (img2float,     slicetime,     [("out_file", "in_file")]),
+            (slicetime,     realign,       [("slice_time_corrected_file", "inputs.timeseries")]),
+            (realign,       skullstrip,    [("outputs.timeseries", "inputs.timeseries")]),
+            ])
+    elif do_slice_time_cor and not interleaved:
+        preproc.connect([
+            (img2float,     realign,     [("out_file", "inputs.timeseries")]),
+            (realign,       slicetime,   [("outputs.timeseries", "in_file")]),
+            (slicetime,     skullstrip,  [("slice_time_corrected_file", "inputs.timeseries")]),
+            ])
+    else:
+        preproc.connect([
+            (img2float,     realign,     [("out_file", "inputs.timeseries")]),
+            (realign,     skullstrip,    [("outputs.timeseries", "inputs.timeseries")]),
+            ])
 
     report = pe.MapNode(util.Function(input_names=["subject_id",
                                                    "input_timeseries",
