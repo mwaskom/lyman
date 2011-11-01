@@ -16,6 +16,7 @@ def main(arglist):
     
     plugin, plugin_args = util.determine_engine(args)
 
+    normalize.config = dict(crashdump_dir="/tmp")
     normalize.run(plugin=plugin, plugin_args=plugin_args)
 
 if __name__ == "__main__":
