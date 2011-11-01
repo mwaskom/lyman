@@ -220,10 +220,20 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
     # Motion correct to middle volume of each run
     mcflirt =  pe.MapNode(fsl.MCFLIRT(save_plots=True,
                                       save_rms=True,
+                                      save_mats=True,
                                       interpolation=interp_type),
                           name="mcflirt",
                           iterfield = ["in_file", "ref_file"])
-  
+
+    resample = pe.MapNode(util.Function(input_names=["timeseries",
+                                                     "ref_file",
+                                                     "aff_mats"],
+                                        output_names=["out_file"],
+                                        function=spline_reslice),
+                          iterfield=["timeseries", "ref_file", "aff_mats"],
+                          name="resample")
+
+    # Generate a report on the motion correction
     report_inputs = ["realign_params", "rms_files"]
     report_outputs = ["motion_file", "disp_plot", "rot_plot", "trans_plot"]
     mcreport = pe.MapNode(util.Function(input_names=report_inputs,
@@ -267,6 +277,9 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
         (extractref,    exampleslice,     [("roi_file", "in_file")]),
         (inputnode,     mcflirt,          [("timeseries", "in_file")]),
         (extractref,    mcflirt,          [("roi_file", "ref_file")]),
+        (mcflirt,       resample,         [("mat_file", "aff_mats")]),
+        (extractref,    resample,         [("roi_file", "ref_file")]),
+        (inputnode,     resample,         [("timeseries", "timeseries")]),
         (mcflirt,       mcreport,         [("par_file", "realign_params"),
                                            ("rms_files", "rms_files")]),
         (exampleslice,  exslicename,      [("out_file", "in_file")]),
@@ -278,7 +291,7 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
         (mcflirt,       parname,          [("par_file", "in_file")]),
         (parname,       outputnode,       [("out_file", "realign_parameters")]),
         (extractref,    exfuncname,       [("roi_file", "in_file")]),
-        (mcflirt,       outputnode,       [("out_file", "timeseries")]),
+        (resample,      outputnode,       [("out_file", "timeseries")]),
         (exfuncname,    outputnode,       [("out_file", "example_func")]),  
         (mergereport,   outputnode,       [("out", "realign_report")]),
         ])
@@ -584,6 +597,39 @@ def max_motion_func(rms_files):
     out_file = join(getcwd(), "max_motion.txt")
     with open(out_file, "w") as f:
         f.write("#Absolute:\n%.4f\n#Relative\n%.4f"%tuple(maxima))
+    return out_file
+
+def spline_reslice(timeseries, ref_file, aff_mats):
+    """Reslice with applywarp using mcflirt affine mats."""
+    from os import getcwd
+    from glob import glob
+    from subprocess import call
+    from nipype.utils.filemanip import fname_presuffix
+
+    # Split the timeseries by frame
+    cmd = ["fslsplit", timeseries, "frame", "-t"]
+    call(cmd)
+
+    # Grab the list of 3D images
+    frames = sorted(glob("frame*.nii.gz"))
+
+    # Reslice each image with its matrix
+    resliced_frames = []
+    for i, mat in enumerate(aff_mats):
+
+        out_frame = "resliced%04d.nii.gz" % i
+        cmd = ["applywarp", "-i", frames[i],
+               "--premat=%s" % mat, "-r", ref_file,
+               "-o", out_frame, "--interp=sinc"]
+        call(cmd)
+        resliced_frames.append(out_frame)
+
+    # Merge the 3D resliced images back into one file
+    out_file = fname_presuffix(timeseries, suffix="_mcf", newpath=getcwd())
+    cmd = ["fslmerge", "-t", out_file]
+    cmd.extend(resliced_frames)
+    call(cmd)
+
     return out_file
 
 def write_realign_report(realign_params, rms_files):
