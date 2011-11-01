@@ -61,7 +61,7 @@ def create_normalization_workflow(data_dir, subjects, name="normalize"):
                     name="flirt")
     sw = [-180, 180]
     for dim in ["x", "y", "z"]:
-        setattr(flirt.inputs, "searchr_%s"%dim, sw)
+        setattr(flirt.inputs, "searchr_%s" % dim, sw)
 
     # FNIRT head to MNI152
     fnirt = pe.Node(fsl.FNIRT(ref_file=target_head,
@@ -78,7 +78,7 @@ def create_normalization_workflow(data_dir, subjects, name="normalize"):
     warphead = pe.Node(fsl.ApplyWarp(ref_file=target_head,
                                      interp="spline"),
                         name="warphead")
-    
+
     warpbrainhr = pe.Node(fsl.ApplyWarp(ref_file=hires_head,
                                         interp="spline"),
                              name="warpbrainhr")
@@ -90,7 +90,7 @@ def create_normalization_workflow(data_dir, subjects, name="normalize"):
     namehrbrain = pe.Node(util.Rename(format_string="brain_warp_hires",
                                       keep_ext=True),
                           name="namehrbrain")
-    
+
     namehrhead = pe.Node(util.Rename(format_string="T1_warp_hires",
                                      keep_ext=True),
                          name="namehrhead")
@@ -103,18 +103,19 @@ def create_normalization_workflow(data_dir, subjects, name="normalize"):
 
     # Save relevant files to the data directory
     datasink = pe.Node(io.DataSink(base_directory=data_dir,
-                                   parameterization = False,
-                                   substitutions=[("norm_", "brain_"),
-                                                  ("nu_", "T1_"),
-                                                  ("_out", ""),
-                                                  ("T1_fieldwarp", "warpfield"),
-                                                  ("brain_flirt.mat", "affine.mat")]),
+                                   parameterization=False,
+                                   substitutions=[
+                                     ("norm_", "brain_"),
+                                      ("nu_", "T1_"),
+                                      ("_out", ""),
+                                      ("T1_fieldwarp", "warpfield"),
+                                      ("brain_flirt.mat", "affine.mat")]),
                        name="datasink")
 
     # Define and connect the workflow
     # -------------------------------
 
-    normalize = pe.Workflow(name="normalize", 
+    normalize = pe.Workflow(name="normalize",
                             base_dir=data_dir)
 
     normalize.connect([
@@ -162,18 +163,18 @@ def mni_reg_qc(in_file):
     planes = ["x", "y", "z"]
     options = []
     for plane in planes:
-        for slice in ["%.2f"%i for i in .15,.3,.45,.5,.55,.7,.85]:
+        for slice in ["%.2f" % i for i in .15, .3, .45, .5, .55, .7, .85]:
             if not(plane == "x" and slice == "0.50"):
-                options.append((plane,slice))
+                options.append((plane, slice))
 
     shots = ["%s-%s.png" % i for i in options]
 
     for i, shot in enumerate(shots):
-        cmd = ["slicer", 
+        cmd = ["slicer",
                in_file,
                mni_targ,
                "-s 1.5",
-               "-%s"%options[i][0],
+               "-%s" % options[i][0],
                options[i][1],
                shot]
 
@@ -181,7 +182,8 @@ def mni_reg_qc(in_file):
 
     for i in range(3):
         cmd = ["pngappend"]
-        cmd.append(" + ".join([s for s in shots if op.split(s)[1].startswith(planes[i])]))
+        cmd.append(" + ".join(
+            [s for s in shots if op.split(s)[1].startswith(planes[i])]))
         rowimg = "row-%d.png" % i
         cmd.append(rowimg)
         shots.append(rowimg)
