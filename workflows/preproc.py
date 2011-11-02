@@ -217,7 +217,7 @@ def create_preprocessing_workflow(name="preproc", do_slice_time_cor=True,
 
 
 
-def create_realignment_workflow(name="realignment", interp_type="trilinear"):
+def create_realignment_workflow(name="realignment"):
     
     # Define the workflow inputs
     inputnode = pe.Node(util.IdentityInterface(fields=["timeseries"]),
@@ -240,17 +240,9 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
     mcflirt =  pe.MapNode(fsl.MCFLIRT(save_plots=True,
                                       save_rms=True,
                                       save_mats=True,
-                                      interpolation=interp_type),
+                                      args="-spline_final"),
                           name="mcflirt",
                           iterfield = ["in_file", "ref_file"])
-
-    resample = pe.MapNode(util.Function(input_names=["timeseries",
-                                                     "ref_file",
-                                                     "aff_mats"],
-                                        output_names=["out_file"],
-                                        function=spline_reslice),
-                          iterfield=["timeseries", "ref_file", "aff_mats"],
-                          name="resample")
 
     # Generate a report on the motion correction
     report_inputs = ["realign_params", "rms_files"]
@@ -296,9 +288,6 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
         (extractref,    exampleslice,     [("roi_file", "in_file")]),
         (inputnode,     mcflirt,          [("timeseries", "in_file")]),
         (extractref,    mcflirt,          [("roi_file", "ref_file")]),
-        (mcflirt,       resample,         [("mat_file", "aff_mats")]),
-        (extractref,    resample,         [("roi_file", "ref_file")]),
-        (inputnode,     resample,         [("timeseries", "timeseries")]),
         (mcflirt,       mcreport,         [("par_file", "realign_params"),
                                            ("rms_files", "rms_files")]),
         (exampleslice,  exslicename,      [("out_file", "in_file")]),
@@ -310,7 +299,7 @@ def create_realignment_workflow(name="realignment", interp_type="trilinear"):
         (mcflirt,       parname,          [("par_file", "in_file")]),
         (parname,       outputnode,       [("out_file", "realign_parameters")]),
         (extractref,    exfuncname,       [("roi_file", "in_file")]),
-        (resample,      outputnode,       [("out_file", "timeseries")]),
+        (mcflirt,       outputnode,       [("out_file", "timeseries")]),
         (exfuncname,    outputnode,       [("out_file", "example_func")]),  
         (mergereport,   outputnode,       [("out", "realign_report")]),
         ])
