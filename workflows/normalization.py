@@ -8,24 +8,19 @@ information about the processing.
 """
 import os
 
-from nipype.interfaces import io
 from nipype.interfaces import fsl
 from nipype.interfaces import freesurfer as fs
-from nipype.interfaces import utility as util
-from nipype.pipeline import engine as pe
+from nipype.interfaces.io import DataGrabber, DataSink
+from nipype.interfaces.utility import IdentityInterface, Rename, Function
+from nipype.pipeline.engine import Node, Workflow
 
 
 def create_normalization_workflow(data_dir, subjects, name="normalize"):
     """Set up the anatomical normalzation workflow.
 
     Your anatomical data must have been processed in Freesurfer.
-    This normalization workflow does not need the entire recon-all
-    pipeline to finish; it can be run after the canorm stage.
-
-
 
     """
-
     # Get target images
     target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
     target_head = fsl.Info.standard_image("avg152T1.nii.gz")
@@ -36,114 +31,111 @@ def create_normalization_workflow(data_dir, subjects, name="normalize"):
         os.environ["FSLDIR"], "etc/flirtsch/T1_2_MNI152_2mm.cnf")
 
     # Subject source node
-    subjectsource = pe.Node(util.IdentityInterface(fields=["subject_id"]),
-                            iterables=("subject_id", subjects),
-                            name="subjectsource")
+    subjectsource = Node(IdentityInterface(fields=["subject_id"]),
+                         iterables=("subject_id", subjects),
+                         name="subjectsource")
 
     # Grab recon-all outputs
-    datasource = pe.Node(io.DataGrabber(infields=["subject_id"],
-                                        outfields=["brain", "head"],
-                                        base_directory=data_dir,
-                                        template="%s/mri/%s.mgz"),
-                         name="datagrabber")
-    datasource.inputs.template_args = dict(brain=[["subject_id", "norm"]],
-                                           head=[["subject_id", "nu"]])
+    datasource = Node(DataGrabber(infields=["subject_id"],
+                                  outfields=["aseg", "head"],
+                                  base_directory=data_dir,
+                                  template="%s/mri/%s.mgz"),
+                      name="datagrabber")
+    datasource.inputs.template_args = dict(aseg=[["subject_id", "aparc+aseg"]],
+                                           head=[["subject_id", "orig"]])
 
     # Convert images to nifti storage and float representation
-    cvtbrain = pe.Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
-                       name="convertbrain")
+    cvtaseg = Node(fs.MRIConvert(out_type="niigz"),
+                   name="convertaseg")
 
-    cvthead = pe.Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
-                      name="converthead")
+    cvthead = Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
+                   name="converthead")
+
+    # Turn the aparc+aseg into a brainmask
+    makemask = Node(fs.Binarize(dilate=4, erode=3, min=0.5),
+                    name="makemask")
+
+    # Extract the brain from the orig.mgz using the mask
+    skullstrip = Node(fsl.ApplyMask(),
+                      name="skullstrip")
 
     # FLIRT brain to MNI152_brain
-    flirt = pe.Node(fsl.FLIRT(reference=target_brain),
-                    name="flirt")
+    flirt = Node(fsl.FLIRT(reference=target_brain),
+                 name="flirt")
+
     sw = [-180, 180]
     for dim in ["x", "y", "z"]:
         setattr(flirt.inputs, "searchr_%s" % dim, sw)
 
     # FNIRT head to MNI152
-    fnirt = pe.Node(fsl.FNIRT(ref_file=target_head,
-                              refmask_file=target_mask,
-                              config_file=fnirt_cfg,
-                              fieldcoeff_file=True),
-                    name="fnirt")
+    fnirt = Node(fsl.FNIRT(ref_file=target_head,
+                           refmask_file=target_mask,
+                           config_file=fnirt_cfg,
+                           fieldcoeff_file=True),
+                 name="fnirt")
 
-    # Warp the images
-    warpbrain = pe.Node(fsl.ApplyWarp(ref_file=target_head,
-                                      interp="spline"),
-                        name="warpbrain")
+    # Warp and rename the images
+    warpbrain = Node(fsl.ApplyWarp(ref_file=target_head,
+                                   interp="spline"),
+                     name="warpbrain")
 
-    warphead = pe.Node(fsl.ApplyWarp(ref_file=target_head,
+    warpbrainhr = Node(fsl.ApplyWarp(ref_file=hires_head,
                                      interp="spline"),
-                        name="warphead")
+                       name="warpbrainhr")
 
-    warpbrainhr = pe.Node(fsl.ApplyWarp(ref_file=hires_head,
-                                        interp="spline"),
-                             name="warpbrainhr")
+    namebrain = Node(Rename(format_string="brain_warp",
+                            keep_ext=True),
+                     name="namebrain")
 
-    warpheadhr = pe.Node(fsl.ApplyWarp(ref_file=hires_head,
-                                       interp="spline"),
-                         name="warpheadhr")
-
-    namehrbrain = pe.Node(util.Rename(format_string="brain_warp_hires",
-                                      keep_ext=True),
-                          name="namehrbrain")
-
-    namehrhead = pe.Node(util.Rename(format_string="T1_warp_hires",
-                                     keep_ext=True),
-                         name="namehrhead")
+    namehrbrain = Node(Rename(format_string="brain_warp_hires",
+                       keep_ext=True),
+                       name="namehrbrain")
 
     # Generate a png summarizing the registration
-    checkreg = pe.Node(util.Function(input_names=["in_file"],
-                                     output_names=["out_file"],
-                                     function=mni_reg_qc),
-                       name="checkreg")
+    checkreg = Node(Function(input_names=["in_file"],
+                             output_names=["out_file"],
+                             function=mni_reg_qc),
+                    name="checkreg")
 
     # Save relevant files to the data directory
-    datasink = pe.Node(io.DataSink(base_directory=data_dir,
-                                   parameterization=False,
-                                   substitutions=[
-                                     ("norm_", "brain_"),
-                                      ("nu_", "T1_"),
-                                      ("_out", ""),
-                                      ("T1_fieldwarp", "warpfield"),
-                                      ("brain_flirt.mat", "affine.mat")]),
-                       name="datasink")
+    datasink = Node(DataSink(base_directory=data_dir,
+                             parameterization=False,
+                             substitutions=[
+                                ("orig_out_masked_flirt.mat", "affine.mat"),
+                                ("orig_out_fieldwarp", "warpfield"),
+                                ("orig_out_masked", "brain"),
+                                ("orig_out", "T1")]),
+                    name="datasink")
 
     # Define and connect the workflow
     # -------------------------------
 
-    normalize = pe.Workflow(name="normalize",
-                            base_dir=data_dir)
+    normalize = Workflow(name=name,
+                         base_dir=os.path.join(data_dir, "workingdir"))
 
     normalize.connect([
         (subjectsource,   datasource,   [("subject_id", "subject_id")]),
-        (datasource,      cvtbrain,     [("brain", "in_file")]),
+        (datasource,      cvtaseg,      [("aseg", "in_file")]),
         (datasource,      cvthead,      [("head", "in_file")]),
-        (cvtbrain,        flirt,        [("out_file", "in_file")]),
+        (cvtaseg,         makemask,     [("out_file", "in_file")]),
+        (cvthead,         skullstrip,   [("out_file", "in_file")]),
+        (makemask,        skullstrip,   [("binary_file", "mask_file")]),
+        (skullstrip,      flirt,        [("out_file", "in_file")]),
         (flirt,           fnirt,        [("out_matrix_file", "affine_file")]),
         (cvthead,         fnirt,        [("out_file", "in_file")]),
-        (cvtbrain,        warpbrain,    [("out_file", "in_file")]),
+        (skullstrip,      warpbrain,    [("out_file", "in_file")]),
         (fnirt,           warpbrain,    [("fieldcoeff_file", "field_file")]),
-        (cvthead,         warphead,     [("out_file", "in_file")]),
-        (fnirt,           warphead,     [("fieldcoeff_file", "field_file")]),
-        (cvtbrain,        warpbrainhr,  [("out_file", "in_file")]),
+        (skullstrip,      warpbrainhr,  [("out_file", "in_file")]),
         (fnirt,           warpbrainhr,  [("fieldcoeff_file", "field_file")]),
-        (cvthead,         warpheadhr,   [("out_file", "in_file")]),
-        (fnirt,           warpheadhr,   [("fieldcoeff_file", "field_file")]),
-        (warpbrain,       checkreg,     [("out_file", "in_file")]),
-        (warpheadhr,      namehrhead,   [("out_file", "in_file")]),
+        (warpbrainhr,     checkreg,     [("out_file", "in_file")]),
+        (warpbrain,       namebrain,    [("out_file", "in_file")]),
         (warpbrainhr,     namehrbrain,  [("out_file", "in_file")]),
         (subjectsource,   datasink,     [("subject_id", "container")]),
-        (cvtbrain,        datasink,     [("out_file", "normalization.@brain")]),
+        (skullstrip,      datasink,     [("out_file", "normalization.@brain")]),
         (cvthead,         datasink,     [("out_file", "normalization.@t1")]),
         (flirt,           datasink,     [("out_file", "normalization.@brain_flirted")]),
         (flirt,           datasink,     [("out_matrix_file", "normalization.@affine")]),
-        (warphead,        datasink,     [("out_file", "normalization.@t1_warped")]),
-        (warpbrain,       datasink,     [("out_file", "normalization.@brain_warped")]),
-        (namehrhead,      datasink,     [("out_file", "normalization.@head_hires")]),
+        (namebrain,       datasink,     [("out_file", "normalization.@brain_warped")]),
         (namehrbrain,     datasink,     [("out_file", "normalization.@brain_hires")]),
         (fnirt,           datasink,     [("fieldcoeff_file", "normalization.@warpfield")]),
         (checkreg,        datasink,     [("out_file", "normalization.@reg_png")]),
@@ -153,12 +145,12 @@ def create_normalization_workflow(data_dir, subjects, name="normalize"):
 
 
 def mni_reg_qc(in_file):
-    """Create a png image summarizing a normalization to the MNI152 brain."""
+    """Create a png image summarizing a normalization to the highres MNI152 brain."""
     import os.path as op
     from subprocess import call
     from nipype.interfaces import fsl
 
-    mni_targ = fsl.Info.standard_image("avg152T1_brain.nii.gz")
+    mni_targ = fsl.Info.standard_image("MNI152_T1_1mm_brain.nii.gz")
 
     planes = ["x", "y", "z"]
     options = []
@@ -173,7 +165,7 @@ def mni_reg_qc(in_file):
         cmd = ["slicer",
                in_file,
                mni_targ,
-               "-s 1.5",
+               "-s .8",
                "-%s" % options[i][0],
                options[i][1],
                shot]
