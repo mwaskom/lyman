@@ -14,24 +14,24 @@ from nipype.interfaces.io import DataGrabber, DataSink
 
 from workflows.preproc import create_preprocessing_workflow
 
-import util
-from util.commandline import parser
+import tools
+from tools.commandline import parser
 
 
 def main(arglist):
 
     args = parse_args(arglist)
 
-    project = util.gather_project_info()
+    project = tools.gather_project_info()
     exp = gather_experiment_info(args.experiment)
 
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
 
     sys.path.insert(0, os.path.abspath("."))
 
-    subject_list = util.determine_subjects(args.subjects)
+    subject_list = tools.determine_subjects(args.subjects)
 
-    subj_source = util.make_subject_source(subject_list)
+    subj_source = tools.make_subject_source(subject_list)
 
     preproc, preproc_input, preproc_output = create_preprocessing_workflow(
                               do_slice_time_cor=exp["slice_time_correction"],
@@ -51,17 +51,17 @@ def main(arglist):
 
     preproc_source.inputs.template_args = dict(timeseries=[["subject_id"]])
 
-    preproc_inwrap = util.InputWrapper(preproc, subj_source,
-                                       preproc_source, preproc_input)
+    preproc_inwrap = tools.InputWrapper(preproc, subj_source,
+                                        preproc_source, preproc_input)
 
     preproc_inwrap.connect_inputs()
 
     preproc_sink = Node(DataSink(base_directory=op.join(
-                            project["analysis_dir"], args.experiment)),
+                                 project["analysis_dir"], args.experiment)),
                         name="preproc_sink")
 
-    preproc_outwrap = util.OutputWrapper(preproc, subj_source,
-                                         preproc_sink, preproc_output)
+    preproc_outwrap = tools.OutputWrapper(preproc, subj_source,
+                                          preproc_sink, preproc_output)
 
     preproc_outwrap.set_subject_container()
     preproc_outwrap.set_mapnode_substitutions(exp["n_runs"])
@@ -95,7 +95,7 @@ def gather_experiment_info(experiment_name, altmodel=None):
 
 def run_workflow(wf, name, args):
 
-    plugin, plugin_args = util.determine_engine(args)
+    plugin, plugin_args = tools.determine_engine(args)
     if name in args.workflows:
         wf.run(plugin, plugin_args)
 
