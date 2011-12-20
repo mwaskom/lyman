@@ -7,15 +7,12 @@ import os.path as op
 
 import matplotlib as mpl
 mpl.use("Agg")
-
 from nipype.pipeline.engine import Node
-
 from nipype.interfaces.io import DataGrabber, DataSink
-
-from workflows.preproc import create_preprocessing_workflow
 
 import tools
 from tools.commandline import parser
+from workflows.preproc import create_preprocessing_workflow
 
 
 def main(arglist):

@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 import sys
-import util
+import tools
 from util.commandline import parser
 from workflows import normalization
 
@@ -9,12 +9,13 @@ def main(arglist):
 
     args = parser.parse_args(arglist)
 
-    subject_list = util.determine_subjects(args.subjects)
-    project_info = util.gather_project_info()
+    subject_list = tools.determine_subjects(args.subjects)
+    project_info = tools.gather_project_info()
 
-    normalize = normalization.create_normalization_workflow(project_info['data_dir'], subject_list)
-    
-    plugin, plugin_args = util.determine_engine(args)
+    normalize = normalization.create_normalization_workflow(
+                    project_info['data_dir'], subject_list)
+
+    plugin, plugin_args = tools.determine_engine(args)
 
     normalize.config = dict(crashdump_dir="/tmp")
     normalize.run(plugin=plugin, plugin_args=plugin_args)
