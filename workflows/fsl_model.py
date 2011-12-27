@@ -154,6 +154,21 @@ def get_model_workflow(name="model"):
     return model, inputnode, outputnode
 
 
+def x_corr_coef(in_file):
+    from os.path import abspath
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    X = np.loadtxt(in_file, skiprows=5)
+    f = plt.figure(figsize=(5, 5))
+    ax = f.add_subplot(111)
+    ax.matshow(np.corrcoef(X.T), vmin=-1, vmax=1)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    out_file = abspath("design_correlation.png")
+    plt.savefig(out_file)
+    return out_file
+
 def con_sort(files):
     """Take a list, sort it, and return it."""
     files.sort()
