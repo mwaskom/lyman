@@ -11,17 +11,10 @@ def get_model_workflow(name="model"):
     # Model Workflow Definition
     model = pe.Workflow(name=name)
 
-    inputnode = pe.Node(util.IdentityInterface(fields=["subject_info",
-                                                       "TR", 
-                                                       "units", 
-                                                       "hpf_cutoff",
-                                                       "HRF_bases", 
-                                                       "contrasts",
-                                                       "outlier_files",
+    inputnode = pe.Node(util.IdentityInterface(fields=["subject_id",
                                                        "overlay_background",
-                                                       "realignment_parameters",
                                                        "timeseries"]),
-                        name="inputspec")
+                        name="inputnode")
 
     # Generate Nipype-style model information
     modelspec = pe.Node(modelgen.SpecifyModel(),
