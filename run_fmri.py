@@ -13,6 +13,7 @@ from nipype.interfaces.io import DataGrabber, DataSink
 import tools
 from tools.commandline import parser
 from workflows.preproc import create_preprocessing_workflow
+from workflows.fslmodel import create_timeseries_model_workflow
 
 
 def main(arglist):
@@ -29,6 +30,9 @@ def main(arglist):
     subject_list = tools.determine_subjects(args.subjects)
 
     subj_source = tools.make_subject_source(subject_list)
+
+    # Preprocessing Workflow
+    # ======================
 
     preproc, preproc_input, preproc_output = create_preprocessing_workflow(
                               do_slice_time_cor=exp["slice_time_correction"],
@@ -74,7 +78,50 @@ def main(arglist):
         shutil.rmtree(
             op.join(project["working_dir"], args.experiment, "preproc"))
 
+    # Timeseries Model
+    # ================
 
+    model, model_input, model_output = create_timeseries_model_workflow(
+        name="model", exp_info=exp)
+
+    model_source = Node(DataGrabber(infields=["subject_id"],
+                                    outfields=["outlier_files",
+                                               "mean_func",
+                                               "realignment_parameters",
+                                               "timeseries"],
+                                    base_directory=op.join(
+                                        project["analysis_dir"], args.experiment),
+                                    template="preproc/%s/run_?/%s.%s",
+                                    sort_filelist=True),
+                        name="model_source")
+
+    model_source.inputs.template_args = dict(
+        outlier_files=[["subject_id", "outlier_volumes", "txt"]],
+        mean_func=[["subject_id", "mean_func", "nii.gz"]],
+        realignment_parameters=[["subject_id", "realignment_parameters", "par"]],
+        timeseries=[["subject_id", "smoothed_timeseries", "nii.gz"]])  # XXX Fix for surface
+
+    model_inwrap = tools.InputWrapper(model, subj_source,
+                                      model_source, model_input)
+
+    model_inwrap.connect_inputs()
+
+    model_sink = Node(DataSink(base_directory=op.join(
+                               project["analysis_dir"], args.experiment)),
+                               name="model_sink")
+
+    model_outwrap = tools.OutputWrapper(model, subj_source,
+                                       model_sink, model_output)
+
+    model_outwrap.set_subject_container()
+    model_outwrap.set_mapnode_substitutions(exp["n_runs"])
+    model_outwrap.sink_outputs("model") # XXX Fix for surface
+
+    model.base_dir = op.join(project["working_dir"], args.experiment)
+
+    model.config = dict(crashdump_dir="/tmp")
+
+    run_workflow(model, "model", args)
 def gather_experiment_info(experiment_name, altmodel=None):
 
     try:

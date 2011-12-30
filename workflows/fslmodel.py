@@ -4,10 +4,9 @@ from nipype.interfaces.utility import IdentityInterface, Function
 from nipype.pipeline.engine import Node, MapNode, Workflow
 
 
-def get_model_workflow(name="model", exp_info={}):
+def create_timeseries_model_workflow(name="model", exp_info={}):
 
     inputnode = Node(IdentityInterface(fields=["subject_id",
-                                               "overlay_background",
                                                "outlier_files",
                                                "mean_func",
                                                "realignment_parameters",
