@@ -305,10 +305,14 @@ def plot_zstats(background_file, zstat_files, contrasts):
 
 def dump_exp_info(exp_info, timeseries):
     """Dump the exp_info dict into a json file."""
+    from copy import deepcopy
     from os.path import abspath
     import json
     json_file = abspath("experiment_info.json")
-    json.dump(exp_info, json_file)
+    json_info = deepcopy(exp_info)
+    del json_info["contrasts"]
+    with open(json_file, "w") as fp:
+        json.dump(json_info, fp, sort_keys=True, indent=4)
     return json_file
 
 
