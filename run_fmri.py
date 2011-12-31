@@ -48,7 +48,7 @@ def main(arglist):
                               slice_order=exp["slice_order"],
                               TR=exp["TR"],
                               smooth_fwhm=exp["smooth_fwhm"],
-                              highpass_sigma=exp["highpass_sigma"])
+                              highpass_sigma=exp["hpf_sigma"])
 
     preproc_source = Node(DataGrabber(infields=["subject_id"],
                                       outfields=["timeseries"],
@@ -97,7 +97,7 @@ def main(arglist):
                                                "realign_params",
                                                "timeseries"],
                                     base_directory=anal_dir_base,
-                                    template="preproc/%s/run_?/%s.%s",
+                                    template="%s/preproc/run_?/%s.%s",
                                     sort_filelist=True),
                         name="model_source")
 
@@ -163,6 +163,7 @@ def gather_experiment_info(experiment_name, altmodel=None):
     # Build contrasts list
     conkeys = sorted([k for k in exp_dict if re.match("cont\d+", k)])
     exp_dict["contrasts"] = [exp_dict[key] for key in conkeys]
+    exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
 
     return exp_dict
 

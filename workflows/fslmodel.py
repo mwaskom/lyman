@@ -1,6 +1,6 @@
 from nipype.interfaces import fsl
 from nipype.algorithms.modelgen import  SpecifyModel
-from nipype.interfaces.utility import IdentityInterface, Function
+from nipype.interfaces.utility import IdentityInterface, Function, Rename
 from nipype.pipeline.engine import Node, MapNode, Workflow
 
 
@@ -45,8 +45,14 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
     designcorr = MapNode(Function(input_names=["in_file"],
                                   output_names=["out_file"],
                                   function=design_corr),
-                         iterfield=["in_file]"],
+                         iterfield=["in_file"],
                          name="designcorr")
+
+    # Rename the design image
+    rename_design = MapNode(Rename(format_string="design",
+                                   keep_ext=True),
+                            iterfield=["in_file"],
+                            name="rename_design")
 
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
@@ -80,7 +86,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
                                   function=plot_zstats),
                          iterfield=["background_file", "zstat_files"],
                          name="plotzstats")
-    plotzstats.inputs.contrasts = exp_info["contrasts"]
+    plotzstats.inputs.contrasts = exp_info["contrast_names"]
 
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(fields=["results",
@@ -118,6 +124,8 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
             [("con_file", "tcon_file")]),
         (featmodel, designcorr,
             [("design_file", "in_file")]),
+        (featmodel, rename_design,
+            [("design_image", "in_file")]),
         (modelestimate, plotresidual,
             [("sigmasquareds", "resid_file")]),
         (inputnode, plotresidual,
@@ -131,8 +139,8 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
             [("zstats", "zstat_files")]),
         (inputnode, plotzstats,
             [("mean_func", "background_file")]),
-        (featmodel, outputnode,
-            [("design_image", "design_image")]),
+        (rename_design, outputnode,
+            [("out_file", "design_image")]),
         (designcorr, outputnode,
             [("out_file", "design_corr")]),
         (plotresidual, outputnode,
@@ -151,7 +159,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
 
 
 def build_model_info(subject_id, functional_runs, exp_info):
-
+    import os.path as op
     from copy import deepcopy
     from numpy import loadtxt
     from nipype.interfaces.base import Bunch
@@ -166,7 +174,8 @@ def build_model_info(subject_id, functional_runs, exp_info):
         onsets, durations, amplitudes, regressors = [], [], [], []
         for event in events:
             event_info = dict(event=event, run=run, subject_id=subject_id)
-            parfile = exp_info['parfile_template'] % event_info
+            parfile = op.join(exp_info["parfile_base_dir"], 
+                              exp_info['parfile_template'] % event_info)
             o, d, a = loadtxt(parfile, unpack=True)
             onsets.append(o)
             durations.append(d)
@@ -223,8 +232,8 @@ def plot_residual(resid_file, background_file):
     sample = 1 if native else 2
     del err_data
     call(["overlay", "1", "0", background_file, "-a",
-          resid_file, low, high, ov_nii])
-    call(["slicer", ov_nii, "-S", sample, width, out_file])
+          resid_file, str(low), str(high), ov_nii])
+    call(["slicer", ov_nii, "-S", str(sample), str(width), out_file])
     return out_file
 
 
@@ -248,5 +257,5 @@ def plot_zstats(background_file, zstat_files, contrasts):
         call(["overlay", "1", "0", background_file, "-a",
               zstat_file, "2.3", "10",
               zstat_file, "-2.3", "-10", ov_nii])
-        call(["slicer", ov_nii, "-S", sample, width, zstat_png])
+        call(["slicer", ov_nii, "-S", str(sample), str(width), zstat_png])
     return out_dir
