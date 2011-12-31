@@ -82,11 +82,36 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
     plotzstats = MapNode(Function(input_names=["background_file",
                                                "zstat_files",
                                                "contrasts"],
-                                  output_names=["out_dir"],
+                                  output_names=["out_files"],
                                   function=plot_zstats),
                          iterfield=["background_file", "zstat_files"],
                          name="plotzstats")
     plotzstats.inputs.contrasts = exp_info["contrast_names"]
+
+    # Build pdf and html reports
+    report = MapNode(Function(input_names=["subject_id",
+                                           "design_image",
+                                           "design_corr",
+                                           "residual",
+                                           "zstat_pngs",
+                                           "contrast_names"],
+                              output_names=["reports"],
+                              function=write_model_report),
+                     iterfield=["design_image",
+                                "design_corr",
+                                "residual",
+                                "zstat_pngs"],
+                     name="report")
+    report.inputs.contrast_names = exp_info["contrast_names"]
+
+    # Dump the exp_info dictionary to json
+    dumpjson = MapNode(Function(input_names=["exp_info",
+                                             "timeseries"],
+                                output_names=["json_file"],
+                                function=dump_exp_info),
+                       iterfield=["timeseries"],
+                       name="dumpjson")
+    dumpjson.inputs.exp_info = exp_info
 
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(fields=["results",
@@ -96,7 +121,9 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
                                                 "copes",
                                                 "varcopes",
                                                 "zstats",
-                                                "zstat_dir"]),
+                                                "reports",
+                                                "json_file",
+                                                "zstat_pngs"]),
                       name="outputnode")
 
     # Define the workflow and connect the nodes
@@ -139,6 +166,22 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
             [("zstats", "zstat_files")]),
         (inputnode, plotzstats,
             [("mean_func", "background_file")]),
+        (inputnode, dumpjson,
+            [("timeseries", "timeseries")]),
+        (inputnode, report,
+            [("subject_id", "subject_id")]),
+        (rename_design, report,
+            [("out_file", "design_image")]),
+        (designcorr, report,
+            [("out_file", "design_corr")]),
+        (plotresidual, report,
+            [("out_file", "residual")]),
+        (plotzstats, report,
+            [("out_files", "zstat_pngs")]),
+        (report, outputnode,
+            [("reports", "reports")]),
+        (dumpjson, outputnode,
+            [("json_file", "json_file")]),
         (rename_design, outputnode,
             [("out_file", "design_image")]),
         (designcorr, outputnode,
@@ -152,7 +195,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
              ("varcopes", "varcopes"),
              ("zstats", "zstats")]),
         (plotzstats, outputnode,
-            [("out_dir", "zstat_dir")]),
+            [("out_files", "zstat_pngs")]),
         ])
 
     return model, inputnode, outputnode
@@ -174,7 +217,7 @@ def build_model_info(subject_id, functional_runs, exp_info):
         onsets, durations, amplitudes, regressors = [], [], [], []
         for event in events:
             event_info = dict(event=event, run=run, subject_id=subject_id)
-            parfile = op.join(exp_info["parfile_base_dir"], 
+            parfile = op.join(exp_info["parfile_base_dir"],
                               exp_info['parfile_template'] % event_info)
             o, d, a = loadtxt(parfile, unpack=True)
             onsets.append(o)
@@ -239,23 +282,89 @@ def plot_residual(resid_file, background_file):
 
 def plot_zstats(background_file, zstat_files, contrasts):
     """Plot the zstats and return a directory of pngs."""
-    from os import mkdir
-    from os.path import join, abspath
+    from os.path import abspath
     from nibabel import load
     from subprocess import call
-    out_dir = abspath("zstat_pngs")
-    mkdir(out_dir)
     bg_img = load(background_file)
     n_slice = bg_img.shape[-1]
     native = n_slice < 50
     width = 750 if native else 872
     sample = 1 if native else 2
+    out_files = []
     for i, contrast in enumerate(contrasts):
         zstat_file = zstat_files[i]
-        zstat_png = join(out_dir, contrast + ".png")
+        zstat_png = "zstat%d.png" % (i + 1)
         ov_nii = contrast + ".nii.gz"
         call(["overlay", "1", "0", background_file, "-a",
               zstat_file, "2.3", "10",
               zstat_file, "-2.3", "-10", ov_nii])
         call(["slicer", ov_nii, "-S", str(sample), str(width), zstat_png])
-    return out_dir
+        out_files.append(abspath(zstat_png))
+    return out_files
+
+
+def dump_exp_info(exp_info, timeseries):
+    """Dump the exp_info dict into a json file."""
+    from os.path import abspath
+    import json
+    json_file = abspath("experiment_info.json")
+    json.dump(exp_info, json_file)
+    return json_file
+
+
+def write_model_report(subject_id, design_image, design_corr,
+                       residual, zstat_pngs, contrast_names):
+    """Write model report info to rst and convert to pdf/html."""
+    import os.path as op
+    import time
+    from subprocess import call
+    from workflows.reporting import model_report_template
+
+    # Fill in the initial report template dict
+    report_dict = dict(now=time.asctime(),
+                       subject_id=subject_id,
+                       design_image=design_image,
+                       design_corr=design_corr,
+                       residual=residual)
+
+    # Add the zstat image templates and update the dict
+    for i, con in enumerate(contrast_names, 1):
+        report_dict["con%d_name" % i] = con
+        report_dict["zstat%d_png" % i] = zstat_pngs[i - 1]
+        header = "Zstat %d: %s" % (i, con)
+        model_report_template = "\n".join(
+            [model_report_template,
+             header,
+             "".join(["^" for l in header]),
+             "",
+             "".join([".. image: %(zstat", str(i), "_png)s"]),
+             "    :width: 6.5in",
+             ""])
+
+    # Plug the values into the template for the pdf file
+    report_rst_text = model_report_template % report_dict
+
+    # Write the rst file and convert to pdf
+    report_pdf_rst_file = "model_pdf.rst"
+    report_pdf_file = op.abspath("model_report.pdf")
+    open(report_pdf_rst_file, "w").write(report_rst_text)
+    call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
+
+    # For images going into the html report, we want the path to be relative
+    # (We expect to read the html page from within the datasink directory
+    # containing the images.  So iteratate through and chop off leading path
+    # of anyhting ending in .png
+    for k, v in report_dict.items():
+        if v.endswith(".png"):
+            report_dict[k] = op.basename(v)
+
+    # Write the another rst file and convert it to html
+    report_html_rst_file = "model_html.rst"
+    report_html_file = op.abspath("model_report.html")
+    report_rst_text = model_report_template % report_dict
+    open(report_html_rst_file, "w").write(report_rst_text)
+    call(["rst2html.py", report_html_rst_file, report_html_file])
+
+    # Return both report files as a list
+    reports = [report_pdf_file, report_html_file]
+    return reports

@@ -77,3 +77,38 @@ Functional to Structural Coregistration
 **Final optimization cost:** %(func_to_anat_cost)s
 
 """
+
+model_report_template = """\
+
+***********************
+Timeseries Model Report
+***********************
+
+**Report generated:** %(now)s
+
+**Subject ID:** %(subject_id)s
+
+Model Design
+------------
+
+Design Matrix
+^^^^^^^^^^^^^
+
+.. image: %(design_image)s
+    :width: 7in
+
+Design Correlation
+^^^^^^^^^^^^^^^^^^
+
+.. image: %(design_corr)s
+    :width: 7in
+
+Residual Map
+^^^^^^^^^^^^
+
+.. image %(residual)s
+    :width: 6.5in
+
+Zstat Maps
+----------
+"""
