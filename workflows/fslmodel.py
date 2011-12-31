@@ -9,7 +9,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
     inputnode = Node(IdentityInterface(fields=["subject_id",
                                                "outlier_files",
                                                "mean_func",
-                                               "realignment_parameters",
+                                               "realign_params",
                                                "timeseries"]),
                      name="inputnode")
 
@@ -104,7 +104,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
         (inputnode, modelspec,
             [("timeseries", "functional_runs"),
              ("outlier_files", "outlier_files"),
-             ("realignment_parameters", "realignment_parameters")]),
+             ("realign_params", "realignment_parameters")]),
         (inputnode, modelestimate,
             [("timeseries", "in_file")]),
         (modelspec, level1design,
