@@ -294,7 +294,7 @@ def plot_zstats(background_file, zstat_files, contrasts):
     for i, contrast in enumerate(contrasts):
         zstat_file = zstat_files[i]
         zstat_png = "zstat%d.png" % (i + 1)
-        ov_nii = contrast + ".nii.gz"
+        ov_nii = "zstat%d_overlay.nii.gz" % (i + 1)
         call(["overlay", "1", "0", background_file, "-a",
               zstat_file, "2.3", "10",
               zstat_file, "-2.3", "-10", ov_nii])
