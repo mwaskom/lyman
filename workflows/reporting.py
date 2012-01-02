@@ -94,19 +94,19 @@ Model Design
 Design Matrix
 ^^^^^^^^^^^^^
 
-.. image: %(design_image)s
-    :width: 7in
+.. image:: %(design_image)s
+    :width: 6.5in
 
 Design Correlation
 ^^^^^^^^^^^^^^^^^^
 
-.. image: %(design_corr)s
-    :width: 7in
+.. image:: %(design_corr)s
+    :width: 6.5in
 
 Residual Map
 ^^^^^^^^^^^^
 
-.. image %(residual)s
+.. image:: %(residual)s
     :width: 6.5in
 
 Zstat Maps

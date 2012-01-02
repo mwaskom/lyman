@@ -267,8 +267,9 @@ def plot_residual(resid_file, background_file):
     out_file = abspath("sigmasquareds.png")
     err_img = load(resid_file)
     err_data = err_img.get_data()
-    low = scoreatpercentile(err_data, 2)
-    high = scoreatpercentile(err_data, 98)
+    low = scoreatpercentile(err_data.ravel(), 2)
+    high = scoreatpercentile(err_data.ravel(), 98)
+    print low, high
     n_slice = err_img.shape[-1]
     native = n_slice < 50  # arbitrary but should work fine
     width = 750 if native else 872
@@ -341,7 +342,7 @@ def write_model_report(subject_id, design_image, design_corr,
              header,
              "".join(["^" for l in header]),
              "",
-             "".join([".. image: %(zstat", str(i), "_png)s"]),
+             "".join([".. image:: %(zstat", str(i), "_png)s"]),
              "    :width: 6.5in",
              ""])
 
