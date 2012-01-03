@@ -2,7 +2,7 @@
 import sys
 import tools
 from util.commandline import parser
-from workflows import normalization
+from workflows import anatwarp
 
 
 def main(arglist):
@@ -12,7 +12,7 @@ def main(arglist):
     subject_list = tools.determine_subjects(args.subjects)
     project_info = tools.gather_project_info()
 
-    normalize = normalization.create_normalization_workflow(
+    normalize = anatwarp.create_anatwarp_workflow(
                     project_info['data_dir'], subject_list)
 
     plugin, plugin_args = tools.determine_engine(args)
