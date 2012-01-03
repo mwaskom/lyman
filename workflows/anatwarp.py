@@ -15,7 +15,7 @@ from nipype.interfaces.utility import IdentityInterface, Rename, Function
 from nipype.pipeline.engine import Node, Workflow
 
 
-def create_normalization_workflow(data_dir, subjects, name="normalize"):
+def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
     """Set up the anatomical normalzation workflow.
 
     Your anatomical data must have been processed in Freesurfer.
@@ -114,38 +114,63 @@ def create_normalization_workflow(data_dir, subjects, name="normalize"):
                          base_dir=os.path.join(data_dir, "workingdir"))
 
     normalize.connect([
-        (subjectsource,   datasource,   [("subject_id", "subject_id")]),
-        (datasource,      cvtaseg,      [("aseg", "in_file")]),
-        (datasource,      cvthead,      [("head", "in_file")]),
-        (cvtaseg,         makemask,     [("out_file", "in_file")]),
-        (cvthead,         skullstrip,   [("out_file", "in_file")]),
-        (makemask,        skullstrip,   [("binary_file", "mask_file")]),
-        (skullstrip,      flirt,        [("out_file", "in_file")]),
-        (flirt,           fnirt,        [("out_matrix_file", "affine_file")]),
-        (cvthead,         fnirt,        [("out_file", "in_file")]),
-        (skullstrip,      warpbrain,    [("out_file", "in_file")]),
-        (fnirt,           warpbrain,    [("fieldcoeff_file", "field_file")]),
-        (skullstrip,      warpbrainhr,  [("out_file", "in_file")]),
-        (fnirt,           warpbrainhr,  [("fieldcoeff_file", "field_file")]),
-        (warpbrainhr,     checkreg,     [("out_file", "in_file")]),
-        (warpbrain,       namebrain,    [("out_file", "in_file")]),
-        (warpbrainhr,     namehrbrain,  [("out_file", "in_file")]),
-        (subjectsource,   datasink,     [("subject_id", "container")]),
-        (skullstrip,      datasink,     [("out_file", "normalization.@brain")]),
-        (cvthead,         datasink,     [("out_file", "normalization.@t1")]),
-        (flirt,           datasink,     [("out_file", "normalization.@brain_flirted")]),
-        (flirt,           datasink,     [("out_matrix_file", "normalization.@affine")]),
-        (namebrain,       datasink,     [("out_file", "normalization.@brain_warped")]),
-        (namehrbrain,     datasink,     [("out_file", "normalization.@brain_hires")]),
-        (fnirt,           datasink,     [("fieldcoeff_file", "normalization.@warpfield")]),
-        (checkreg,        datasink,     [("out_file", "normalization.@reg_png")]),
+        (subjectsource, datasource,
+            [("subject_id", "subject_id")]),
+        (datasource, cvtaseg,
+            [("aseg", "in_file")]),
+        (datasource, cvthead,
+            [("head", "in_file")]),
+        (cvtaseg, makemask,
+            [("out_file", "in_file")]),
+        (cvthead, skullstrip,
+            [("out_file", "in_file")]),
+        (makemask, skullstrip,
+            [("binary_file", "mask_file")]),
+        (skullstrip, flirt,
+            [("out_file", "in_file")]),
+        (flirt, fnirt,
+            [("out_matrix_file", "affine_file")]),
+        (cvthead, fnirt,
+            [("out_file", "in_file")]),
+        (skullstrip, warpbrain,
+            [("out_file", "in_file")]),
+        (fnirt, warpbrain,
+            [("fieldcoeff_file", "field_file")]),
+        (skullstrip, warpbrainhr,
+            [("out_file", "in_file")]),
+        (fnirt, warpbrainhr,
+            [("fieldcoeff_file", "field_file")]),
+        (warpbrainhr, checkreg,
+            [("out_file", "in_file")]),
+        (warpbrain, namebrain,
+            [("out_file", "in_file")]),
+        (warpbrainhr, namehrbrain,
+            [("out_file", "in_file")]),
+        (subjectsource, datasink,
+            [("subject_id", "container")]),
+        (skullstrip, datasink,
+            [("out_file", "normalization.@brain")]),
+        (cvthead, datasink,
+            [("out_file", "normalization.@t1")]),
+        (flirt, datasink,
+            [("out_file", "normalization.@brain_flirted")]),
+        (flirt, datasink,
+            [("out_matrix_file", "normalization.@affine")]),
+        (namebrain, datasink,
+            [("out_file", "normalization.@brain_warped")]),
+        (namehrbrain, datasink,
+            [("out_file", "normalization.@brain_hires")]),
+        (fnirt, datasink,
+            [("fieldcoeff_file", "normalization.@warpfield")]),
+        (checkreg, datasink,
+            [("out_file", "normalization.@reg_png")]),
         ])
 
     return normalize
 
 
 def mni_reg_qc(in_file):
-    """Create a png image summarizing a normalization to the highres MNI152 brain."""
+    """Write a png summarizing registration to the highres MNI152 brain."""
     import os.path as op
     from subprocess import call
     from nipype.interfaces import fsl
