@@ -1,4 +1,8 @@
 #! /usr/bin/env python
+"""
+Main execution script for fMRI analysis in the Lyman ecosystem.
+
+"""
 import os
 import re
 import sys
@@ -9,14 +13,15 @@ import matplotlib as mpl
 mpl.use("Agg")
 from nipype.pipeline.engine import Node
 from nipype.interfaces.io import DataGrabber, DataSink
+from nipype.interfaces.utility import IdentityInterface
 
+import workflows as wf
 import tools
 from tools.commandline import parser
-import workflows as wf
 
 
 def main(arglist):
-
+    """Main function for workflow setup and execution."""
     args = parse_args(arglist)
 
     project = tools.gather_project_info()
@@ -86,7 +91,8 @@ def main(arglist):
     # Timeseries Model
     # ================
 
-    model_smooth = "unsmoothed" if args.surf else "smoothed"
+    surface = args.regspace in ["cortex", "fsaverage"]
+    model_smooth = "unsmoothed" if surface else "smoothed"
 
     model, model_input, model_output = wf.create_timeseries_model_workflow(
         name=model_smooth + "_model", exp_info=exp)
@@ -97,15 +103,15 @@ def main(arglist):
                                                "realign_params",
                                                "timeseries"],
                                     base_directory=anal_dir_base,
-                                    template="%s/preproc/run_?/%s.%s",
+                                    template="%s/preproc/run_*/%s",
                                     sort_filelist=True),
                         name="model_source")
 
     model_source.inputs.template_args = dict(
-        outlier_files=[["subject_id", "outlier_volumes", "txt"]],
-        mean_func=[["subject_id", "mean_func", "nii.gz"]],
-        realign_params=[["subject_id", "realignment_parameters", "par"]],
-        timeseries=[["subject_id", model_smooth + "_timeseries", "nii.gz"]])
+        outlier_files=[["subject_id", "outlier_volumes.txt"]],
+        mean_func=[["subject_id", "mean_func.nii.gz"]],
+        realign_params=[["subject_id", "realignment_parameters.par"]],
+        timeseries=[["subject_id", model_smooth + "_timeseries.nii.gz"]])
 
     model_inwrap = tools.InputWrapper(model, subj_source,
                                       model_source, model_input)
@@ -131,10 +137,97 @@ def main(arglist):
     if project["rm_working_dir"]:
         shutil.rmtree(op.join(work_dir_base, model_smooth + "_model"))
 
+    # Across-Run Registration
+    # =======================
+
+    space = args.regspace
+
+    # Retrieve the right workflow function for registration
+    workflow_function = getattr(wf, "create_%s_reg_workflow" % space)
+    reg, reg_input, reg_output = workflow_function()
+
+    # Set up some source nodes to control what images get registered
+    space_source = Node(IdentityInterface(fields=["space"]),
+                        iterables=("space", [space]),
+                        name="space_source")
+
+    source_iter = ["timeseries"] if args.timeseries else ["cope", "varcope"]
+    source_source = Node(IdentityInterface(fields=["source_image"]),
+                         iterables=("source_image", source_iter),
+                         name="source_soure")
+
+    contrast_source = Node(IdentityInterface(fields=["contrast"]),
+                           iterables=("contrast", exp["contrast_names"]),
+                           name="contrast_source")
+
+
+    reg_infields = ["subject_id", "space"]
+    if args.timeseries:
+        reg_infields.append("smooth")
+    else:
+        reg_infields.extend(["source_image", "contrast_number"])
+
+    reg_outfields = dict(
+        mni=["source_image", "warpfield", "fsl_affine"],
+        epi=["source_image", "tk_affine"],
+        cortex=["source_image", "tk_affine"],
+        fsaverage=["source_image", "tk_affine"])[space]
+    
+    reg_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
+
+    reg_source = Node(DataGrabber(infields=reg_infields,
+                                  outfields=reg_outfields,
+                                  base_directory=anal_dir_base,
+                                  template="%s/%s/%s/run_*/%s%d.%s",
+                                  sort_filelist=True),
+                      name="reg_source")
+
+    reg_source.inputs.field_template = dict(
+        warpfield=op.join(project["data_dir"], 
+                          "%s/normalization/warpfield.nii.gz"),
+        fsl_affine=op.join(preproc_dir,
+                          "%s/preproc/run_*/func2anat_flirt.mat"))
+
+    reg_source.inputs.template_args = dict(
+        source_image=[["subject_id", "model", model_smooth, 
+                       "source_image", "contrast_number", "nii.gz"]],
+        fsl_affine=[["subject_id"]],
+        warpfield=[["subject_id"]])
+
+    reg_inwrap = tools.InputWrapper(reg, subj_source,
+                                    reg_source, reg_input)
+    
+    reg_inwrap.connect_inputs()
+    reg.connect([
+        (space_source, reg_source,
+            [("space", "space")]),
+        (contrast_source, reg_source,
+            [(("contrast", tools.find_contrast_number, exp["contrast_names"]), 
+              "contrast_number")]),
+        (source_source, reg_source,
+            [("source_image", "source_image")])
+            ])
+
+    reg_sink = Node(DataSink(base_directory=anal_dir_base),
+                             name="reg_sink")
+
+    reg_outwrap = tools.OutputWrapper(reg, subj_source,
+                                    reg_sink, reg_output)
+    reg_outwrap.set_subject_container()
+    reg_outwrap.set_mapnode_substitutions(exp["n_runs"])
+    reg_outwrap.sink_outputs("registration")
+    reg_outwrap.add_regexp_substitutions([
+        (r"_contrast_[^/]*/", ""),
+        (r"_source_image_[^/]*/", ""),
+        (r"_space_", "")])
+ 
+    reg.base_dir = work_dir_base
+
+    run_workflow(reg, "reg", args)
+
 
 def gather_experiment_info(experiment_name, altmodel=None):
-
-    # Import the experiment module
+    """Import an experiment module and add some formatted information."""
     try:
         if altmodel is not None:
             experiment_name = "%s-%s" % (experiment_name, altmodel)
@@ -169,7 +262,7 @@ def gather_experiment_info(experiment_name, altmodel=None):
 
 
 def verify_experiment_info(exp_dict):
-
+    """Catch setup errors that might lead to confusing workflow crashes."""
     if exp_dict["units"] not in ["secs", "scans"]:
         raise ValueError("units must be 'secs' or 'scans'")
 
@@ -179,23 +272,26 @@ def verify_experiment_info(exp_dict):
 
 
 def run_workflow(wf, name, args):
-
+    """Run a workflow, if we asked to do so on the command line."""
     plugin, plugin_args = tools.determine_engine(args)
     if name in args.workflows:
         wf.run(plugin, plugin_args)
 
 
 def parse_args(arglist):
-
+    """Take an arglist and return an argparse Namespace."""
     parser.add_argument("-experiment", help="experimental paradigm")
     parser.add_argument("-altmodel", help="alternate model to fit")
     parser.add_argument("-workflows", nargs="*",
                         choices=["all", "preproc", "model", "reg", "ffx"],
                         help="which workflos to run")
-    parser.add_argument("-surf", action="store_true",
-                        help="run processing for surface analysis")
-    parser.add_argument("-native", action="store_true",
-                        help="run fixed effect analysis on native surface")
+    parser.add_argument("-regspace", default="mni",
+                        choices=["mni", "epi", "cortex", "fsaverage"],
+                        help="common space for registration and fixed effects")
+    parser.add_argument("-timeseries", action="store_true",
+                        help="perform registration on preprocessed timeseries")
+    parser.add_argument("-unsmoothed", action="store_true",
+                        help="register unsmoothed timeseries")
     return parser.parse_args(arglist)
 
 if __name__ == "__main__":

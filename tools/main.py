@@ -73,6 +73,15 @@ class OutputWrapper(object):
         else:
             self.sink_node.inputs.substitutions = substitutions
 
+
+    def add_regexp_substitutions(self, sub_list):
+        
+        if isdefined(self.sink_node.inputs.regexp_substitutions):
+            self.sink_node.inputs.regexp_substitutions.extend(sub_list)
+        else:
+            self.sink_node.inputs.regexp_substitutions = sub_list
+
+
     def set_subject_container(self):
 
         # Connect the subject_id value as the container and string to remove
@@ -185,3 +194,8 @@ def parse_par_file(parfile):
         durations.append(float(line[1]))
         amplitudes.append(float(line[2]))
     return onsets, durations, amplitudes
+
+
+def find_contrast_number(contrast_name, contrast_names):
+    
+    return contrast_names.index(contrast_name) + 1

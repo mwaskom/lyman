@@ -95,3 +95,11 @@ def test_determine_engine():
 
         if arg == "multiproc":
             yield assert_equal, plugin_args, dict(n_procs=4)
+
+
+def test_find_contrast_number():
+
+    contrasts = ["foo", "bar", "buz"]
+
+    for i, contrast in enumerate(contrasts, 1):
+        yield assert_equal, main.find_contrast_number(contrast, contrasts), i
