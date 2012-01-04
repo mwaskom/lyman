@@ -160,7 +160,6 @@ def main(arglist):
                            iterables=("contrast", exp["contrast_names"]),
                            name="contrast_source")
 
-
     reg_infields = ["subject_id", "space"]
     if args.timeseries:
         reg_infields.append("smooth")
@@ -169,10 +168,10 @@ def main(arglist):
 
     reg_outfields = dict(
         mni=["source_image", "warpfield", "fsl_affine"],
-        epi=["source_image", "tk_affine"],
+        epi=["source_image", "fsl_affine"],
         cortex=["source_image", "tk_affine"],
         fsaverage=["source_image", "tk_affine"])[space]
-    
+
     reg_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
 
     reg_source = Node(DataGrabber(infields=reg_infields,
@@ -183,26 +182,28 @@ def main(arglist):
                       name="reg_source")
 
     reg_source.inputs.field_template = dict(
-        warpfield=op.join(project["data_dir"], 
-                          "%s/normalization/warpfield.nii.gz"),
         fsl_affine=op.join(preproc_dir,
                           "%s/preproc/run_*/func2anat_flirt.mat"))
 
     reg_source.inputs.template_args = dict(
-        source_image=[["subject_id", "model", model_smooth, 
+        source_image=[["subject_id", "model", model_smooth,
                        "source_image", "contrast_number", "nii.gz"]],
-        fsl_affine=[["subject_id"]],
-        warpfield=[["subject_id"]])
+        fsl_affine=[["subject_id"]])
+
+    if space == "mni":
+        reg_source.inputs.field_template["warpfield"] = op.join(
+            project["data_dir"], "%s/normalization/warpfield.nii.gz"),
+        reg_source.inputs.template_args["warpfield"] = [["subject_id"]]
 
     reg_inwrap = tools.InputWrapper(reg, subj_source,
                                     reg_source, reg_input)
-    
+
     reg_inwrap.connect_inputs()
     reg.connect([
         (space_source, reg_source,
             [("space", "space")]),
         (contrast_source, reg_source,
-            [(("contrast", tools.find_contrast_number, exp["contrast_names"]), 
+            [(("contrast", tools.find_contrast_number, exp["contrast_names"]),
               "contrast_number")]),
         (source_source, reg_source,
             [("source_image", "source_image")])
@@ -219,8 +220,9 @@ def main(arglist):
     reg_outwrap.add_regexp_substitutions([
         (r"_contrast_[^/]*/", ""),
         (r"_source_image_[^/]*/", ""),
-        (r"_space_", "")])
- 
+        (r"_space_", ""),
+        (r"_run_", "run_")])
+
     reg.base_dir = work_dir_base
 
     run_workflow(reg, "reg", args)
