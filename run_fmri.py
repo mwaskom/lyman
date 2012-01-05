@@ -146,12 +146,9 @@ def main(arglist):
     workflow_function = getattr(wf, "create_%s_reg_workflow" % space)
     reg, reg_input, reg_output = workflow_function()
 
-    # Set up some source nodes to control what images get registered
-    space_source = Node(IdentityInterface(fields=["space"]),
-                        iterables=("space", [space]),
-                        name="space_source")
-
-    source_iter = ["timeseries"] if args.timeseries else ["cope", "varcope"]
+    reg_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
+    timeseries = reg_smooth + "_timeseries"
+    source_iter = [timeseries] if args.timeseries else ["cope", "varcope"]
     source_source = Node(IdentityInterface(fields=["source_image"]),
                          iterables=("source_image", source_iter),
                          name="source_soure")
@@ -160,10 +157,8 @@ def main(arglist):
                            iterables=("contrast", exp["contrast_names"]),
                            name="contrast_source")
 
-    reg_infields = ["subject_id", "space"]
-    if args.timeseries:
-        reg_infields.append("smooth")
-    else:
+    reg_infields = ["subject_id", "source_image"]
+    if not args.timeseries:
         reg_infields.extend(["source_image", "contrast_number"])
 
     reg_outfields = dict(
@@ -172,12 +167,13 @@ def main(arglist):
         cortex=["source_image", "tk_affine"],
         fsaverage=["source_image", "tk_affine"])[space]
 
-    reg_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
+    reg_template = ("%s/preproc/run_*/%s.%s" if args.timeseries
+                    else  "%s/model/%s/run_*/%s%d.%s")
 
     reg_source = Node(DataGrabber(infields=reg_infields,
                                   outfields=reg_outfields,
                                   base_directory=anal_dir_base,
-                                  template="%s/%s/%s/run_*/%s%d.%s",
+                                  template=reg_template,
                                   sort_filelist=True),
                       name="reg_source")
 
@@ -185,28 +181,37 @@ def main(arglist):
         fsl_affine=op.join(preproc_dir,
                           "%s/preproc/run_*/func2anat_flirt.mat"))
 
-    reg_source.inputs.template_args = dict(
-        source_image=[["subject_id", "model", model_smooth,
-                       "source_image", "contrast_number", "nii.gz"]],
-        fsl_affine=[["subject_id"]])
+    template_args = dict()
+
+    if args.timeseries:
+        template_args["source_image"] = [
+            ["subject_id", "source_image", "nii.gz"]]
+    else:
+        template_args["source_image"] = [
+            ["subject_id", model_smooth,
+             "source_image", "contrast_number", "nii.gz"]]
+
+    template_args["fsl_affine"] = [["subject_id"]]
 
     if space == "mni":
         reg_source.inputs.field_template["warpfield"] = op.join(
-            project["data_dir"], "%s/normalization/warpfield.nii.gz"),
-        reg_source.inputs.template_args["warpfield"] = [["subject_id"]]
+            project["data_dir"], "%s/normalization/warpfield.nii.gz")
+        template_args["warpfield"] = [["subject_id"]]
+
+    reg_source.inputs.template_args = template_args
 
     reg_inwrap = tools.InputWrapper(reg, subj_source,
                                     reg_source, reg_input)
 
     reg_inwrap.connect_inputs()
-    reg.connect([
-        (space_source, reg_source,
-            [("space", "space")]),
-        (contrast_source, reg_source,
-            [(("contrast", tools.find_contrast_number, exp["contrast_names"]),
-              "contrast_number")]),
-        (source_source, reg_source,
-            [("source_image", "source_image")])
+    reg.connect([(source_source, reg_source, [("source_image", "source_image")])
+            ])
+
+    if not args.timeseries:
+        reg.connect([
+            (contrast_source, reg_source,
+                [(("contrast", tools.find_contrast_number, exp["contrast_names"]),
+                  "contrast_number")]),
             ])
 
     reg_sink = Node(DataSink(base_directory=anal_dir_base),
@@ -216,7 +221,7 @@ def main(arglist):
                                     reg_sink, reg_output)
     reg_outwrap.set_subject_container()
     reg_outwrap.set_mapnode_substitutions(exp["n_runs"])
-    reg_outwrap.sink_outputs("registration")
+    reg_outwrap.sink_outputs("reg.%s" % space)
     reg_outwrap.add_regexp_substitutions([
         (r"_contrast_[^/]*/", ""),
         (r"_source_image_[^/]*/", ""),
