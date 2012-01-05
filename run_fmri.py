@@ -168,7 +168,7 @@ def main(arglist):
     # Define a smooth variable here
     # Can unsmoothed or smoothed in volume, always unsmoothed for surface
     reg_smooth = "unsmoothed" if (
-        args.unsmoothed or args.surface) else "smoothed"
+        args.unsmoothed or surface) else "smoothed"  # XXX Figure out how to store these outputs correctly
 
     # Determine which type of registration is happening
     # (model output or timeseries) and set things accordingly
@@ -188,7 +188,7 @@ def main(arglist):
     aff_template_base = op.join(preproc_dir, "%s/preproc/run_*/func2anat_")
 
     if args.timeseries:
-        base_directory = preproc_dir,
+        base_directory = preproc_dir
         reg_template = "%s/preproc/run_*/%s.%s"
         reg_template_args = {"source_image":
             [["subject_id", "source_image", "nii.gz"]]}
@@ -201,15 +201,12 @@ def main(arglist):
               "source_image", "contrast_number", "nii.gz"]]}
 
     # Add options conditional on space
-    aff_key = "%s_affine" % ("tk" if args.surface else "fsl")
+    aff_key = "%s_affine" % ("tk" if surface else "fsl")
     reg_template_args[aff_key] = [["subject_id"]]
     if surface:
         field_template = {"tk_affine": aff_template_base + "tkreg.dat"}
     else:
-        mask_template = op.join(preproc_dir,
-                                "%s/preproc/run_*/functional_mask.nii.gz")
-        field_template = {"fsl_affine": aff_template_base + "flirt.mat",
-                          "functional_mask": mask_template}
+        field_template = {"fsl_affine": aff_template_base + "flirt.mat"}
         if space == "mni":
             field_template["warpfield"] = op.join(
                 project["data_dir"], "%s/normalization/warpfield.nii.gz")
@@ -217,8 +214,8 @@ def main(arglist):
 
     # Same thing for the outputs, but this is only dependant on space
     reg_outfields = dict(
-        mni=["source_image", "warpfield", "fsl_affine", "functional_mask"],
-        epi=["source_image", "fsl_affine", "functional_mask"],
+        mni=["source_image", "warpfield", "fsl_affine"],
+        epi=["source_image", "fsl_affine"],
         cortex=["source_image", "tk_affine"],
         fsaverage=["source_image", "tk_affine"])[space]
 
@@ -227,9 +224,9 @@ def main(arglist):
                                   outfields=reg_outfields,
                                   base_directory=base_directory,
                                   template=reg_template,
-                                  field_template=field_template,
                                   sort_filelist=True),
                       name="reg_source")
+    reg_source.inputs.field_template = field_template
     reg_source.inputs.template_args = reg_template_args
 
     # Registration inutnode
@@ -243,7 +240,7 @@ def main(arglist):
         names = exp["contrast_names"]
         reg.connect(
              contrast_source, ("contrast", tools.find_contrast_number, names),
-             reg_source, "contrast")
+             reg_source, "contrast_number")
 
     # Reg output and datasink
     reg_sink = Node(DataSink(base_directory=anal_dir_base),
