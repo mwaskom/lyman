@@ -108,7 +108,7 @@ def main(arglist):
 
     # Variable to control whether volume processing inputs are smoothed
     # Surface inputs are always unsmoothed, but that's not relevant till below
-    model_smooth = "smoothed" if args.unsmoothed else "unsmoothed"
+    model_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
 
     # Create a modelfitting workflow and specific nodes as above
     model, model_input, model_output = wf.create_timeseries_model_workflow(
@@ -168,7 +168,10 @@ def main(arglist):
     # Define a smooth variable here
     # Can unsmoothed or smoothed in volume, always unsmoothed for surface
     reg_smooth = "unsmoothed" if (
-        args.unsmoothed or surface) else "smoothed"  # XXX Figure out how to store these outputs correctly
+        args.unsmoothed or surface) else "smoothed"
+    smooth_source = Node(IdentityInterface(fields=["smooth"]), 
+                         iterables=("smooth", [reg_smooth]),
+                         name="smooth_source")
 
     # Determine which type of registration is happening
     # (model output or timeseries) and set things accordingly
@@ -194,7 +197,7 @@ def main(arglist):
             [["subject_id", "source_image", "nii.gz"]]}
     else:
         base_directory = anal_dir_base
-        reg_infields.extend(["contrast_number"])
+        reg_infields.append("contrast_number")
         reg_template = "%s/model/%s/run_*/%s%d.%s"
         reg_template_args = {"source_image":
             [["subject_id", reg_smooth,
@@ -205,6 +208,7 @@ def main(arglist):
     reg_template_args[aff_key] = [["subject_id"]]
     if surface:
         field_template = {"tk_affine": aff_template_base + "tkreg.dat"}
+        reg_infields.append("smooth")
     else:
         field_template = {"fsl_affine": aff_template_base + "flirt.mat"}
         if space == "mni":
@@ -241,6 +245,8 @@ def main(arglist):
         reg.connect(
              contrast_source, ("contrast", tools.find_contrast_number, names),
              reg_source, "contrast_number")
+    if not surface:
+        reg.connect(smooth_source, "smooth", reg_source, "smooth")
 
     # Reg output and datasink
     reg_sink = Node(DataSink(base_directory=anal_dir_base),
@@ -257,6 +263,7 @@ def main(arglist):
         (r"_contrast_[^/]*/", ""),
         (r"_source_image_[^/]*/", ""),
         (r"_space_", ""),
+        (r"_smooth_", ""),
         (r"_run_", "run_")])  # This one's wired to interal function
 
     reg.base_dir = work_dir_base
