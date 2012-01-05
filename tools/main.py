@@ -63,7 +63,7 @@ class OutputWrapper(object):
 
         # Build a list of substitution tuples
         substitutions = []
-        for r in range(n_runs):
+        for r in reversed(range(n_runs)):
             for name in mapnode_names:
                 substitutions.append(("_%s%d" % (name, r), "run_%d" % (r + 1)))
 
@@ -84,17 +84,18 @@ class OutputWrapper(object):
 
     def set_subject_container(self):
 
-        # Connect the subject_id value as the container and string to remove
-        self.wf.connect([
-            (self.subj_node, self.sink_node, [("subject_id", "container"),
-                                              ("subject_id", "strip_dir")]),
-            ])
+        # Connect the subject_id value as the container
+        self.wf.connect(self.subj_node, "subject_id", self.sink_node, "container")
 
-        # Strip the _subject_id_ component from the path as well
+        subj_subs = []
+        for s in self.subj_node.iterables[1]:
+            subj_subs.append(("/_subject_id_%s/" % s, "/"))
+
+        # Strip the subject_id iterable from the path
         if isdefined(self.sink_node.inputs.substitutions):
-            self.sink_node.inputs.substitutions.append(("_subject_id_", ""))
+            self.sink_node.inputs.substitutions.extend(subj_subs)
         else:
-            self.sink_node.inputs.substitutions = [("_subject_id_", "")]
+            self.sink_node.inputs.substitutions = subj_subs
 
     def sink_outputs(self, dir_name):
         """Connect the outputs of a workflow to a datasink."""
