@@ -264,6 +264,7 @@ def main(arglist):
         (r"_source_image_[^/]*/", ""),
         (r"_space_", ""),
         (r"_smooth_", ""),
+        (r"(un)*(smoothed_time)", "time"),
         (r"_run_", "run_")])  # This one's wired to interal function
 
     reg.base_dir = work_dir_base
