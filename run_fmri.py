@@ -99,10 +99,6 @@ def main(arglist):
     # Possibly execute the workflow, depending on the command line
     run_workflow(preproc, "preproc", args)
 
-    # Possibly remove temporary store
-    if project["rm_working_dir"]:
-        shutil.rmtree(op.join(work_dir_base, "preproc"))
-
     # Timeseries Model
     # ================
 
@@ -146,10 +142,8 @@ def main(arglist):
     model.base_dir = work_dir_base
     model.config = dict(crashdump_dir=crashdump_dir)
 
-    # Possibly execute the workflow and clean up
+    # Possibly execute the workflow
     run_workflow(model, "model", args)
-    if project["rm_working_dir"]:
-        shutil.rmtree(op.join(work_dir_base, model_smooth + "_model"))
 
     # Across-Run Registration
     # =======================
@@ -285,8 +279,6 @@ def main(arglist):
 
     # Possibly run registration workflow and clean up
     run_workflow(reg, "reg", args)
-    if project["rm_working_dir"]:
-        shutil.rmtree(op.join(work_dir_base, "reg"))
 
     # Cross-Run Fixed Effects Model
     # -----------------------------
@@ -373,10 +365,14 @@ def main(arglist):
     ffx.base_dir = work_dir_base
     ffx.config = dict(crashdump_dir=crashdump_dir)
 
-    # Possibly run fixed effects workflow and clean up
+    # Possibly run fixed effects workflow
     run_workflow(ffx, "ffx", args)
+
+    # Clean-up
+    # --------
+
     if project["rm_working_dir"]:
-        shutil.rmtree(op.join(work_dir_base, "ffx"))
+        shutil.rmtree(op.join(work_dir_base))
 
 
 def gather_experiment_info(experiment_name, altmodel=None):
