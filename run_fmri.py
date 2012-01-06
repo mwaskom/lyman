@@ -252,6 +252,8 @@ def main(arglist):
         reg.connect(contrast_source, ("contrast", tools.reg_template_args,
                                       mask_template_args, reg_template_args),
                     reg_source, "template_args")
+        reg_source.inputs.template = reg_template
+        reg_source.inputs.template_args = reg_template_args
     if not surface:
         reg.connect(smooth_source, "smooth", reg_source, "smooth")
 
