@@ -1,8 +1,3 @@
-
-
-
-
-
 preproc_report_template = """\
 ********************
 Preprocessing Report
@@ -19,7 +14,7 @@ Input Timeseries
 
 %(timeseries_file)s
 
-**Original path:** 
+**Original path:**
 
 %(orig_timeseries_path)s
 
@@ -111,4 +106,30 @@ Residual Map
 
 Zstat Maps
 ----------
+"""
+
+ffx_report_template = """\
+
+**************************
+Fixed Effects Model Report
+**************************
+
+**Report generated:** %(now)s
+
+**Subject ID:** %(subject_id)s
+
+**Contrast:** %(contrast_name)s
+
+Mask Overlap
+------------
+
+.. image:: %(mask_png)s
+    :width: 6.5in
+
+Zstat Maps
+----------
+
+.. image:: %(zstat_png)s
+    :width: 6.5in
+
 """

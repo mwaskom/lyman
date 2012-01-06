@@ -73,23 +73,22 @@ class OutputWrapper(object):
         else:
             self.sink_node.inputs.substitutions = substitutions
 
-
     def add_regexp_substitutions(self, sub_list):
-        
+
         if isdefined(self.sink_node.inputs.regexp_substitutions):
             self.sink_node.inputs.regexp_substitutions.extend(sub_list)
         else:
             self.sink_node.inputs.regexp_substitutions = sub_list
 
-
     def set_subject_container(self):
 
         # Connect the subject_id value as the container
-        self.wf.connect(self.subj_node, "subject_id", self.sink_node, "container")
+        self.wf.connect(self.subj_node, "subject_id",
+                        self.sink_node, "container")
 
         subj_subs = []
         for s in self.subj_node.iterables[1]:
-            subj_subs.append(("/_subject_id_%s/" % s, "/"))
+            subj_subs.append(("/_subject_id_%s" % s, "/"))
 
         # Strip the subject_id iterable from the path
         if isdefined(self.sink_node.inputs.substitutions):
@@ -175,28 +174,18 @@ def make_subject_source(subject_list):
                 name="subj_source")
 
 
-def archive_crashdumps(workflow):
-    """Archive crashdumps by date to the code directory"""
-    datestamp = str(datetime.now())[:10]
-    codepath = op.split(op.abspath(__file__))[0]
-    crashdir = op.abspath("%s/../crashdumps/%s" % (codepath, datestamp))
-    if not op.isdir(crashdir):
-        os.makedirs(crashdir)
-    workflow.config = dict(crashdump_dir=crashdir)
-
-
-def parse_par_file(parfile):
-    onsets = []
-    durations = []
-    amplitudes = []
-    for line in open(parfile):
-        line = line.split()
-        onsets.append(float(line[0]))
-        durations.append(float(line[1]))
-        amplitudes.append(float(line[2]))
-    return onsets, durations, amplitudes
-
-
 def find_contrast_number(contrast_name, contrast_names):
-    
+
+    if contrast_name == "_mask":
+        return 0
     return contrast_names.index(contrast_name) + 1
+
+
+def reg_template(contrast, mask_template, model_template):
+
+    return mask_template if contrast == "_mask" else model_template
+
+
+def reg_template_args(contrast, mask_args, model_args):
+
+    return mask_args if contrast == "_mask" else model_args

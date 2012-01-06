@@ -169,7 +169,7 @@ def main(arglist):
     # Can unsmoothed or smoothed in volume, always unsmoothed for surface
     reg_smooth = "unsmoothed" if (
         args.unsmoothed or surface) else "smoothed"
-    smooth_source = Node(IdentityInterface(fields=["smooth"]), 
+    smooth_source = Node(IdentityInterface(fields=["smooth"]),
                          iterables=("smooth", [reg_smooth]),
                          name="smooth_source")
 
@@ -181,9 +181,10 @@ def main(arglist):
                          iterables=("source_image", source_iter),
                          name="source_soure")
 
+    reg_contrast_iterables = ["_mask"] + exp["contrast_names"]
     # Here we add contrast as an aditional layer of parameterization
     contrast_source = Node(IdentityInterface(fields=["contrast"]),
-                           iterables=("contrast", exp["contrast_names"]),
+                           iterables=("contrast", reg_contrast_iterables),
                            name="contrast_source")
 
     # Build the registration inputs conditional on type of registration
@@ -203,9 +204,14 @@ def main(arglist):
             [["subject_id", reg_smooth,
               "source_image", "contrast_number", "nii.gz"]]}
 
+    # There's a bit of a hack to pick up and register the mask correctly
+    mask_template = "%s/preproc/run_*/functional_mask.nii.gz"
+    mask_template_args = dict(source_image=[["subject_id"]])
+
     # Add options conditional on space
     aff_key = "%s_affine" % ("tk" if surface else "fsl")
     reg_template_args[aff_key] = [["subject_id"]]
+    mask_template_args[aff_key] = [["subject_id"]]
     if surface:
         field_template = {"tk_affine": aff_template_base + "tkreg.dat"}
         reg_infields.append("smooth")
@@ -215,6 +221,7 @@ def main(arglist):
             field_template["warpfield"] = op.join(
                 project["data_dir"], "%s/normalization/warpfield.nii.gz")
             reg_template_args["warpfield"] = [["subject_id"]]
+            mask_template_args["warpfield"] = [["subject_id"]]
 
     # Same thing for the outputs, but this is only dependant on space
     reg_outfields = dict(
@@ -227,11 +234,9 @@ def main(arglist):
     reg_source = Node(DataGrabber(infields=reg_infields,
                                   outfields=reg_outfields,
                                   base_directory=base_directory,
-                                  template=reg_template,
                                   sort_filelist=True),
                       name="reg_source")
     reg_source.inputs.field_template = field_template
-    reg_source.inputs.template_args = reg_template_args
 
     # Registration inutnode
     reg_inwrap = tools.InputWrapper(reg, subj_source,
@@ -247,6 +252,14 @@ def main(arglist):
              reg_source, "contrast_number")
     if not surface:
         reg.connect(smooth_source, "smooth", reg_source, "smooth")
+
+    reg.connect(contrast_source, ("contrast", tools.reg_template,
+                                  mask_template, reg_template),
+                reg_source, "template")
+
+    reg.connect(contrast_source, ("contrast", tools.reg_template_args,
+                                  mask_template_args, reg_template_args),
+                reg_source, "template_args")
 
     # Reg output and datasink
     reg_sink = Node(DataSink(base_directory=anal_dir_base),
@@ -274,6 +287,96 @@ def main(arglist):
     run_workflow(reg, "reg", args)
     if project["rm_working_dir"]:
         shutil.rmtree(op.join(work_dir_base, "reg"))
+
+    # Cross-Run Fixed Effects Model
+    # -----------------------------
+
+    space_source = Node(IdentityInterface(fields=["space"]),
+                        iterables=("space", [space]),
+                        name="space_source")
+    contrast_source.iterables = ("contrast", exp["contrast_names"])
+
+    # Dynamically get the workflow
+    manifold = "surface" if surface else "volume"
+    workflow_function = getattr(wf, "create_%s_ffx_workflow" % manifold)
+    ffx, ffx_input, ffx_output = workflow_function()
+
+    ffx_infields = ["subject_id", "contrast_number", "space"]
+    ffx_outfields = ["copes", "varcopes", "dof_files", "masks"]
+    if not surface:
+        ffx_outfields.append("background_file")
+
+    ffx_template = "%s/reg/%s/%s/run_*/%s%d_*.nii.gz"
+
+    ffx_template_args = dict(
+        copes=[["subject_id", "space", "smooth", "cope", "contrast_number"]],
+        varcopes=[["subject_id", "space", "smooth",
+                   "varcope", "contrast_number"]],
+        masks=[["subject_id", "space", "smooth"]],
+        dof_files=[["subject_id", "smooth"]])
+
+    ffx_field_template = {"dof_files": "%s/model/%s/run_*/dof",
+        "masks": "%s/reg/%s/%s/run_*/functional_mask_*.nii.gz"}
+    if space == "epi":
+        ffx_field_template["background_file"] = op.join(
+            preproc_dir, "%s/preproc//run_1/mean_func.nii.gz")
+    elif space == "mni":
+        ffx_field_template["background_file"] = op.join(
+            project["data_dir"], "%s/normalization/brain_warp.nii.gz")
+
+    if not surface:
+        ffx_template_args["background_file"] = [["subject_id"]]
+
+    # Define the ffxistration data source node
+    ffx_source = Node(DataGrabber(infields=ffx_infields,
+                                  outfields=ffx_outfields,
+                                  base_directory=anal_dir_base,
+                                  template=ffx_template,
+                                  sort_filelist=True),
+                      name="ffx_source")
+    ffx_source.inputs.field_template = ffx_field_template
+    ffx_source.inputs.template_args = ffx_template_args
+
+    # Fixed effects inutnode
+    ffx_inwrap = tools.InputWrapper(ffx, subj_source,
+                                    ffx_source, ffx_input)
+    ffx_inwrap.connect_inputs()
+
+    # There are some additional connections to this input
+    ffx.connect(space_source, "space", ffx_source, "space")
+    ffx.connect(contrast_source, "contrast", ffx_input, "contrast")
+    if not args.timeseries:
+        names = exp["contrast_names"]
+        ffx.connect(
+             contrast_source, ("contrast", tools.find_contrast_number, names),
+             ffx_source, "contrast_number")
+    if not surface:
+        ffx.connect(smooth_source, "smooth", ffx_source, "smooth")
+
+    # Fixed effects output and datasink
+    ffx_sink = Node(DataSink(base_directory=anal_dir_base),
+                             name="ffx_sink")
+
+    ffx_outwrap = tools.OutputWrapper(ffx, subj_source,
+                                      ffx_sink, ffx_output)
+    ffx_outwrap.set_mapnode_substitutions(exp["n_runs"])
+    ffx_outwrap.set_subject_container()
+    ffx_outwrap.sink_outputs("ffx.%s.%s" % (space, model_smooth))
+
+    # Fixed effects has some additional substitutions to strip out interables
+    ffx_outwrap.add_regexp_substitutions([
+        (r"/_source_image_[^/]*/", ""),
+        (r"/_space_[^/]*/", "/"),
+        (r"/_smooth_[^/]*/", "/"),
+        (r"/_contrast_", "/")])
+
+    ffx.base_dir = work_dir_base
+    ffx.config = dict(crashdump_dir=crashdump_dir)
+
+    # Possibly run fixed effects workflow and clean up
+    run_workflow(ffx, "ffx", args)
+    if project["rm_working_dir"]:
+        shutil.rmtree(op.join(work_dir_base, "ffx"))
 
 
 def gather_experiment_info(experiment_name, altmodel=None):

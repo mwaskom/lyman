@@ -292,6 +292,8 @@ def plot_zstats(background_file, zstat_files, contrasts):
     width = 750 if native else 872
     sample = 1 if native else 2
     out_files = []
+    if not isinstance(zstat_files, list):
+        zstat_files = [zstat_files]
     for i, contrast in enumerate(contrasts):
         zstat_file = zstat_files[i]
         zstat_png = "zstat%d.png" % (i + 1)

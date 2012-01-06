@@ -55,9 +55,16 @@ def create_mni_reg_workflow(name="mni_reg", interp="spline"):
 
     target = fsl.Info.standard_image("avg152T1_brain.nii.gz")
 
-    applywarp = MapNode(fsl.ApplyWarp(ref_file=target,
-                                      interp=interp),
-                        iterfield=["in_file", "premat"],
+    getinterp = MapNode(Function(input_names=["source_file",
+                                              "default_interp"],
+                                 output_names="interp",
+                                 function=get_interp),
+                        iterfield=["source_file"],
+                        name="getinterp")
+    getinterp.inputs.default_interp=interp
+
+    applywarp = MapNode(fsl.ApplyWarp(ref_file=target),
+                        iterfield=["in_file", "premat", "interp"],
                         name="applywarp")
 
     outputnode = Node(IdentityInterface(fields=["out_file"]),
@@ -69,6 +76,10 @@ def create_mni_reg_workflow(name="mni_reg", interp="spline"):
             [("source_image", "in_file"),
              ("warpfield", "field_file"),
              ("fsl_affine", "premat")]),
+        (inputnode, getinterp,
+            [("source_image", "source_file")]),
+        (getinterp, applywarp,
+            [("interp", "interp")]),
         (applywarp, outputnode,
             [("out_file", "out_file")])
         ])
@@ -84,6 +95,15 @@ def create_cortex_reg_workflow():
 def create_fsaverage_reg_workflow():
 
     pass
+
+
+def get_interp(source_file, default_interp="spline"):
+    """Nearest neighboor if it's a mask, otherwise the default."""
+    from nibabel import load
+    img_data = load(source_file).get_data()
+    is_bool = img_data.sum() == img_data.astype(bool).sum()
+    interp = "nn" if is_bool else default_interp
+    return interp
 
 
 def register_to_epi(source_images, fsl_affines, interp="spline"):
