@@ -175,6 +175,7 @@ def main(arglist):
                          iterables=("source_image", source_iter),
                          name="source_soure")
 
+    # Use the mask as a "contrast" to transform it appropriately
     reg_contrast_iterables = ["_mask"] + exp["contrast_names"]
     # Here we add contrast as an aditional layer of parameterization
     contrast_source = Node(IdentityInterface(fields=["contrast"]),
@@ -244,16 +245,15 @@ def main(arglist):
         reg.connect(
              contrast_source, ("contrast", tools.find_contrast_number, names),
              reg_source, "contrast_number")
+        reg.connect(contrast_source, ("contrast", tools.reg_template,
+                                      mask_template, reg_template),
+                    reg_source, "template")
+
+        reg.connect(contrast_source, ("contrast", tools.reg_template_args,
+                                      mask_template_args, reg_template_args),
+                    reg_source, "template_args")
     if not surface:
         reg.connect(smooth_source, "smooth", reg_source, "smooth")
-
-    reg.connect(contrast_source, ("contrast", tools.reg_template,
-                                  mask_template, reg_template),
-                reg_source, "template")
-
-    reg.connect(contrast_source, ("contrast", tools.reg_template_args,
-                                  mask_template_args, reg_template_args),
-                reg_source, "template_args")
 
     # Reg output and datasink
     reg_sink = Node(DataSink(base_directory=anal_dir_base),
