@@ -408,12 +408,8 @@ def gather_experiment_info(experiment_name, altmodel=None):
 
     # Build contrasts list
     conkeys = sorted([k for k in exp_dict if re.match("cont\d+", k)])
-    if conkeys:
-        exp_dict["contrasts"] = [exp_dict[key] for key in conkeys]
-        exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
-    else:
-        exp_dict["contrasts"] = []
-        exp_dict["contrast_names"] = []
+    exp_dict["contrasts"] = [exp_dict[key] for key in conkeys]
+    exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
 
     return exp_dict
 
