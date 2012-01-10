@@ -827,8 +827,8 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
 
     import os.path as op
     import time
-    from subprocess import call
     from nibabel import load
+    from tools import write_workflow_report
     from workflows.reporting import preproc_report_template
 
     # Gather some attributes of the input timeseries
@@ -864,33 +864,12 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
                            coreg_report[0]).read().split()[0],
                        func_to_anat_slices=coreg_report[1])
 
-    # Plug the values into the template for the pdf file
-    report_rst_text = preproc_report_template % report_dict
-
-    # Write the rst file and convert to pdf
-    report_pdf_rst_file = "preproc_pdf.rst"
-    report_pdf_file = op.abspath("preproc_report.pdf")
-    open(report_pdf_rst_file, "w").write(report_rst_text)
-    call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
-
-    # For images going into the html report, we want the path to be relative
-    # (We expect to read the html page from within the datasink directory
-    # containing the images.  So iteratate through and chop off leading path.
-    html_images = ["example_func_slices", "mean_func_slices", "intensity_plot",
-                   "displacement_plot", "rotation_plot", "translation_plot",
-                   "func_to_anat_slices"]
-    for img in html_images:
-        report_dict[img] = op.split(report_dict[img])[1]
-
-    # Write the another rst file and convert it to html
-    report_html_rst_file = "preproc_html.rst"
-    report_html_file = op.abspath("preproc_report.html")
-    report_rst_text = preproc_report_template % report_dict
-    open(report_html_rst_file, "w").write(report_rst_text)
-    call(["rst2html.py", report_html_rst_file, report_html_file])
+    # Write the reports (this is sterotyped for workflows from here
+    out_files = write_workflow_report("preproc",
+                                      preproc_report_template,
+                                      report_dict)
 
     # Return both report files as a list
-    out_files = [report_pdf_file, report_html_file]
     return out_files
 
 

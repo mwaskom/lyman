@@ -194,9 +194,8 @@ def create_ffx_mask(masks, background_file):
 
 
 def write_ffx_report(subject_id, mask_png, zstat_pngs, contrast):
-    import os.path as op
     import time
-    from subprocess import call
+    from tools import write_workflow_report
     from workflows.reporting import ffx_report_template
 
     # Fill in the report template dict
@@ -206,33 +205,10 @@ def write_ffx_report(subject_id, mask_png, zstat_pngs, contrast):
                        mask_png=mask_png,
                        zstat_png=zstat_pngs[0])
 
-    # Plug the values into the template for the pdf file
-    report_rst_text = ffx_report_template % report_dict
-
-    # Write the rst file and convert to pdf
-    report_pdf_rst_file = "ffx_report.rst"
-    report_pdf_file = op.abspath("ffx_report.pdf")
-    open(report_pdf_rst_file, "w").write(report_rst_text)
-    call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
-
-    # For images going into the html report, we want the path to be relative
-    # (We expect to read the html page from within the datasink directory
-    # containing the images.  So iteratate through and chop off leading path
-    # of anyhting ending in .png
-    for k, v in report_dict.items():
-        if v.endswith(".png"):
-            report_dict[k] = op.basename(v)
-
-    # Write the another rst file and convert it to html
-    report_html_rst_file = "ffx_html.rst"
-    report_html_file = op.abspath("ffx_report.html")
-    report_rst_text = ffx_report_template % report_dict
-    open(report_html_rst_file, "w").write(report_rst_text)
-    call(["rst2html.py", report_html_rst_file, report_html_file])
-
-    # Return both report files as a list
-    reports = [report_pdf_file, report_html_file]
-    return reports
+    out_files = write_workflow_report("ffx",
+                                      ffx_report_template,
+                                      report_dict)
+    return out_files
 
 
 def length(x):

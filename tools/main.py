@@ -189,3 +189,37 @@ def reg_template(contrast, mask_template, model_template):
 def reg_template_args(contrast, mask_args, model_args):
 
     return mask_args if contrast == "_mask" else model_args
+
+
+def write_workflow_report(workflow_name, report_template, report_dict):
+    from os.path import exists, basename
+    from subprocess import call
+
+    # Plug the values into the template for the pdf file
+    report_rst_text = report_template % report_dict
+
+    # Write the rst file and convert to pdf
+    report_pdf_rst_file = "preproc_pdf.rst"
+    report_pdf_file = op.abspath("preproc_report.pdf")
+    open(report_pdf_rst_file, "w").write(report_rst_text)
+    call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
+    if not exists(report_pdf_file):
+        raise RuntimeError
+
+    # For images going into the html report, we want the path to be relative
+    # (We expect to read the html page from within the datasink directory
+    # containing the images.  So iteratate through and chop off leading path.
+    report_dict = dict([(k, basename(v)) for k, v in report_dict.items()
+                             if v.endswith(".png")])
+
+    # Write the another rst file and convert it to html
+    report_html_rst_file = "%s_html.rst" % workflow_name
+    report_html_file = op.abspath("%s_report.html" % workflow_name)
+    report_rst_text = report_template % report_dict
+    open(report_html_rst_file, "w").write(report_rst_text)
+    call(["rst2html.py", report_html_rst_file, report_html_file])
+    if not exists(report_html_file):
+        raise RuntimeError
+
+    # Return both report files as a list
+    return [report_pdf_file, report_html_file]
