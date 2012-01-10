@@ -375,7 +375,7 @@ def main(arglist):
     # --------
 
     if project["rm_working_dir"]:
-        shutil.rmtree(op.join(work_dir_base))
+        shutil.rmtree(project["working_dir"])
 
 
 def gather_experiment_info(experiment_name, altmodel=None):
