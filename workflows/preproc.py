@@ -1,4 +1,10 @@
+"""Preprocessing workflow definition.
 
+See the docstring of create_preprocessing_workflow() for information
+about the workflow itself. This module contains the main setup
+function and assorted supporting functions for preprocessing.
+
+"""
 import nipype.interfaces.io as io
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
@@ -18,7 +24,10 @@ def create_preprocessing_workflow(name="preproc",
                                   TR=2,
                                   smooth_fwhm=6,
                                   highpass_sigma=32):
+    """Return a Nipype workflow for fMRI preprocessing.
 
+
+    """
     preproc = Workflow(name=name)
 
     # Define the inputs for the preprocessing workflow
