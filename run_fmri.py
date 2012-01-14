@@ -27,7 +27,7 @@ def main(arglist):
 
     # Get and process specific information
     project = tools.gather_project_info()
-    exp = gather_experiment_info(args.experiment)
+    exp = gather_experiment_info(args.experiment, args.altmodel)
 
     # Make sure some paths are set properly
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
@@ -48,6 +48,10 @@ def main(arglist):
     work_dir_base = op.join(project["working_dir"], exp_name)
     preproc_dir = op.join(project["analysis_dir"], args.experiment)
     crashdump_dir = "/tmp/%d" % time.time()
+
+    # This might not exist if we're running an altmodel
+    if not os.path.exists(anal_dir_base):
+        os.makedirs(anal_dir_base)
 
     # Preprocessing Workflow
     # ======================
@@ -115,7 +119,7 @@ def main(arglist):
                                                "mean_func",
                                                "realign_params",
                                                "timeseries"],
-                                    base_directory=anal_dir_base,
+                                    base_directory=preproc_dir,
                                     template="%s/preproc/run_*/%s",
                                     sort_filelist=True),
                         name="model_source")
@@ -200,7 +204,8 @@ def main(arglist):
               "source_image", "contrast_number", "nii.gz"]]}
 
     # There's a bit of a hack to pick up and register the mask correctly
-    mask_template = "%s/preproc/run_*/functional_mask.nii.gz"
+    mask_template = op.join(preproc_dir,
+                            "%s/preproc/run_*/functional_mask.nii.gz")
     mask_template_args = dict(source_image=[["subject_id"]])
 
     # Add options conditional on space
@@ -380,13 +385,14 @@ def main(arglist):
 
 def gather_experiment_info(experiment_name, altmodel=None):
     """Import an experiment module and add some formatted information."""
+    module_name = experiment_name
+    if altmodel is not None:
+        module_name = "-".join([experiment_name, altmodel])
     try:
-        if altmodel is not None:
-            experiment_name = "%s-%s" % (experiment_name, altmodel)
-        exp = __import__("experiments." + experiment_name,
+        exp = __import__("experiments." + module_name,
                          fromlist=["experiments"])
     except ImportError:
-        print "ERROR: Could not import experiments/%s.py" % experiment_name
+        print "ERROR: Could not import experiments/%s.py" % module_name
         sys.exit()
 
     # Create an experiment dict stripping the OOP hooks
@@ -395,6 +401,9 @@ def gather_experiment_info(experiment_name, altmodel=None):
 
     # Verify some experiment dict attributes
     verify_experiment_info(exp_dict)
+
+    # Save the __doc__ attribute to the dict
+    exp_dict["comments"] = exp.__doc__
 
     # Convert HPF cutoff to sigma for fslmaths
     exp_dict["TR"] = float(exp_dict["TR"])

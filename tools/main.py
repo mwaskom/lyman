@@ -209,8 +209,9 @@ def write_workflow_report(workflow_name, report_template, report_dict):
     # For images going into the html report, we want the path to be relative
     # (We expect to read the html page from within the datasink directory
     # containing the images.  So iteratate through and chop off leading path.
-    report_dict = dict([(k, basename(v)) for k, v in report_dict.items()
-                             if v.endswith(".png")])
+    for k, v in report_dict.items():
+        if v.endswith(".png"):
+            report_dict[k] = basename(v)
 
     # Write the another rst file and convert it to html
     report_html_rst_file = "%s_html.rst" % workflow_name
