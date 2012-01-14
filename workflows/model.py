@@ -249,7 +249,7 @@ def design_corr(in_file):
     X = np.loadtxt(in_file, skiprows=5)
     f = plt.figure(figsize=(5, 5))
     ax = f.add_subplot(111)
-    ax.matshow(np.corrcoef(X.T), vmin=-1, vmax=1)
+    ax.matshow(np.abs(np.corrcoef(X.T)), vmin=0, vmax=1, cmap="hot")
     ax.set_xticks([])
     ax.set_yticks([])
     out_file = abspath("design_correlation.png")

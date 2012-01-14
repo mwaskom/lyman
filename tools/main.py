@@ -199,8 +199,8 @@ def write_workflow_report(workflow_name, report_template, report_dict):
     report_rst_text = report_template % report_dict
 
     # Write the rst file and convert to pdf
-    report_pdf_rst_file = "preproc_pdf.rst"
-    report_pdf_file = op.abspath("preproc_report.pdf")
+    report_pdf_rst_file = "%s_pdf.rst" % workflow_name
+    report_pdf_file = op.abspath("%s_report.pdf" % workflow_name)
     open(report_pdf_rst_file, "w").write(report_rst_text)
     call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
     if not exists(report_pdf_file):
