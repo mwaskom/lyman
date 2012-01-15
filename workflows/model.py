@@ -42,7 +42,8 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
                         name="featmodel")
 
     # Generate a plot of regressor correlation
-    designcorr = MapNode(Function(input_names=["in_file"],
+    designcorr = MapNode(Function(input_names=["in_file",
+                                               "ev_files"],
                                   output_names=["out_file"],
                                   function=design_corr),
                          iterfield=["in_file"],
@@ -151,6 +152,8 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
             [("con_file", "tcon_file")]),
         (featmodel, designcorr,
             [("design_file", "in_file")]),
+        (level1design, designcorr,
+            [("ev_files", "ev_files")]),
         (featmodel, rename_design,
             [("design_image", "in_file")]),
         (modelestimate, plotresidual,
@@ -241,17 +244,24 @@ def build_model_info(subject_id, functional_runs, exp_info):
     return model_info
 
 
-def design_corr(in_file):
-    from os.path import abspath
+def design_corr(in_file, ev_files):
+    import re
+    from os.path import abspath, basename
     import numpy as np
     import matplotlib.pyplot as plt
-
     X = np.loadtxt(in_file, skiprows=5)
     f = plt.figure(figsize=(5, 5))
     ax = f.add_subplot(111)
     ax.matshow(np.abs(np.corrcoef(X.T)), vmin=0, vmax=1, cmap="hot")
-    ax.set_xticks([])
-    ax.set_yticks([])
+    run = int(re.match(r"run(\d).mat", basename(in_file)).group(1))
+    ev_files = ev_files[run]
+    pat = "ev_(\w+)_%d_\d+.txt" % run
+    ev_names = [re.match(pat, basename(f)).group(1) for f in ev_files]
+    ev_names = map(lambda x: x.lower(), ev_names)
+    ax.set_xticks(range(len(ev_names)))
+    ax.set_yticks(range(len(ev_names)))
+    ax.set_xticklabels(ev_names, fontsize=6, rotation="vertical")
+    ax.set_yticklabels(ev_names, fontsize=6)
     out_file = abspath("design_correlation.png")
     plt.savefig(out_file)
     return out_file
@@ -269,7 +279,6 @@ def plot_residual(resid_file, background_file):
     err_data = err_img.get_data()
     low = scoreatpercentile(err_data.ravel(), 2)
     high = scoreatpercentile(err_data.ravel(), 98)
-    print low, high
     n_slice = err_img.shape[-1]
     native = n_slice < 50  # arbitrary but should work fine
     width = 750 if native else 872
