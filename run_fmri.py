@@ -420,6 +420,9 @@ def gather_experiment_info(experiment_name, altmodel=None):
         exp_dict["contrasts"] = [exp_dict[key] for key in conkeys]
     exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
 
+    if "regressors" not in exp_dict:
+        exp_dict["regressors"] = []
+
     return exp_dict
 
 
