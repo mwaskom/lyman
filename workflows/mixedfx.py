@@ -3,11 +3,11 @@ from nipype.interfaces.utility import IdentityInterface
 from nipype.pipeline.engine import Node, MapNode, Workflow
 
 
-def create_mixed_effects_workflow(name="volume_group",
-                                  regressors=[], contrasts=[],
-                                  flame_mode="flame1",
-                                  overlay_thresh=(2.3, 4.265),
-                                  cluster_zthresh=2.3, grf_pthresh=0.05):
+def create_volume_mixedfx_workflow(name="volume_group",
+                                   regressors=[], contrasts=[],
+                                   flame_mode="flame1",
+                                   overlay_thresh=(2.3, 4.265),
+                                   cluster_zthresh=2.3, grf_pthresh=0.05):
 
     inputnode = Node(IdentityInterface(fields=["copes",
                                                "varcopes",

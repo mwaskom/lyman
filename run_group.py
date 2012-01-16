@@ -49,7 +49,7 @@ def main(arglist):
     # Subject source (no iterables here)
     subj_source = Node(IdentityInterface(fields=["subject_id"]),
                        name="subj_source")
-    subj_source.inputs.subject_id = args.subject
+    subj_source.inputs.subject_id = args.subjects
 
     # Subject level contrast source
     contrast_source = Node(IdentityInterface(fields=["l1_contrast"]),
@@ -57,7 +57,7 @@ def main(arglist):
                            name="contrast_source")
 
     # Mixed effects group workflow
-    mfx, mfx_input, mfx_output = wf.create_mixed_effects_workflow(
+    mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
         regressors=regressors, contrasts=contrasts)
 
     # Mixed effects inputs
