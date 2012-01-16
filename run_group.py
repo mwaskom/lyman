@@ -102,7 +102,7 @@ def main(arglist):
     mfx.config = dict(crashdump_dir=crashdump_dir)
 
     # Execute
-    tools.run_workflow(mfx)
+    tools.run_workflow(mfx, args=args)
 
     # Clean up
     if project["rm_working_dir"]:
