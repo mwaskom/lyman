@@ -94,7 +94,7 @@ class OutputWrapper(object):
         else:
             self.sink_node.inputs.substitutions = subj_subs
 
-    def sink_outputs(self, dir_name):
+    def sink_outputs(self, dir_name=""):
         """Connect the outputs of a workflow to a datasink."""
 
         outputs = self.out_node.outputs.get()

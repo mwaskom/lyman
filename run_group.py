@@ -90,7 +90,7 @@ def main(arglist):
 
     # Mixed effects outputs
     mfx_sink = Node(DataSink(base_directory=anal_dir_base + "/group",
-                             substitutions=[("/stats/", "/")],
+                             substitutions=[("/stats", "/")],
                              parameterization=False),
                     name="mfx_sink")
 
