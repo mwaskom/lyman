@@ -64,10 +64,10 @@ def main(arglist):
     mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/%s.nii.gz"
     mfx_source = MapNode(DataGrabber(infields=["subject_id",
                                                "l1_contrast"],
-                                  outfields=["copes", "varcopes", "dofs"],
-                                  base_directory=anal_dir_base,
-                                  template=mfx_template,
-                                  sort_filelist=True),
+                                     outfields=["copes", "varcopes", "dofs"],
+                                     base_directory=anal_dir_base,
+                                     template=mfx_template,
+                                     sort_filelist=True),
                       iterfield=["subject_id"],
                       name="mfx_source")
     mfx_source.inputs.template_args = dict(
@@ -75,11 +75,16 @@ def main(arglist):
         varcopes=[["subject_id", "l1_contrast", "varcope"]],
         dofs=[["subject_id", "l1_contrast", "tdof_t"]])
 
-    mfx_inwrap = tools.InputWrapper(mfx, subj_source,
-                                    mfx_source, mfx_input)
-    mfx_inwrap.connect_inputs()
-    mfx.connect(contrast_source, "l1_contrast",
-                mfx_source, "l1_contrast")
+    mfx.connect([
+        (contrast_source, mfx_source, 
+            [("l1_contrast", "l1_contrast")]),
+        (subj_source, mfx_source,
+            [("subject_id", "subject_it")]),
+        (mfx_source, mfx_input,
+            [("copes", "copes"),
+             ("varcopes", "varcopes"),
+             ("dofs", "dofs")]),
+             ])
 
     # Mixed effects outputs
     mfx_sink = Node(DataSink(base_directory=anal_dir_base,
