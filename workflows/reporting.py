@@ -133,3 +133,21 @@ Zstat Maps
     :width: 6.5in
 
 """
+
+mfx_report_template = """
+
+**************************
+Mixed Effects Model Report
+**************************
+
+**Report generated:** %(now)s
+
+**First-level contrast:** %(l1_contrast)s
+
+Number of subjects: %(n_subs)d
+
+Subjects included: %(subject_list)s
+
+Zstat Maps
+----------
+"""

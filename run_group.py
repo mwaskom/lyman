@@ -48,7 +48,6 @@ def main(arglist):
                        name="subj_source")
     subj_source.inputs.subject_id = subject_list
 
-
     # Set up the regressors and contrasts
     regressors = dict(group_mean=[1] * len(subject_list))
     contrasts = [["group_mean", "T", ["group_mean"], [1]]]
@@ -60,7 +59,7 @@ def main(arglist):
 
     # Mixed effects group workflow
     mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
-        regressors=regressors, contrasts=contrasts)
+        subject_list=subject_list, regressors=regressors, contrasts=contrasts)
 
     # Mixed effects inputs
     mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/%s1.nii.gz"
@@ -78,7 +77,9 @@ def main(arglist):
         dofs=[["subject_id", "l1_contrast", "tdof_t"]])
 
     mfx.connect([
-        (contrast_source, mfx_source, 
+        (contrast_source, mfx_source,
+            [("l1_contrast", "l1_contrast")]),
+        (contrast_source, mfx_input,
             [("l1_contrast", "l1_contrast")]),
         (subj_source, mfx_source,
             [("subject_id", "subject_id")]),
@@ -89,14 +90,15 @@ def main(arglist):
              ])
 
     # Mixed effects outputs
-    mfx_sink = Node(DataSink(base_directory=anal_dir_base + "/group",
+    mfx_sink = Node(DataSink(base_directory="%s/group/%s/" % (anal_dir_base,
+                                                              args.regspace),
                              substitutions=[("/stats", "/")],
                              parameterization=False),
                     name="mfx_sink")
 
     mfx_outwrap = tools.OutputWrapper(mfx, subj_source,
                                       mfx_sink, mfx_output)
-    mfx_outwrap.sink_outputs(args.regspace)
+    mfx_outwrap.sink_outputs()
     mfx.connect(contrast_source, "l1_contrast",
                 mfx_sink, "container")
 
