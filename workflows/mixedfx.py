@@ -23,7 +23,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
     mergedof = Node(fsl.Merge(dimension="t"),
                     name="mergedof")
 
-    design = Node(fsl.MultipleRegressDesign(),
+    design = Node(fsl.MultipleRegressDesign(regressors=regressors,
+                                            contrasts=contrasts),
                   name="design")
 
     brain_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")

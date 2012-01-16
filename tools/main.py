@@ -227,7 +227,7 @@ def make_subject_source(subject_list):
 def run_workflow(wf, name=None, args=None):
     """Run a workflow, if we asked to do so on the command line."""
     plugin, plugin_args = determine_engine(args)
-    if name in args.workflows or name is None:
+    if name is None or name in args.workflows:
         wf.run(plugin, plugin_args)
 
 

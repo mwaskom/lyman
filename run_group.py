@@ -42,14 +42,16 @@ def main(arglist):
     work_dir_base = op.join(project["working_dir"], exp_name)
     crashdump_dir = "/tmp/%d" % time.time()
 
-    # Set up the regressors and contrasts
-    regressors = dict(group_mean=[1] * len(args.subjects))
-    contrasts = ["group_mean", "T", ["group_mean"], [1]]
-
     # Subject source (no iterables here)
+    subject_list = tools.determine_subjects(args.subjects)
     subj_source = Node(IdentityInterface(fields=["subject_id"]),
                        name="subj_source")
-    subj_source.inputs.subject_id = args.subjects
+    subj_source.inputs.subject_id = subject_list
+
+
+    # Set up the regressors and contrasts
+    regressors = dict(group_mean=[1] * len(subject_list))
+    contrasts = [["group_mean", "T", ["group_mean"], [1]]]
 
     # Subject level contrast source
     contrast_source = Node(IdentityInterface(fields=["l1_contrast"]),
@@ -61,7 +63,7 @@ def main(arglist):
         regressors=regressors, contrasts=contrasts)
 
     # Mixed effects inputs
-    mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/%s.nii.gz"
+    mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/%s1.nii.gz"
     mfx_source = MapNode(DataGrabber(infields=["subject_id",
                                                "l1_contrast"],
                                      outfields=["copes", "varcopes", "dofs"],
@@ -79,7 +81,7 @@ def main(arglist):
         (contrast_source, mfx_source, 
             [("l1_contrast", "l1_contrast")]),
         (subj_source, mfx_source,
-            [("subject_id", "subject_it")]),
+            [("subject_id", "subject_id")]),
         (mfx_source, mfx_input,
             [("copes", "copes"),
              ("varcopes", "varcopes"),
@@ -87,13 +89,14 @@ def main(arglist):
              ])
 
     # Mixed effects outputs
-    mfx_sink = Node(DataSink(base_directory=anal_dir_base,
+    mfx_sink = Node(DataSink(base_directory=anal_dir_base + "/group",
+                             substitutions=[("/stats/", "/")],
                              parameterization=False),
                     name="mfx_sink")
 
     mfx_outwrap = tools.OutputWrapper(mfx, subj_source,
                                       mfx_sink, mfx_output)
-    mfx_outwrap.sink_outputs("group.%s" % args.regspace)
+    mfx_outwrap.sink_outputs(args.regspace)
     mfx.connect(contrast_source, "l1_contrast",
                 mfx_sink, "container")
 
