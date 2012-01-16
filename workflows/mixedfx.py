@@ -74,7 +74,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                                 "thresh_zstat",
                                                 "cluster_image",
                                                 "cluster_peaks",
-                                                "stat_png"]),
+                                                "stat_png",
+                                                "reports"]),
                       name="outputnode")
 
     group_anal = Workflow(name=name)
@@ -113,6 +114,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("out_file", "stat_png")]),
         (slicer, report,
             [("out_file", "zstat_pngs")]),
+        (report, outputnode,
+            [("reports", "report")]),
         (cluster, outputnode,
             [("threshold_file", "thresh_zstat"),
              ("index_file", "cluster_image"),
