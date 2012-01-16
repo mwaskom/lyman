@@ -282,3 +282,23 @@ def write_workflow_report(workflow_name, report_template, report_dict):
 
     # Return both report files as a list
     return [report_pdf_file, report_html_file]
+
+def localmax_to_rst(localmax_file):
+    """Write a rst table from an FSL cluster localmax text file.
+
+    Right now just handle the dump to a literal block. When I'm feeling
+    more adventurous, this will write an actual rst table.
+
+    """
+    tbl_hdr = ["",
+               "Local Maxima",
+               "^^^^^^^^^^^^",
+               "",
+               "::",
+               "",
+               "\tIndex   Z\tx\ty\tz"]
+
+    tbl_txt = ["\t%s" % l.strip() for l in
+        open(localmax_file).readlines()[1:]]
+    max_table = "\n".join(tbl_hdr + tbl_txt + [""])
+    return max_table

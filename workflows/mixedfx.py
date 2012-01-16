@@ -43,7 +43,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                   pthreshold=0.05,
                                   out_threshold_file=True,
                                   out_index_file=True,
-                                  out_localmax_txt_file=True),
+                                  out_localmax_txt_file=True,
+                                  use_mm=True),
                       iterfield=["in_file", "dlh", "volume"],
                       name="cluster")
 
@@ -133,7 +134,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
 def write_mfx_report(subject_list, l1_contrast,
                      zstat_pngs, localmax_files, contrasts):
     import time
-    from tools import write_workflow_report
+    from tools import write_workflow_report, localmax_to_rst
     from workflows.reporting import mfx_report_template
 
     # Fill in the initial report template dict
@@ -143,10 +144,10 @@ def write_mfx_report(subject_list, l1_contrast,
                        n_subs=len(subject_list))
 
     # Add the zstat image templates and update the dict
-    for i, con in enumerate([c[0] for c in contrasts], 1):
-        report_dict["con%d_name" % i] = con
+    for i, con in enumerate(contrasts, 1):
+        report_dict["con%d_name" % i] = con[0]
         report_dict["zstat%d_png" % i] = zstat_pngs[i - 1]
-        header = "Zstat %d: %s" % (i, con)
+        header = "Zstat %d: %s" % (i, con[0])
         mfx_report_template = "\n".join(
             [mfx_report_template,
              header,
@@ -154,19 +155,8 @@ def write_mfx_report(subject_list, l1_contrast,
              "",
              "".join([".. image:: %(zstat", str(i), "_png)s"]),
              "    :width: 6.5in",
+             localmax_to_rst(localmax_files[i - 1]),
              ""])
-
-        max_table_list = [
-        "===== ===== === === ===",
-        "Index Max Z x   y   z",
-        "----- ----- --- --- ---"]
-        max_table_list.extend(
-            [l.strip() for l in open(localmax_files[i]).readlines()])
-        max_table_list.append(
-        "===== ===== === === ===")
-        max_table = "\n".join(max_table_list)
-        mfx_report_template = "\n".join(
-            [mfx_report_template, max_table])
 
     out_files = write_workflow_report("mfx",
                                       mfx_report_template,
