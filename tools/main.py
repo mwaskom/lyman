@@ -94,13 +94,14 @@ class OutputWrapper(object):
         else:
             self.sink_node.inputs.substitutions = subj_subs
 
-    def sink_outputs(self, dir_name):
+    def sink_outputs(self, dir_name=None):
         """Connect the outputs of a workflow to a datasink."""
 
         outputs = self.out_node.outputs.get()
+        prefix = "@" if dir_name is None else dir_name + ".@"
         for field in outputs:
             self.wf.connect(self.out_node, field,
-                            self.sink_node, dir_name + ".@" + field)
+                            self.sink_node, prefix + field)
 
 
 def find_mapnodes(workflow):
