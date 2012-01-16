@@ -144,9 +144,9 @@ Mixed Effects Model Report
 
 **First-level contrast:** %(l1_contrast)s
 
-Number of subjects: %(n_subs)d
+**Number of subjects:** %(n_subs)d
 
-Subjects included: %(subject_list)s
+**Subjects included:** %(subject_list)s
 
 Zstat Maps
 ----------
