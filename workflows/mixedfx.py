@@ -54,7 +54,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                       iterfield=["stat_image"],
                       name="overlay")
 
-    slicer = MapNode(fsl.Slicer(image_width=991),
+    slicer = MapNode(fsl.Slicer(image_width=872),
                      iterfield=["in_file"],
                      name="slicer")
     slicer.inputs.sample_axial = 2
@@ -63,6 +63,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
     report = Node(Function(input_names=["subject_list",
                                         "l1_contrast",
                                         "zstat_pngs",
+                                        "localmax_files",
                                         "contrasts"],
                               output_names=["reports"],
                               function=write_mfx_report),
@@ -114,6 +115,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("out_file", "stat_png")]),
         (slicer, report,
             [("out_file", "zstat_pngs")]),
+        (cluster, report,
+            [("localmax_txt_file", "localmax_files")]),
         (report, outputnode,
             [("reports", "reports")]),
         (cluster, outputnode,
@@ -127,7 +130,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
     return group_anal, inputnode, outputnode
 
 
-def write_mfx_report(subject_list, l1_contrast, zstat_pngs, contrasts):
+def write_mfx_report(subject_list, l1_contrast,
+                     zstat_pngs, localmax_files, contrasts):
     import time
     from tools import write_workflow_report
     from workflows.reporting import mfx_report_template
@@ -151,6 +155,18 @@ def write_mfx_report(subject_list, l1_contrast, zstat_pngs, contrasts):
              "".join([".. image:: %(zstat", str(i), "_png)s"]),
              "    :width: 6.5in",
              ""])
+
+        max_table_list = [
+        "===== ===== === === ===",
+        "Index Max Z x   y   z",
+        "----- ----- --- --- ---"]
+        max_table_list.extend(
+            [l.strip() for l in open(localmax_files[i]).readlines()])
+        max_table_list.append(
+        "===== ===== === === ===")
+        max_table = "\n".join(max_table_list)
+        mfx_report_template = "\n".join(
+            [mfx_report_template, max_table])
 
     out_files = write_workflow_report("mfx",
                                       mfx_report_template,
