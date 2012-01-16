@@ -1,8 +1,6 @@
-import os
 import re
 import sys
 import os.path as op
-from datetime import datetime
 
 import numpy as np
 import networkx as nx
@@ -144,6 +142,58 @@ def gather_project_info():
     print "You must run setup_project.py before using the analysis scripts."
     sys.exit()
 
+def gather_experiment_info(experiment_name, altmodel=None):
+    """Import an experiment module and add some formatted information."""
+    module_name = experiment_name
+    if altmodel is not None:
+        module_name = "-".join([experiment_name, altmodel])
+    try:
+        exp = __import__("experiments." + module_name,
+                         fromlist=["experiments"])
+    except ImportError:
+        print "ERROR: Could not import experiments/%s.py" % module_name
+        sys.exit()
+
+    # Create an experiment dict stripping the OOP hooks
+    exp_dict = dict(
+        [(k, v) for k, v in exp.__dict__.items() if not re.match("__.*__", k)])
+
+    # Verify some experiment dict attributes
+    verify_experiment_info(exp_dict)
+
+    # Save the __doc__ attribute to the dict
+    exp_dict["comments"] = exp.__doc__
+
+    # Convert HPF cutoff to sigma for fslmaths
+    exp_dict["TR"] = float(exp_dict["TR"])
+    exp_dict["hpf_cutoff"] = float(exp_dict["hpf_cutoff"])
+    exp_dict["hpf_sigma"] = (exp_dict["hpf_cutoff"] / 2.35) / exp_dict["TR"]
+
+    # Setup the hrf_bases dictionary
+    exp_dict["hrf_bases"] = {exp_dict["hrf_model"]:
+                                {"derivs": exp_dict["hrf_derivs"]}}
+
+    # Build contrasts list if neccesary
+    if "contrasts" not in exp_dict:
+        conkeys = sorted([k for k in exp_dict if re.match("cont\d+", k)])
+        exp_dict["contrasts"] = [exp_dict[key] for key in conkeys]
+    exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
+
+    if "regressors" not in exp_dict:
+        exp_dict["regressors"] = []
+
+    return exp_dict
+
+
+def verify_experiment_info(exp_dict):
+    """Catch setup errors that might lead to confusing workflow crashes."""
+    if exp_dict["units"] not in ["secs", "scans"]:
+        raise ValueError("units must be 'secs' or 'scans'")
+
+    if (exp_dict["slice_time_correction"]
+        and exp_dict["slice_order"] not in ["up", "down"]):
+        raise ValueError("slice_order must be 'up' or 'down'")
+
 
 def determine_subjects(subject_arg):
 
@@ -172,6 +222,13 @@ def make_subject_source(subject_list):
                 iterables=("subject_id", subject_list),
                 overwrite=True,
                 name="subj_source")
+
+
+def run_workflow(wf, name=None, args=None):
+    """Run a workflow, if we asked to do so on the command line."""
+    plugin, plugin_args = determine_engine(args)
+    if name in args.workflows or name is None:
+        wf.run(plugin, plugin_args)
 
 
 def find_contrast_number(contrast_name, contrast_names):

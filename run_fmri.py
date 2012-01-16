@@ -4,7 +4,6 @@ Main execution script for fMRI analysis in the Lyman ecosystem.
 
 """
 import os
-import re
 import sys
 import time
 import shutil
@@ -27,7 +26,7 @@ def main(arglist):
 
     # Get and process specific information
     project = tools.gather_project_info()
-    exp = gather_experiment_info(args.experiment, args.altmodel)
+    exp = tools.gather_experiment_info(args.experiment, args.altmodel)
 
     # Make sure some paths are set properly
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
@@ -101,7 +100,7 @@ def main(arglist):
     preproc.config = dict(crashdump_dir=crashdump_dir)
 
     # Possibly execute the workflow, depending on the command line
-    run_workflow(preproc, "preproc", args)
+    tools.run_workflow(preproc, "preproc", args)
 
     # Timeseries Model
     # ================
@@ -147,7 +146,7 @@ def main(arglist):
     model.config = dict(crashdump_dir=crashdump_dir)
 
     # Possibly execute the workflow
-    run_workflow(model, "model", args)
+    tools.run_workflow(model, "model", args)
 
     # Across-Run Registration
     # =======================
@@ -286,7 +285,7 @@ def main(arglist):
     reg.config = dict(crashdump_dir=crashdump_dir)
 
     # Possibly run registration workflow and clean up
-    run_workflow(reg, "reg", args)
+    tools.run_workflow(reg, "reg", args)
 
     # Cross-Run Fixed Effects Model
     # -----------------------------
@@ -374,73 +373,13 @@ def main(arglist):
     ffx.config = dict(crashdump_dir=crashdump_dir)
 
     # Possibly run fixed effects workflow
-    run_workflow(ffx, "ffx", args)
+    tools.run_workflow(ffx, "ffx", args)
 
     # Clean-up
     # --------
 
     if project["rm_working_dir"]:
         shutil.rmtree(project["working_dir"])
-
-
-def gather_experiment_info(experiment_name, altmodel=None):
-    """Import an experiment module and add some formatted information."""
-    module_name = experiment_name
-    if altmodel is not None:
-        module_name = "-".join([experiment_name, altmodel])
-    try:
-        exp = __import__("experiments." + module_name,
-                         fromlist=["experiments"])
-    except ImportError:
-        print "ERROR: Could not import experiments/%s.py" % module_name
-        sys.exit()
-
-    # Create an experiment dict stripping the OOP hooks
-    exp_dict = dict(
-        [(k, v) for k, v in exp.__dict__.items() if not re.match("__.*__", k)])
-
-    # Verify some experiment dict attributes
-    verify_experiment_info(exp_dict)
-
-    # Save the __doc__ attribute to the dict
-    exp_dict["comments"] = exp.__doc__
-
-    # Convert HPF cutoff to sigma for fslmaths
-    exp_dict["TR"] = float(exp_dict["TR"])
-    exp_dict["hpf_cutoff"] = float(exp_dict["hpf_cutoff"])
-    exp_dict["hpf_sigma"] = (exp_dict["hpf_cutoff"] / 2.35) / exp_dict["TR"]
-
-    # Setup the hrf_bases dictionary
-    exp_dict["hrf_bases"] = {exp_dict["hrf_model"]:
-                                {"derivs": exp_dict["hrf_derivs"]}}
-
-    # Build contrasts list if neccesary
-    if "contrasts" not in exp_dict:
-        conkeys = sorted([k for k in exp_dict if re.match("cont\d+", k)])
-        exp_dict["contrasts"] = [exp_dict[key] for key in conkeys]
-    exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
-
-    if "regressors" not in exp_dict:
-        exp_dict["regressors"] = []
-
-    return exp_dict
-
-
-def verify_experiment_info(exp_dict):
-    """Catch setup errors that might lead to confusing workflow crashes."""
-    if exp_dict["units"] not in ["secs", "scans"]:
-        raise ValueError("units must be 'secs' or 'scans'")
-
-    if (exp_dict["slice_time_correction"]
-        and exp_dict["slice_order"] not in ["up", "down"]):
-        raise ValueError("slice_order must be 'up' or 'down'")
-
-
-def run_workflow(wf, name, args):
-    """Run a workflow, if we asked to do so on the command line."""
-    plugin, plugin_args = tools.determine_engine(args)
-    if name in args.workflows:
-        wf.run(plugin, plugin_args)
 
 
 def parse_args(arglist):
