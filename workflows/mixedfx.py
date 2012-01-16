@@ -132,7 +132,7 @@ def write_mfx_report(subject_list, l1_contrast, zstat_pngs, contrasts):
     # Fill in the initial report template dict
     report_dict = dict(now=time.asctime(),
                        l1_contrast=l1_contrast,
-                       subject_list_=", ".join(subject_list),
+                       subject_list=", ".join(subject_list),
                        n_subs=len(subject_list))
 
     # Add the zstat image templates and update the dict
