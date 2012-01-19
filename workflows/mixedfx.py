@@ -1,6 +1,7 @@
 from nipype.interfaces import fsl
 from nipype.interfaces.utility import IdentityInterface, Function
 from nipype.pipeline.engine import Node, MapNode, Workflow
+import tools
 
 
 def create_volume_mixedfx_workflow(name="volume_group",
@@ -60,11 +61,24 @@ def create_volume_mixedfx_workflow(name="volume_group",
                      name="slicer")
     slicer.inputs.sample_axial = 2
 
+    boxplot = MapNode(Function(input_names=["cope_file", "localmax_file"],
+                               output_names=["out_file"],
+                               function="mfx_boxplot"),
+                      iterfield=["localmax_file"],
+                      name="boxplot")
+
+    peaktable = MapNode(Function(inputnames=["localmax_file"],
+                                 outputnames=["out_file"],
+                                 function=tools.cluster_to_rst),
+                        iterfield=["localmax_file"],
+                        name="peaktable")
+
     # Build pdf and html reports
     report = Node(Function(input_names=["subject_list",
                                         "l1_contrast",
                                         "zstat_pngs",
-                                        "localmax_files",
+                                        "boxplots",
+                                        "peak_tables",
                                         "contrasts"],
                               output_names=["reports"],
                               function=write_mfx_report),
@@ -76,7 +90,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                                 "thresh_zstat",
                                                 "cluster_image",
                                                 "cluster_peaks",
-                                                "stat_png",
+                                                "boxplots",
                                                 "reports"]),
                       name="outputnode")
 
@@ -108,6 +122,12 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("volume", "volume")]),
         (flameo, cluster,
             [("zstats", "in_file")]),
+        (mergecope, boxplot,
+            [("merged_file", "cope_file")]),
+        (cluster, boxplot,
+            [("localmax_txt_file", "localmax_file")]),
+        (cluster, peaktable,
+            [("localmax_txt_file", "localmax_file")]),
         (cluster, overlay,
             [("threshold_file", "stat_image")]),
         (overlay, slicer,
@@ -118,12 +138,18 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("out_file", "zstat_pngs")]),
         (cluster, report,
             [("localmax_txt_file", "localmax_files")]),
+        (boxplot, report,
+            [("out_file", "boxplots")]),
+        (peaktable, report,
+            [("out_file", "peak_table")]),
         (report, outputnode,
             [("reports", "reports")]),
         (cluster, outputnode,
             [("threshold_file", "thresh_zstat"),
              ("index_file", "cluster_image"),
              ("localmax_txt_file", "cluster_peaks")]),
+        (boxplot, outputnode,
+            [("out_file", "boxplots")]),
         (flameo, outputnode,
             [("stats_dir", "flameo_stats")])
         ])
@@ -131,10 +157,46 @@ def create_volume_mixedfx_workflow(name="volume_group",
     return group_anal, inputnode, outputnode
 
 
+def mfx_boxplot(cope_file, localmax_file):
+    """Plot the distribution of fixed effects COPEs at each local maximum."""
+    from os.path import abspath
+    from nibabel import load
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    out_file = abspath("peak_boxplot.png")
+    peak_array = np.loadtxt(localmax_file, int, skiprows=1)
+
+    if not peak_array.any():
+        # If there wre no significant peaks, return an empty text file
+        with open(out_file, "w") as f:
+            f.write("")
+        return out_file
+
+    cope_data = load(cope_file).get_data()
+    peak_dists = []
+    for coords in peak_array[:, 2:5]:
+        peak_dists.append(cope_data[tuple(coords)])
+    peak_dists.reverse()
+    n_peaks = len(peak_dists)
+    fig = plt.figure(figsize=(7, n_peaks))
+    ax = fig.add_subplot(111)
+    ax.boxplot(peak_dists, vert=0, widths=0.5)
+    labels = range(1, n_peaks + 1)
+    labels.reverse()
+    ax.set_yticklabels(labels)
+    ax.set_ylabel("Local Maximum")
+    ax.set_xlabel("COPE Value")
+    ax.set_title("COPE Distributions")
+    fig.savefig(out_file)
+
+    return out_file
+
+
 def write_mfx_report(subject_list, l1_contrast,
-                     zstat_pngs, localmax_files, contrasts):
+                     zstat_pngs, peak_tables, boxplots, contrasts):
     import time
-    from tools import write_workflow_report, localmax_to_rst
+    from tools import write_workflow_report
     from workflows.reporting import mfx_report_template
 
     # Fill in the initial report template dict
@@ -147,16 +209,36 @@ def write_mfx_report(subject_list, l1_contrast,
     for i, con in enumerate(contrasts, 1):
         report_dict["con%d_name" % i] = con[0]
         report_dict["zstat%d_png" % i] = zstat_pngs[i - 1]
+        report_dict["boxplot%d_png" % i] = boxplots[i - 1]
         header = "Zstat %d: %s" % (i, con[0])
-        mfx_report_template = "\n".join(
-            [mfx_report_template,
+        mfx_report_template = "\n".join([
+             mfx_report_template,
              header,
              "".join(["^" for l in header]),
              "",
              "".join([".. image:: %(zstat", str(i), "_png)s"]),
              "    :width: 6.5in",
-             localmax_to_rst(localmax_files[i - 1]),
-             ""])
+             "",
+             "Local Maxima",
+             "^^^^^^^^^^^^",
+             "",
+             "::",
+             ])
+        mfx_report_template = "\n".join([
+             mfx_report_template,
+             open(peak_tables).read()])
+
+        mfx_report_template = "\n".join([
+            mfx_report_template,
+            "\n".join([
+                "",
+                "COPE Distributions",
+                "^^^^^^^^^^^^^^^^^^",
+                "",
+                "".join([".. image:: %(boxplot", str(i), "_png)s"]),
+                "",
+                ])
+            ])
 
     out_files = write_workflow_report("mfx",
                                       mfx_report_template,
