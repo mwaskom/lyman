@@ -143,6 +143,7 @@ def gather_project_info():
     print "You must run setup_project.py before using the analysis scripts."
     sys.exit()
 
+
 def gather_experiment_info(experiment_name, altmodel=None):
     """Import an experiment module and add some formatted information."""
     module_name = experiment_name
@@ -283,22 +284,170 @@ def write_workflow_report(workflow_name, report_template, report_dict):
     # Return both report files as a list
     return [report_pdf_file, report_html_file]
 
-def localmax_to_rst(localmax_file):
-    """Write a rst table from an FSL cluster localmax text file.
 
-    Right now just handle the dump to a literal block. When I'm feeling
-    more adventurous, this will write an actual rst table.
+def cluster_to_rst(localmax_file):
+    """Convert the localmax text file from Cluster to RST formatting.
+
+    Also convert the voxel coordinates to MNI coordinates and add in
+    the most likely location and probability from Harvard Oxford atlas.
 
     """
-    tbl_hdr = ["",
-               "Local Maxima",
-               "^^^^^^^^^^^^",
-               "",
-               "::",
-               "",
-               "\tIndex   Z\tx\ty\tz"]
+    from os.path import abspath
+    import numpy as np
+    from . import vox_to_mni, locate_peaks
 
-    tbl_txt = ["\t%s" % l.strip() for l in
-        open(localmax_file).readlines()[1:]]
-    max_table = "\n".join(tbl_hdr + tbl_txt + [""])
-    return max_table
+    # Localmax files seem to be badly formed
+    # So geting them into array form is pretty annoying
+    with open(localmax_file) as f:
+        clust_head = f.readline().split()[:-1]
+    clust_a = np.loadtxt(localmax_file, str,
+                        delimiter="\t", skiprows=1)
+    clust_a = np.vstack((clust_head, clust_a))
+    clust_a[0, 0] = "Cluster"
+    index_v = np.atleast_2d(np.array(
+        ["Peak"] + range(1, clust_a.shape[0]))).T
+    clust_a = np.hstack((index_v, clust_a))
+
+    # Find out where the peaks most likely are
+    loc_a = np.array(locate_peaks(clust_a[1:, 3:6].astype(int)))
+    peak_a = np.hstack((clust_a, loc_a))
+
+    # Convert the voxel coordinates to MNI
+    vox_coords = peak_a[1:, 3:6]
+    peak_a[1:, 3:6] = vox_to_mni(vox_coords)
+
+    # Insert the column-defining dash rows
+    len_a = np.array([[len(c) for c in r] for r in peak_a])
+    max_lens = len_a.max(axis=0)
+    hyphen_v = ["".join(["-" for i in range(l)]) for l in max_lens]
+    peak_l = peak_a.tolist()
+    for pos in [0, 2]:
+        peak_l.insert(pos, hyphen_v)
+    peak_l.append(hyphen_v)
+    peak_a = np.array(peak_l)
+
+    # Write the rows out to a text file with padding
+    out_file = abspath("localmax_table.txt")
+    len_a = np.array([[len(c) for c in r] for r in peak_a])
+    len_diff = max_lens - len_a
+    pad_a = np.array(
+        [["".join([" " for i in range(l)]) for l in row] for row in len_diff])
+    with open(out_file, "w") as f:
+        for i, row in enumerate(peak_a):
+            for j, word in enumerate(row):
+                f.write("%s%s " % (word, pad_a[i, j]))
+            f.write("\n")
+
+    return out_file
+
+
+def locate_peaks(vox_coords):
+    from os import environ
+    import os.path as op
+    import numpy as np
+    from lxml import etree
+    from nibabel import load
+    from . import shorten_name
+    at_dir = op.join(environ["FSLDIR"], "data", "atlases")
+    ctx_xml = op.join(at_dir, "HarvardOxford-Cortical.xml")
+    ctx_labels = etree.parse(ctx_xml).find("data").findall("label")
+    sub_xml = op.join(at_dir, "HarvardOxford-SubCortical.xml")
+    sub_labels = etree.parse(sub_xml).find("data").findall("label")
+    ctx_data = load(op.join(at_dir, "HarvardOxford",
+                            "HarvardOxford-cort-prob-2mm.nii.gz")).get_data()
+    sub_data = load(op.join(at_dir, "HarvardOxford",
+                            "HarvardOxford-sub-prob-2mm.nii.gz")).get_data()
+
+    loc_list = []
+    for coord in vox_coords:
+        coord = tuple(coord)
+        ctx_index = np.argmax(ctx_data[coord])
+        ctx_prob = ctx_data[coord][ctx_index]
+        sub_index = np.argmax(sub_data[coord])
+        sub_prob = ctx_data[coord][sub_index]
+
+        if not max(sub_prob, ctx_prob):
+            loc_list.append(("Unknown", 0))
+            continue
+        if sub_prob > ctx_prob and sub_index not in [1, 12]:
+            loc_list.append(
+                (shorten_name(sub_labels[sub_index].text, "sub"), sub_prob))
+            continue
+        loc_list.append(
+            (shorten_name(ctx_labels[ctx_index].text, "ctx"), ctx_prob))
+    loc_list.insert(0, ("MaxProb Region", "Prob"))
+
+    return loc_list
+
+
+def shorten_name(region_name, atlas):
+    import re
+    from . import (harvard_oxford_ctx_subs,
+                   harvard_oxford_sub_subs)
+    sub_list = dict(ctx=harvard_oxford_ctx_subs,
+                    sub=harvard_oxford_sub_subs)
+    for pat, rep in sub_list[atlas]:
+        region_name = re.sub(pat, rep, region_name)
+    return region_name
+
+
+def vox_to_mni(vox_coords):
+    import numpy as np
+    from nibabel import load
+    from nipype.interfaces.fsl import Info
+
+    mni_file = Info.standard_image("avg152T1.nii.gz")
+    aff = load(mni_file).get_affine()
+    for i, coord in enumerate(vox_coords):
+        coord = coord.astype(float)
+        vox_coords[i] = np.dot(aff, np.r_[coord, 1])[:3].astype(int)
+    return vox_coords
+
+harvard_oxford_sub_subs = [
+    ("Left", "L"),
+    ("Right", "R"),
+    ("Cerebral Cortex", "Ctx"),
+    ("Cerebral White Matter", "Cereb WM"),
+    ("Lateral Ventrica*le*", "LatVent"),
+]
+
+harvard_oxford_ctx_subs = [
+    ("Superior", "Sup"),
+    ("Middle", "Mid"),
+    ("Inferior", "Inf"),
+    ("Lateral", "Lat"),
+    ("Medial", "Med"),
+    ("Frontal", "Front"),
+    ("Parietal", "Par"),
+    ("Temporal", "Temp"),
+    ("Occipital", "Occ"),
+    ("Cingulate", "Cing"),
+    ("Cortex", "Ctx"),
+    ("Gyrus", "G"),
+    ("Sup Front G", "SFG"),
+    ("Mid Front G", "MFG"),
+    ("Inf Front G", "IFG"),
+    ("Sup Temp G", "STG"),
+    ("Mid Temp G", "MTG"),
+    ("Inf Temp G", "ITG"),
+    ("Parahippocampal", "Parahip"),
+    ("Juxtapositional", "Juxt"),
+    ("Intracalcarine", "Intracalc"),
+    ("Supramarginal", "Supramarg"),
+    ("Supracalcarine", "Supracalc"),
+    ("Paracingulate", "Paracing"),
+    ("Fusiform", "Fus"),
+    ("Orbital", "Orb"),
+    ("Opercul[ua][mr]", "Oper"),
+    ("temporooccipital", "tempocc"),
+    ("triangularis", "triang"),
+    ("opercularis", "oper"),
+    ("division", ""),
+    ("par[st] *", ""),
+    ("anterior", "ant"),
+    ("posterior", "post"),
+    ("superior", "sup"),
+    ("inferior", "inf"),
+    (" +", " "),
+    ("\(.+\)", ""),
+]
