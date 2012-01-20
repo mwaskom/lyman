@@ -394,7 +394,7 @@ def shorten_name(region_name, atlas):
     sub_list = dict(ctx=harvard_oxford_ctx_subs,
                     sub=harvard_oxford_sub_subs)
     for pat, rep in sub_list[atlas]:
-        region_name = re.sub(pat, rep, region_name)
+        region_name = re.sub(pat, rep, region_name).strip()
     return region_name
 
 
@@ -405,10 +405,11 @@ def vox_to_mni(vox_coords):
 
     mni_file = Info.standard_image("avg152T1.nii.gz")
     aff = load(mni_file).get_affine()
+    mni_coords = np.zeros_like(vox_coords)
     for i, coord in enumerate(vox_coords):
         coord = coord.astype(float)
-        vox_coords[i] = np.dot(aff, np.r_[coord, 1])[:3].astype(int)
-    return vox_coords
+        mni_coords[i] = np.dot(aff, np.r_[coord, 1])[:3].astype(int)
+    return mni_coords
 
 harvard_oxford_sub_subs = [
     ("Left", "L"),
