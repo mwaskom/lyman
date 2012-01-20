@@ -181,6 +181,7 @@ def mfx_boxplot(cope_file, localmax_file):
     fig = plt.figure(figsize=(7, float(n_peaks) / 2 + 0.5))
     ax = fig.add_subplot(111)
     ax.boxplot(peak_dists, vert=0, widths=0.5)
+    ax.plot([0, 0], ax.ylim(), "c--")
     labels = range(1, n_peaks + 1)
     labels.reverse()
     ax.set_yticklabels(labels)
