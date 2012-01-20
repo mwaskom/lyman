@@ -294,16 +294,21 @@ def cluster_to_rst(localmax_file):
     """
     from os.path import abspath
     import numpy as np
-    from . import vox_to_mni, locate_peaks
+    from tools import vox_to_mni, locate_peaks
 
+    out_file = abspath("localmax_table.txt")
     # Localmax files seem to be badly formed
     # So geting them into array form is pretty annoying
     with open(localmax_file) as f:
-        clust_head = f.readline().split()[:-1]
+        clust_head = f.readline().split()
+        _ = clust_head.pop(1)
     clust_a = np.loadtxt(localmax_file, str,
                         delimiter="\t", skiprows=1)
+    if not clust_a.size:
+        with open(out_file, "w") as f:
+            f.write("")
+        return out_file
     clust_a = np.vstack((clust_head, clust_a))
-    clust_a[0, 0] = "Cluster"
     index_v = np.atleast_2d(np.array(
         ["Peak"] + range(1, clust_a.shape[0]))).T
     clust_a = np.hstack((index_v, clust_a))
@@ -319,7 +324,7 @@ def cluster_to_rst(localmax_file):
     # Insert the column-defining dash rows
     len_a = np.array([[len(c) for c in r] for r in peak_a])
     max_lens = len_a.max(axis=0)
-    hyphen_v = ["".join(["-" for i in range(l)]) for l in max_lens]
+    hyphen_v = ["".join(["=" for i in range(l)]) for l in max_lens]
     peak_l = peak_a.tolist()
     for pos in [0, 2]:
         peak_l.insert(pos, hyphen_v)
@@ -327,7 +332,6 @@ def cluster_to_rst(localmax_file):
     peak_a = np.array(peak_l)
 
     # Write the rows out to a text file with padding
-    out_file = abspath("localmax_table.txt")
     len_a = np.array([[len(c) for c in r] for r in peak_a])
     len_diff = max_lens - len_a
     pad_a = np.array(
@@ -347,7 +351,7 @@ def locate_peaks(vox_coords):
     import numpy as np
     from lxml import etree
     from nibabel import load
-    from . import shorten_name
+    from tools import shorten_name
     at_dir = op.join(environ["FSLDIR"], "data", "atlases")
     ctx_xml = op.join(at_dir, "HarvardOxford-Cortical.xml")
     ctx_labels = etree.parse(ctx_xml).find("data").findall("label")
@@ -358,24 +362,27 @@ def locate_peaks(vox_coords):
     sub_data = load(op.join(at_dir, "HarvardOxford",
                             "HarvardOxford-sub-prob-2mm.nii.gz")).get_data()
 
-    loc_list = []
+    loc_list = [("MaxProb Region", "Prob")]
     for coord in vox_coords:
         coord = tuple(coord)
         ctx_index = np.argmax(ctx_data[coord])
         ctx_prob = ctx_data[coord][ctx_index]
         sub_index = np.argmax(sub_data[coord])
-        sub_prob = ctx_data[coord][sub_index]
+        sub_prob = sub_data[coord][sub_index]
 
         if not max(sub_prob, ctx_prob):
             loc_list.append(("Unknown", 0))
             continue
-        if sub_prob > ctx_prob and sub_index not in [1, 12]:
+        if not ctx_prob and sub_index in [0, 11]:
+            loc_list.append(
+                (shorten_name(sub_labels[sub_index].text, "sub"), sub_prob))
+            continue
+        if sub_prob > ctx_prob and sub_index not in [0, 1, 11, 12]:
             loc_list.append(
                 (shorten_name(sub_labels[sub_index].text, "sub"), sub_prob))
             continue
         loc_list.append(
             (shorten_name(ctx_labels[ctx_index].text, "ctx"), ctx_prob))
-    loc_list.insert(0, ("MaxProb Region", "Prob"))
 
     return loc_list
 

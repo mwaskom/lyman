@@ -63,12 +63,12 @@ def create_volume_mixedfx_workflow(name="volume_group",
 
     boxplot = MapNode(Function(input_names=["cope_file", "localmax_file"],
                                output_names=["out_file"],
-                               function="mfx_boxplot"),
+                               function=mfx_boxplot),
                       iterfield=["localmax_file"],
                       name="boxplot")
 
-    peaktable = MapNode(Function(inputnames=["localmax_file"],
-                                 outputnames=["out_file"],
+    peaktable = MapNode(Function(input_names=["localmax_file"],
+                                 output_names=["out_file"],
                                  function=tools.cluster_to_rst),
                         iterfield=["localmax_file"],
                         name="peaktable")
@@ -90,6 +90,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                                 "thresh_zstat",
                                                 "cluster_image",
                                                 "cluster_peaks",
+                                                "zstat_pngs",
                                                 "boxplots",
                                                 "reports"]),
                       name="outputnode")
@@ -133,15 +134,13 @@ def create_volume_mixedfx_workflow(name="volume_group",
         (overlay, slicer,
             [("out_file", "in_file")]),
         (slicer, outputnode,
-            [("out_file", "stat_png")]),
+            [("out_file", "zstat_pngs")]),
         (slicer, report,
             [("out_file", "zstat_pngs")]),
-        (cluster, report,
-            [("localmax_txt_file", "localmax_files")]),
         (boxplot, report,
             [("out_file", "boxplots")]),
         (peaktable, report,
-            [("out_file", "peak_table")]),
+            [("out_file", "peak_tables")]),
         (report, outputnode,
             [("reports", "reports")]),
         (cluster, outputnode,
@@ -188,7 +187,7 @@ def mfx_boxplot(cope_file, localmax_file):
     ax.set_ylabel("Local Maximum")
     ax.set_xlabel("COPE Value")
     ax.set_title("COPE Distributions")
-    fig.savefig(out_file)
+    plt.savefig(out_file)
 
     return out_file
 
@@ -222,11 +221,10 @@ def write_mfx_report(subject_list, l1_contrast,
              "Local Maxima",
              "^^^^^^^^^^^^",
              "",
-             "::",
              ])
         mfx_report_template = "\n".join([
              mfx_report_template,
-             open(peak_tables).read()])
+             open(peak_tables[i - 1]).read()])
 
         mfx_report_template = "\n".join([
             mfx_report_template,
