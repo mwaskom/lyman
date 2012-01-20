@@ -1,3 +1,4 @@
+import numpy as np
 from argparse import Namespace
 from nipype.testing import assert_equal, assert_true
 
@@ -103,3 +104,47 @@ def test_find_contrast_number():
 
     for i, contrast in enumerate(contrasts, 1):
         yield assert_equal, main.find_contrast_number(contrast, contrasts), i
+
+
+def test_reg_template():
+
+    yield assert_equal, "foo", main.reg_template("_mask", "foo", "bar")
+    yield assert_equal, "qux", main.reg_template("whatever", "buz", "qux")
+
+
+def test_locate_peaks():
+
+    challenge = [
+        ([(60, 60, 50)], ("L Cereb WM", 95)),
+        ([(62, 69, 50)], ("MFG", 20)),
+        ([(31, 50, 27)], ("Parahip G, post", 30)),
+        # This is actually suboptimal, I'd eventually like this to fail
+        ([(26, 55, 27)], ("Temp Fus Ctx, post", 3)),
+        ([(29, 50, 30)], ("R Hippocampus", 95))]
+
+    for coord, res in challenge:
+        yield assert_equal, res, main.locate_peaks(coord)[1]
+
+
+def test_shorten_name():
+
+    names = [("Parahippocampal Gyrus, anterior division",
+              "Parahip G, ant",
+              "ctx"),
+             ("Middle Frontal Gyrus", "MFG", "ctx"),
+             ("Right Hippocampus", "R Hippocampus", "sub")]
+
+    for orig, new, atlas in names:
+        yield assert_equal, new, main.shorten_name(orig, atlas)
+
+
+def test_vox_to_mni():
+
+    coords = [((29, 68, 57), (32, 10, 42)),
+              ((70, 38, 42), (-50, -50, 12)),
+              ((45, 63, 36), (0, 0, 0))]
+
+    for vox, mni in coords:
+        vox = np.atleast_2d(vox)
+        mni = np.atleast_2d(mni)
+        yield assert_equal, mni, main.vox_to_mni(vox)
