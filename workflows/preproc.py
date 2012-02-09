@@ -656,6 +656,8 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2"):
 def get_trimmed_length(in_files, frames_to_toss):
     from nibabel import load
     lengths = []
+    if not isinstance(in_files, list):
+        in_files = [in_files]
     for f in in_files:
         lengths.append(load(f).shape[-1] - frames_to_toss)
     return lengths
