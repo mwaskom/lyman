@@ -215,6 +215,8 @@ def build_model_info(subject_id, functional_runs, exp_info):
 
     model_info = []
 
+    if not isinstance(functional_runs, list):
+        functional_runs = list(functional_runs)
     n_runs = len(functional_runs)
     for run in range(1, n_runs + 1):
         onsets, durations, amplitudes, regressors = [], [], [], []
