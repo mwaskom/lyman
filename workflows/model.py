@@ -43,11 +43,13 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
 
     # Generate a plot of regressor correlation
     designcorr = MapNode(Function(input_names=["in_file",
-                                               "ev_files"],
+                                               "ev_files",
+                                               "n_runs"],
                                   output_names=["out_file"],
                                   function=design_corr),
-                         iterfield=["in_file", "ev_files"],
+                         iterfield=["in_file"],
                          name="designcorr")
+    design_corr.inputs.n_runs = exp_info["n_runs"]
 
     # Rename the design image
     rename_design = MapNode(Rename(format_string="design",
@@ -246,7 +248,7 @@ def build_model_info(subject_id, functional_runs, exp_info):
     return model_info
 
 
-def design_corr(in_file, ev_files):
+def design_corr(in_file, ev_files, n_runs):
     import re
     from os.path import abspath, basename
     import numpy as np
@@ -257,6 +259,8 @@ def design_corr(in_file, ev_files):
     ax.matshow(np.abs(np.corrcoef(X.T)), vmin=0, vmax=1, cmap="hot")
     run = int(re.match(r"run(\d).mat", basename(in_file)).group(1))
     pat = "ev_(\w+)_%d_\d+.txt" % run
+    if n_runs > 1:
+        ev_files = ev_files[run]
     ev_names = [re.match(pat, basename(f)).group(1) for f in ev_files]
     ev_names = map(lambda x: x.lower(), ev_names)
     ax.set_xticks(range(len(ev_names)))
