@@ -49,7 +49,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
                                   function=design_corr),
                          iterfield=["in_file"],
                          name="designcorr")
-    design_corr.inputs.n_runs = exp_info["n_runs"]
+    designcorr.inputs.n_runs = exp_info["n_runs"]
 
     # Rename the design image
     rename_design = MapNode(Rename(format_string="design",
