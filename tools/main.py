@@ -252,7 +252,7 @@ def reg_template_args(contrast, mask_args, model_args):
 
 def write_workflow_report(workflow_name, report_template, report_dict):
     from os.path import exists, basename
-    from subprocess import call
+    from subprocess import check_output
 
     # Plug the values into the template for the pdf file
     report_rst_text = report_template % report_dict
@@ -261,7 +261,7 @@ def write_workflow_report(workflow_name, report_template, report_dict):
     report_pdf_rst_file = "%s_pdf.rst" % workflow_name
     report_pdf_file = op.abspath("%s_report.pdf" % workflow_name)
     open(report_pdf_rst_file, "w").write(report_rst_text)
-    call(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
+    check_output(["rst2pdf", report_pdf_rst_file, "-o", report_pdf_file])
     if not exists(report_pdf_file):
         raise RuntimeError
 
@@ -277,7 +277,7 @@ def write_workflow_report(workflow_name, report_template, report_dict):
     report_html_file = op.abspath("%s_report.html" % workflow_name)
     report_rst_text = report_template % report_dict
     open(report_html_rst_file, "w").write(report_rst_text)
-    call(["rst2html.py", report_html_rst_file, report_html_file])
+    check_output(["rst2html.py", report_html_rst_file, report_html_file])
     if not exists(report_html_file):
         raise RuntimeError
 
