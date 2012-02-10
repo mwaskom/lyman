@@ -221,4 +221,6 @@ def force_list(f):
     return f
 
 def length(x):
-    return len(x)
+    if isinstance(x, list):
+        return len(x)
+    return 1
