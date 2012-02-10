@@ -131,6 +131,7 @@ def create_dof_image(copes, dof_files):
     from os.path import abspath
     from numpy import ones, int16
     from nibabel import load, Nifti1Image
+    import force_list
     copes = force_list(copes)
     dof_files = force_list(dof_files)
     cope_imgs = map(load, copes)
@@ -158,6 +159,7 @@ def create_ffx_mask(masks, background_file):
     from nibabel import load, Nifti1Image
     from numpy import zeros
     from subprocess import call
+    import force_list
     masks = force_list(masks)
     mask_imgs = map(load, masks)
     data_shape = list(mask_imgs[0].shape) + [len(mask_imgs)]
