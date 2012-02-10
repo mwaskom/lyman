@@ -74,9 +74,9 @@ def create_volume_ffx_workflow(name="volume_ffx"):
     ffx = Workflow(name=name)
     ffx.connect([
         (inputnode, copemerge,
-            [("copes", "in_files")]),
+            [(("copes", force_list), "in_files")]),
         (inputnode, varcopemerge,
-            [("varcopes", "in_files")]),
+            [(("varcopes", force_list), "in_files")]),
         (inputnode, createdof,
             [("copes", "copes"),
              ("dof_files", "dof_files")]),
@@ -131,6 +131,8 @@ def create_dof_image(copes, dof_files):
     from os.path import abspath
     from numpy import ones, int16
     from nibabel import load, Nifti1Image
+    copes = force_list(copes)
+    dof_files = force_list(dof_files)
     cope_imgs = map(load, copes)
     data_shape = list(cope_imgs[0].shape) + [len(cope_imgs)]
     dof_data = ones(data_shape, int16)
@@ -156,6 +158,7 @@ def create_ffx_mask(masks, background_file):
     from nibabel import load, Nifti1Image
     from numpy import zeros
     from subprocess import call
+    masks = force_list(masks)
     mask_imgs = map(load, masks)
     data_shape = list(mask_imgs[0].shape) + [len(mask_imgs)]
     mask_data = zeros(data_shape, int)
@@ -210,6 +213,10 @@ def write_ffx_report(subject_id, mask_png, zstat_pngs, contrast):
                                       report_dict)
     return out_files
 
+def force_list(f):
+    if not isinstance(f, list):
+        return [f]
+    return f
 
 def length(x):
     return len(x)
