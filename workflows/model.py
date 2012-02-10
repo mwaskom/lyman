@@ -46,7 +46,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
                                                "ev_files"],
                                   output_names=["out_file"],
                                   function=design_corr),
-                         iterfield=["in_file"],
+                         iterfield=["in_file", "ev_files"],
                          name="designcorr")
 
     # Rename the design image
@@ -256,7 +256,6 @@ def design_corr(in_file, ev_files):
     ax = f.add_subplot(111)
     ax.matshow(np.abs(np.corrcoef(X.T)), vmin=0, vmax=1, cmap="hot")
     run = int(re.match(r"run(\d).mat", basename(in_file)).group(1))
-    ev_files = ev_files[run]
     pat = "ev_(\w+)_%d_\d+.txt" % run
     ev_names = [re.match(pat, basename(f)).group(1) for f in ev_files]
     ev_names = map(lambda x: x.lower(), ev_names)
