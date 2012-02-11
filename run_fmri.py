@@ -98,9 +98,8 @@ def main(arglist):
     # Set the base for the possibly temporary working directory
     preproc.base_dir = work_dir_base
 
-    # Just write crashes to the system /tmp location
-    # This may break with next nipype release
-    preproc.config = dict(crashdump_dir=crashdump_dir)
+    # Configure crashdump output
+    tools.crashdump_config(preproc, crashdump_dir)
 
     # Possibly execute the workflow, depending on the command line
     tools.run_workflow(preproc, "preproc", args)
@@ -146,7 +145,7 @@ def main(arglist):
 
     # Set temporary output locations
     model.base_dir = work_dir_base
-    model.config = dict(crashdump_dir=crashdump_dir)
+    tools.crashdump_config(model, crashdump_dir)
 
     # Possibly execute the workflow
     tools.run_workflow(model, "model", args)
@@ -285,7 +284,7 @@ def main(arglist):
         (r"_run_", "run_")])  # This one's wired to interal function
 
     reg.base_dir = work_dir_base
-    reg.config = dict(crashdump_dir=crashdump_dir)
+    tools.crashdump_config(reg, crashdump_dir)
 
     # Possibly run registration workflow and clean up
     tools.run_workflow(reg, "reg", args)
@@ -373,7 +372,7 @@ def main(arglist):
         (r"/_contrast_", "/")])
 
     ffx.base_dir = work_dir_base
-    ffx.config = dict(crashdump_dir=crashdump_dir)
+    tools.crashdump_config(ffx, crashdump_dir)
 
     # Possibly run fixed effects workflow
     tools.run_workflow(ffx, "ffx", args)
