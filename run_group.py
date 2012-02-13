@@ -35,7 +35,10 @@ def main(arglist):
 
     # Make sure some paths are set properly
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
-    sys.path.insert(0, os.path.abspath("."))
+    script_dir = os.path.abspath(".")
+    sys.path.insert(0, script_dir)
+    os.environ["PYTHONPATH"] = "%s:%s" % (script_dir,
+                                          os.environ["PYTHONPATH"])
 
     # Set roots of output storage
     anal_dir_base = op.join(project["analysis_dir"], exp_name)
