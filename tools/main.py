@@ -349,14 +349,11 @@ def locate_peaks(vox_coords):
     from os import environ
     import os.path as op
     import numpy as np
-    from lxml import etree
     from nibabel import load
-    from tools import shorten_name
+    from tools.main import harvard_oxford_sub_names, harvard_oxford_ctx_names
+    sub_names = harvard_oxford_sub_names
+    ctx_names = harvard_oxford_ctx_names
     at_dir = op.join(environ["FSLDIR"], "data", "atlases")
-    ctx_xml = op.join(at_dir, "HarvardOxford-Cortical.xml")
-    ctx_labels = etree.parse(ctx_xml).find("data").findall("label")
-    sub_xml = op.join(at_dir, "HarvardOxford-SubCortical.xml")
-    sub_labels = etree.parse(sub_xml).find("data").findall("label")
     ctx_data = load(op.join(at_dir, "HarvardOxford",
                             "HarvardOxford-cort-prob-2mm.nii.gz")).get_data()
     sub_data = load(op.join(at_dir, "HarvardOxford",
@@ -374,15 +371,12 @@ def locate_peaks(vox_coords):
             loc_list.append(("Unknown", 0))
             continue
         if not ctx_prob and sub_index in [0, 11]:
-            loc_list.append(
-                (shorten_name(sub_labels[sub_index].text, "sub"), sub_prob))
+            loc_list.append((sub_names[sub_index], sub_prob))
             continue
         if sub_prob > ctx_prob and sub_index not in [0, 1, 11, 12]:
-            loc_list.append(
-                (shorten_name(sub_labels[sub_index].text, "sub"), sub_prob))
+            loc_list.append((sub_names[sub_index], sub_prob))
             continue
-        loc_list.append(
-            (shorten_name(ctx_labels[ctx_index].text, "ctx"), ctx_prob))
+        loc_list.append((ctx_names[ctx_index], ctx_prob))
 
     return loc_list
 
@@ -459,3 +453,78 @@ harvard_oxford_ctx_subs = [
     (" +", " "),
     ("\(.+\)", ""),
 ]
+
+harvard_oxford_sub_names = [
+    'L Cereb WM',
+    'L Ctx',
+    'L LatVent',
+    'L Thalamus',
+    'L Caudate',
+    'L Putamen',
+    'L Pallidum',
+    'Brain-Stem',
+    'L Hippocampus',
+    'L Amygdala',
+    'L Accumbens',
+    'R Cereb WM',
+    'R Ctx',
+    'R LatVent',
+    'R Thalamus',
+    'R Caudate',
+    'R Putamen',
+    'R Pallidum',
+    'R Hippocampus',
+    'R Amygdala',
+    'R Accumbens',
+    ]
+
+harvard_oxford_ctx_names = [
+    'Front Pole',
+    'Insular Ctx',
+    'SFG',
+    'MFG',
+    'IFG, triang',
+    'IFG, oper',
+    'Precentral G',
+    'Temp Pole',
+    'STG, ant',
+    'STG, post',
+    'MTG, ant',
+    'MTG, post',
+    'MTG, tempocc',
+    'ITG, ant',
+    'ITG, post',
+    'ITG, tempocc',
+    'Postcentral G',
+    'Sup Par Lobule',
+    'Supramarg G, ant',
+    'Supramarg G, post',
+    'Angular G',
+    'Lat Occ Ctx, sup',
+    'Lat Occ Ctx, inf',
+    'Intracalc Ctx',
+    'Front Med Ctx',
+    'Juxt Lobule Ctx',
+    'Subcallosal Ctx',
+    'Paracing G',
+    'Cing G, ant',
+    'Cing G, post',
+    'Precuneous Ctx',
+    'Cuneal Ctx',
+    'Front Orb Ctx',
+    'Parahip G, ant',
+    'Parahip G, post',
+    'Lingual G',
+    'Temp Fus Ctx, ant',
+    'Temp Fus Ctx, post',
+    'Temp Occ Fus Ctx',
+    'Occ Fus G',
+    'Front Oper Ctx',
+    'Central Oper Ctx',
+    'Par Oper Ctx',
+    'Planum Polare',
+    'Heschl"s G',
+    'Planum Tempe',
+    'Supracalc Ctx',
+    'Occ Pole',
+    ]
