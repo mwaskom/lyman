@@ -5,6 +5,7 @@ import os.path as op
 import numpy as np
 import networkx as nx
 
+import nipype
 from nipype.pipeline.engine import Workflow, MapNode, Node
 from nipype.interfaces.base import isdefined
 from nipype.interfaces.utility import IdentityInterface
@@ -224,6 +225,15 @@ def make_subject_source(subject_list):
                 iterables=("subject_id", subject_list),
                 overwrite=True,
                 name="subj_source")
+
+
+def crashdump_config(wf, dump_dir):
+
+    version = nipype.__version__
+    if version > "0.4.1":
+        wf.config["execution"]["crashdump_dir"] = dump_dir
+    else:
+        wf.config = dict(crashdump_dir=dump_dir)
 
 
 def run_workflow(wf, name=None, args=None):

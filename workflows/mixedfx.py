@@ -164,7 +164,7 @@ def mfx_boxplot(cope_file, localmax_file):
     import numpy as np
 
     out_file = abspath("peak_boxplot.png")
-    peak_array = np.loadtxt(localmax_file, int, skiprows=1)
+    peak_array = np.loadtxt(localmax_file, int, skiprows=1, usecols=(2, 3, 4))
 
     if not peak_array.any():
         # If there wre no significant peaks, return an empty text file
@@ -174,7 +174,7 @@ def mfx_boxplot(cope_file, localmax_file):
 
     cope_data = load(cope_file).get_data()
     peak_dists = []
-    for coords in peak_array[:, 2:5]:
+    for coords in peak_array:
         peak_dists.append(cope_data[tuple(coords)])
     peak_dists.reverse()
     n_peaks = len(peak_dists)

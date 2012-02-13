@@ -104,7 +104,7 @@ def main(arglist):
 
     # Set a few last things
     mfx.base_dir = work_dir_base
-    mfx.config = dict(crashdump_dir=crashdump_dir)
+    tools.crashdump_config(mfx, crashdump_dir)
 
     # Execute
     tools.run_workflow(mfx, args=args)
