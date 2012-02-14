@@ -148,6 +148,12 @@ Mixed Effects Model Report
 
 **Subjects included:** %(subject_list)s
 
+Brain Mask
+----------
+
+.. image:: %(mask_png)s
+    :width: 6.5in
+
 Zstat Maps
 ----------
 """

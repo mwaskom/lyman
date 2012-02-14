@@ -31,10 +31,20 @@ def create_volume_mixedfx_workflow(name="volume_group",
                   name="design")
 
     brain_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
+    bg_image = fsl.Info.standard_image("avg152T1_brain.nii.gz")
 
     flameo = Node(fsl.FLAMEO(run_mode=flame_mode,
                              mask_file=brain_mask),
                   name="flameo")
+
+    maskpng = Node(Function(input_names=["varcope_file", 
+                                         "background_file",
+                                         "brain_mask"],
+                            output_names=["out_file"],
+                            function=mfx_mask_func),
+                   name="maskpng")
+    maskpng.inputs.brain_mask = brain_mask
+    maskpng.inputs.background_file = bg_image
 
     smoothest = MapNode(fsl.SmoothEstimate(mask_file=brain_mask),
                         iterfield=["zstat_file"],
@@ -49,7 +59,6 @@ def create_volume_mixedfx_workflow(name="volume_group",
                       iterfield=["in_file", "dlh", "volume"],
                       name="cluster")
 
-    bg_image = fsl.Info.standard_image("avg152T1_brain.nii.gz")
     overlay = MapNode(fsl.Overlay(auto_thresh_bg=True,
                                   stat_thresh=overlay_thresh,
                                   background_image=bg_image),
@@ -79,6 +88,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                         "zstat_pngs",
                                         "boxplots",
                                         "peak_tables",
+                                        "mask_png",
                                         "contrasts"],
                               output_names=["reports"],
                               function=write_mfx_report),
@@ -91,6 +101,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                                 "cluster_image",
                                                 "cluster_peaks",
                                                 "zstat_pngs",
+                                                "mask_png",
                                                 "boxplots",
                                                 "reports"]),
                       name="outputnode")
@@ -110,6 +121,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("merged_file", "cope_file")]),
         (mergevarcope, flameo,
             [("merged_file", "var_cope_file")]),
+        (mergevarcope, maskpng,
+            [("merged_file", "varcope_file")]),
         (mergedof, flameo,
             [("merged_file", "dof_var_cope_file")]),
         (design, flameo,
@@ -137,6 +150,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("out_file", "zstat_pngs")]),
         (slicer, report,
             [("out_file", "zstat_pngs")]),
+        (maskpng, report,
+            [("out_file", "mask_png")]),
         (boxplot, report,
             [("out_file", "boxplots")]),
         (peaktable, report,
@@ -149,11 +164,43 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("localmax_txt_file", "cluster_peaks")]),
         (boxplot, outputnode,
             [("out_file", "boxplots")]),
+        (maskpng, outputnode,
+            [("out_file", "mask_png")]),
         (flameo, outputnode,
             [("stats_dir", "flameo_stats")])
         ])
 
     return group_anal, inputnode, outputnode
+
+
+def mfx_mask_func(varcope_file, brain_mask, background_file):
+    from os.path import abspath
+    from nibabel import load, Nifti1Image
+    from subprocess import check_output
+    import numpy as np
+    varcope_img = load(varcope_file)
+    varcope_data = varcope_img.get_data()
+    mask_img = load(brain_mask)
+    mask_data = mask_img.get_data()
+
+    pos_vars = np.all(varcope_data, axis=-1)
+    pos_vars = np.logical_and(pos_vars, mask_data)
+
+    pos_img = Nifti1Image(pos_vars,
+                          mask_img.get_affine(),
+                          mask_img.get_header())
+    pos_file = "pos_var.nii.gz"
+    pos_img.to_filename(pos_file)
+
+    overlay_cmd = ["overlay", "1", "0", background_file,
+                   "-a", pos_file, "0.5", "1.5", "pos_overlay.nii.gz"]
+    check_output(overlay_cmd)
+
+    out_file = abspath("pos_variance.png")
+    slicer_cmd = ["slicer", "pos_overlay.nii.gz", "-S", "2", "872", out_file]
+    check_output(slicer_cmd)
+
+    return out_file
 
 
 def mfx_boxplot(cope_file, localmax_file):
@@ -193,7 +240,7 @@ def mfx_boxplot(cope_file, localmax_file):
     return out_file
 
 
-def write_mfx_report(subject_list, l1_contrast,
+def write_mfx_report(subject_list, l1_contrast, mask_png,
                      zstat_pngs, peak_tables, boxplots, contrasts):
     import time
     from tools import write_workflow_report
@@ -203,6 +250,7 @@ def write_mfx_report(subject_list, l1_contrast,
     report_dict = dict(now=time.asctime(),
                        l1_contrast=l1_contrast,
                        subject_list=", ".join(subject_list),
+                       mask_png=mask_png,
                        n_subs=len(subject_list))
 
     # Add the zstat image templates and update the dict
