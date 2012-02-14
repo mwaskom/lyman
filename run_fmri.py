@@ -32,8 +32,11 @@ def main(arglist):
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
     script_dir = os.path.abspath(".")
     sys.path.insert(0, script_dir)
-    os.environ["PYTHONPATH"] = "%s:%s" % (script_dir,
-                                          os.environ["PYTHONPATH"])
+    if "PYTHONPATH" in os.environ:
+        os.environ["PYTHONPATH"] = "%s:%s" % (script_dir,
+                                              os.environ["PYTHONPATH"])
+    else:
+        os.environ["PYTHONPATH"] = "%s:" % script_dir
 
     # Subject is always highest level of parameterization
     subject_list = tools.determine_subjects(args.subjects)
