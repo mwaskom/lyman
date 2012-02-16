@@ -215,6 +215,8 @@ def determine_engine(args):
     plugin_args = dict()
     if plugin == "MultiProc":
         plugin_args['n_procs'] = args.nprocs
+    elif plugin == "PBS":
+        plugin_args["qsub_args"] = "-V -e /dev/null -o /dev/null"
 
     return plugin, plugin_args
 
