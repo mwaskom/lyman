@@ -51,11 +51,21 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
                          name="designcorr")
     designcorr.inputs.n_runs = exp_info["n_runs"]
 
-    # Rename the design image
+    # Rename the design matrix, contrasts, and image
     rename_design = MapNode(Rename(format_string="design",
                                    keep_ext=True),
                             iterfield=["in_file"],
                             name="rename_design")
+
+    rename_x_mat = MapNode(Rename(format_string="design",
+                                  keep_ext=True),
+                           iterfield=["in_file"],
+                           name="rename_x_mat")
+
+    rename_c_mat = MapNode(Rename(format_string="design",
+                                  keep_ext=True),
+                           iterfield=["in_file"],
+                           name="rename_c_mat")
 
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
@@ -125,6 +135,8 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
                                                 "varcopes",
                                                 "zstats",
                                                 "reports",
+                                                "design_mat",
+                                                "contrast_mat",
                                                 "json_file",
                                                 "zstat_pngs"]),
                       name="outputnode")
@@ -154,6 +166,10 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
             [("con_file", "tcon_file")]),
         (featmodel, designcorr,
             [("design_file", "in_file")]),
+        (featmodel, rename_x_mat,
+            [("design_file", "in_file")]),
+        (featmodel, rename_c_mat,
+            [("con_file", "in_file")]),
         (level1design, designcorr,
             [("ev_files", "ev_files")]),
         (featmodel, rename_design,
@@ -187,6 +203,12 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
             [("reports", "reports")]),
         (dumpjson, outputnode,
             [("json_file", "json_file")]),
+        (rename_design, outputnode,
+            [("out_file", "design_image")]),
+        (rename_x_mat, outputnode,
+            [("out_file", "design_mat")]),
+        (rename_c_mat, outputnode,
+            [("out_file", "contrast_mat")]),
         (rename_design, outputnode,
             [("out_file", "design_image")]),
         (designcorr, outputnode,
