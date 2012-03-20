@@ -126,6 +126,8 @@ def create_preprocessing_workflow(name="preproc",
             (("timeseries", get_trimmed_length, frames_to_toss), "t_size")]),
         (trimmer, img2float,
             [("roi_file", "in_file")]),
+        (img2float, realign,
+            [("out_file", "inputs.timeseries")]),
         (realign, art,
             [("outputs.realign_parameters", "inputs.realignment_parameters")]),
         (img2float, art,
@@ -161,14 +163,13 @@ def create_preprocessing_workflow(name="preproc",
     # Possibly hook-up slice time correction
     if do_slice_time_cor:
         preproc.connect([
-            (img2float, realign,   [("out_file", "inputs.timeseries")]),
-            (realign,   slicetime, [("outputs.timeseries", "in_file")]),
+            (realign,   slicetime,
+                [("outputs.timeseries", "in_file")]),
             (slicetime, skullstrip,
                 [("slice_time_corrected_file", "inputs.timeseries")]),
             ])
     else:
         preproc.connect([
-            (img2float,     realign,     [("out_file", "inputs.timeseries")]),
             (realign,     skullstrip,
                 [("outputs.timeseries", "inputs.timeseries")]),
             ])
