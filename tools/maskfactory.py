@@ -2,7 +2,7 @@ import os
 import os.path as op
 import shutil
 from tempfile import mkdtemp
-from subprocess import call
+from subprocess import call, check_output
 from IPython.parallel import Client, error
 import numpy as np
 
@@ -195,7 +195,7 @@ class MaskFactory(object):
 
     def execute(self, cmd_list, out_temp):
 
-        self.map(call, cmd_list)
+        self.map(check_output, cmd_list)
         self.check_exists(out_temp)
 
     def check_exists(self, fpath_temp):
