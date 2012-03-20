@@ -158,17 +158,8 @@ def create_preprocessing_workflow(name="preproc",
             [("out_file", "in_file")]),
         ])
 
-    # Do slicetime/realignment connections here to handle slice timing logic
-    if do_slice_time_cor and interleaved:
-        preproc.connect([
-            (img2float, slicetime, [("out_file", "in_file")]),
-            (slicetime, realign,
-                [("slice_time_corrected_file", "inputs.timeseries")]),
-            (realign,   skullstrip,
-                [("outputs.timeseries", "inputs.timeseries")]),
-            ])
-
-    elif do_slice_time_cor and not interleaved:
+    # Possibly hook-up slice time correction
+    if do_slice_time_cor:
         preproc.connect([
             (img2float, realign,   [("out_file", "inputs.timeseries")]),
             (realign,   slicetime, [("outputs.timeseries", "in_file")]),
