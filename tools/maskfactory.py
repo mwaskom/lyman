@@ -43,7 +43,7 @@ class MaskFactory(object):
 
         shutil.rmtree(self.temp_dir)
 
-    def from_common_label(self, label_file, hemi, keep_going=True):
+    def from_common_label(self, label_file, hemi, dilate=True, keep_going=True):
 
         subj_label_temp = op.join(self.temp_dir,
                                   hemi + ".%s_label.label")
@@ -61,17 +61,18 @@ class MaskFactory(object):
         self.execute(label_cmds, subj_label_temp)
 
         if keep_going:
-            self.from_label(subj_label_temp, hemi)
+            self.from_label(subj_label_temp, hemi, dilate=dilate)
 
-    def from_common_bilat_label(self, label_template):
+    def from_common_bilat_label(self, label_template, dilate=True):
 
         lateral_label_temp = op.join(self.temp_dir, "%(hemi)s.%(subj)s_label.label")
         for hemi in ["lh", "rh"]:
-            self.from_common_label(label_template % hemi, hemi, False)
+            self.from_common_label(label_template % hemi, hemi,
+                                  dilate=dilate, keep_going=False)
 
-        self.from_bilat_labels(lateral_label_temp)
+        self.from_bilat_labels(lateral_label_temp, dilate=dilate)
 
-    def from_label(self, label_template, hemi, keep_going=True):
+    def from_label(self, label_template, hemi, dilate=True, keep_going=True):
 
         hires_mask_template = op.join(self.temp_dir,
                                       hemi + ".%s_hires_mask.nii.gz")
@@ -89,26 +90,27 @@ class MaskFactory(object):
                         "--o", hires_mask_template % subj])
         self.execute(proj_cmds, hires_mask_template)
 
-        dil_cmds = []
-        for subj in self.subject_list:
-            dil_cmds.append(
-                      ["fslmaths",
-                       hires_mask_template % subj,
-                       "-dilF",
-                       hires_mask_template % subj])
-        self.execute(dil_cmds, hires_mask_template)
+        if dilate:
+            dil_cmds = []
+            for subj in self.subject_list:
+                dil_cmds.append(
+                          ["fslmaths",
+                           hires_mask_template % subj,
+                           "-dilF",
+                           hires_mask_template % subj])
+            self.execute(dil_cmds, hires_mask_template)
 
         if keep_going:
             self.from_hires_mask(hires_mask_template)
 
-    def from_bilat_labels(self, label_template):
+    def from_bilat_labels(self, label_template, dilate=True):
 
         lateral_mask_temp = op.join(self.temp_dir, "%(hemi)s.%(subj)s_hires_mask.nii.gz")
         hires_mask_template = op.join(self.temp_dir, "%s_hires_mask.nii.gz")
 
         for hemi in ["lh", "rh"]:
             lateral_temp = label_template % dict(hemi=hemi, subj="%s")
-            self.from_label(lateral_temp, hemi, False)
+            self.from_label(lateral_temp, hemi, dilate=dilate, keep_going=False)
 
         combine_cmds = []
         for subj in self.subject_list:
