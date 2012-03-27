@@ -231,7 +231,7 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
 def build_model_info(subject_id, functional_runs, exp_info):
     import os.path as op
     from copy import deepcopy
-    from numpy import loadtxt
+    from numpy import loadtxt, atleast_1d, atleast_2d
     from nipype.interfaces.base import Bunch
 
     events = exp_info["events"]
@@ -248,16 +248,18 @@ def build_model_info(subject_id, functional_runs, exp_info):
             event_info = dict(event=event, run=run, subject_id=subject_id)
             parfile = op.join(exp_info["parfile_base_dir"],
                               exp_info['parfile_template'] % event_info)
-            o, d, a = loadtxt(parfile, unpack=True)
+            o, d, a = atleast_2d(loadtxt(parfile)).T
             onsets.append(o)
             durations.append(d)
             amplitudes.append(a)
-        for regressor in regressors:
+        for regressor in regressor_names:
             regress_info = dict(regressor=regressor,
                                 run=run,
                                 subject_id=subject_id)
-            regressor_file = exp_info['regressor_template'] % regress_info
-            regressors.append(loadtxt(regressor_file))
+            regressor_file = op.join(
+                exp_info["regressor_base_dir"],
+                exp_info["regressor_template"] % regress_info)
+            regressors.append(atleast_1d(loadtxt(regressor_file)))
 
         model_info.append(
             Bunch(conditions=events,
