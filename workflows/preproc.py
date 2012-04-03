@@ -12,7 +12,10 @@ import nipype.interfaces.utility as util
 import nipype.algorithms.rapidart as ra
 from nipype.pipeline.engine import Node, MapNode, Workflow
 
-from nipype.workflows.fsl import create_susan_smooth
+try:
+    from nipype.workflows.fmri.fsl import create_susan_smooth
+except ImportError:
+    from nipype.workflows.fsl import create_susan_smooth
 from .interfaces import TimeSeriesMovie
 
 

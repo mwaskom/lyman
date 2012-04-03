@@ -209,8 +209,6 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
             [("out_file", "design_mat")]),
         (rename_c_mat, outputnode,
             [("out_file", "contrast_mat")]),
-        (rename_design, outputnode,
-            [("out_file", "design_image")]),
         (designcorr, outputnode,
             [("out_file", "design_corr")]),
         (plotresidual, outputnode,
