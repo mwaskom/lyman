@@ -19,31 +19,27 @@ Python
 
 - Nipype and related dependencies
 
-- Core scientific Python environment 
-(best to use the Enthought Python Distribution)
+- Core scientific Python environment (best to use the Enthought Python Distribution)
 
 - Nibabel
 
 - rst2pdf
 
-- Docutils 0.7 or 0.9 (rst2pdf does not work with 0.8, 
-which is the version currently in the PyPi)
+- Docutils 0.7 or 0.9 (rst2pdf does not work with 0.8, which is the version currently in the PyPi)
 
 Basic Workflow
 --------------
 
-- All stages of processing assumes that your anatomical data have 
-been processed in Freesurfer (recon-all)
+- All stages of processing assumes that your anatomical data have been processed in Freesurfer (recon-all)
 
-- run_warp.py > anatomical normalizatino
+- run_warp.py > anatomical normalization
 
 - run_fmri.py > subject-level functional analyses
 
-- run_group.py > basic group level mixed effects
+- run_group.py > basic group level mixed effects analyses
 
 Note
 ----
 
-Surface-based workflows are not currently operational, although some 
-surface information is used (e.g. for functional coregistration)
+Surface-based workflows are not currently operational, although some surface information is used (e.g. for functional coregistration)
 
