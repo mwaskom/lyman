@@ -162,10 +162,13 @@ def main(arglist):
     # Short ref to the common space we're using on this execution
     space = args.regspace
 
+    # Use spline interp if timeseries, else trilinear
+    interp = "spline" if args.timeseries else "trilinear"
+
     # Retrieve the right workflow function for registration
     # Get the workflow function dynamically based on the space
     workflow_function = getattr(wf, "create_%s_reg_workflow" % space)
-    reg, reg_input, reg_output = workflow_function()
+    reg, reg_input, reg_output = workflow_function(interp=interp)
 
     # Define a smooth variable here
     # Can unsmoothed or smoothed in volume, always unsmoothed for surface

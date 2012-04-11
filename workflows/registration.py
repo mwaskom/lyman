@@ -98,7 +98,7 @@ def create_fsaverage_reg_workflow():
 
 
 def get_interp(source_file, default_interp="spline"):
-    """Nearest neighboor if it's a mask, otherwise the default."""
+    """Determine what interpolation to use for volume resampling."""
     from nibabel import load
     img_data = load(source_file).get_data()
     is_bool = img_data.sum() == img_data.astype(bool).sum()
