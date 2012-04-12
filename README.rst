@@ -30,7 +30,7 @@ Python
 Basic Workflow
 --------------
 
-- All stages of processing assumes that your anatomical data have been processed in Freesurfer (recon-all)
+- All stages of processing assume that your anatomical data have been processed in Freesurfer (recon-all)
 
 - run_warp.py > anatomical normalization
 
