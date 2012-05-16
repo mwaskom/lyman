@@ -6,7 +6,9 @@ from nipype.pipeline.engine import Workflow, Node
 from .model import plot_zstats
 
 
-def create_volume_ffx_workflow(name="volume_ffx"):
+def create_volume_ffx_workflow(name="volume_ffx",
+                               regressors=None,
+                               contrasts=None):
 
     inputnode = Node(IdentityInterface(fields=["subject_id",
                                                "contrast",
@@ -40,8 +42,13 @@ def create_volume_ffx_workflow(name="volume_ffx"):
                    name="getmask")
 
     # Set up a fixed effects FLAMEO model
-    ffxmodel = Node(fsl.L2Model(),
-                    name="ffxmodel")
+    if regressors is None:
+        ffxmodel = Node(fsl.L2Model(),
+                        name="ffxmodel")
+    else:
+        ffxmodel = Node(fsl.MultipleRegressDesign(regressors=regressors,
+                                                  contrasts=contrasts),
+                        name="ffxmodel")
 
     # Run a fixed effects analysis in FLAMEO
     flameo = Node(fsl.FLAMEO(run_mode="fe"),
@@ -123,7 +130,7 @@ def create_volume_ffx_workflow(name="volume_ffx"):
 
 def create_surface_ffx_workflow(name="surface_ffx"):
 
-    pass
+    raise NotImplementedError
 
 
 def create_dof_image(copes, dof_files):
