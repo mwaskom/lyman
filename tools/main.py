@@ -167,6 +167,10 @@ def gather_experiment_info(experiment_name, altmodel=None):
     # Save the __doc__ attribute to the dict
     exp_dict["comments"] = exp.__doc__
 
+    # Check if it looks like this is a partial FOV acquisition
+    if "full_fov_epi" in exp_dict:
+        exp_dict["partial_fov"] = True
+
     # Convert HPF cutoff to sigma for fslmaths
     exp_dict["TR"] = float(exp_dict["TR"])
     exp_dict["hpf_cutoff"] = float(exp_dict["hpf_cutoff"])

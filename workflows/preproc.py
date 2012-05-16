@@ -10,6 +10,7 @@ import nipype.interfaces.fsl as fsl
 import nipype.interfaces.freesurfer as fs
 import nipype.interfaces.utility as util
 import nipype.algorithms.rapidart as ra
+from nipype.interfaces.utility import IdentityInterface, Rename, Function
 from nipype.pipeline.engine import Node, MapNode, Workflow
 
 try:
@@ -26,7 +27,8 @@ def create_preprocessing_workflow(name="preproc",
                                   slice_order="up",
                                   TR=2,
                                   smooth_fwhm=6,
-                                  highpass_sigma=32):
+                                  highpass_sigma=32,
+                                  partial_fov=False):
     """Return a Nipype workflow for fMRI preprocessing.
 
 
@@ -34,9 +36,11 @@ def create_preprocessing_workflow(name="preproc",
     preproc = Workflow(name=name)
 
     # Define the inputs for the preprocessing workflow
-    inputnode = Node(util.IdentityInterface(fields=["timeseries",
-                                                    "subject_id"]),
-                        name="inputnode")
+    in_fields = ["timeseries", "subject_id"]
+    if partial_fov:
+        in_fields.append("full_fov_epi")
+    inputnode = Node(IdentityInterface(fields=in_fields),
+                     name="inputnode")
 
     # Remove early frames to account for T1 stabalization
     trimmer = MapNode(fsl.ExtractROI(t_min=frames_to_toss),
@@ -79,14 +83,14 @@ def create_preprocessing_workflow(name="preproc",
     susan.inputs.inputnode.fwhm = smooth_fwhm
 
     # Scale the grand median of the timeserieses to 10000
-    scale_smooth = MapNode(util.Function(input_names=["in_file",
-                                                      "mask",
-                                                      "statistic",
-                                                      "target"],
-                                         output_names=["out_file"],
-                                         function=scale_timeseries),
-                           iterfield=["in_file", "mask"],
-                           name="scale_smooth")
+    scale_smooth = MapNode(Function(input_names=["in_file",
+                                                 "mask",
+                                                 "statistic",
+                                                 "target"],
+                                     output_names=["out_file"],
+                                     function=scale_timeseries),
+                       iterfield=["in_file", "mask"],
+                       name="scale_smooth")
     scale_smooth.inputs.statistic = "median"
     scale_smooth.inputs.target = 10000
 
@@ -549,12 +553,20 @@ def create_art_workflow(name="art", make_movie=False):
     return artifact
 
 
-def create_bbregister_workflow(name="bbregister", contrast_type="t2"):
+def create_bbregister_workflow(name="bbregister", contrast_type="t2",
+                               partial_fov=False):
 
     # Define the workflow inputs
-    inputnode = Node(util.IdentityInterface(fields=["subject_id",
-                                                    "source_file"]),
+    in_fields = ["subject_id", "source_file"]
+    if partial_fov:
+        in_fields.append("full_fov_epi")
+    inputnode = Node(IdentityInterface(fields=in_fields),
                      name="inputs")
+
+    mean_fullfov = Node(Function(input_names=["in_file"],
+                                 output_names=["out_file"],
+                                 function=maybe_mean),
+                        name="mean_fullfov")
 
     # Estimate the registration to Freesurfer conformed space
     func2anat = MapNode(fs.BBRegister(contrast_type=contrast_type,
@@ -592,15 +604,15 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2"):
                            name="func2anatpng")
 
     # Rename some files
-    pngname = MapNode(util.Rename(format_string="func2anat.png"),
+    pngname = MapNode(Rename(format_string="func2anat.png"),
                       iterfield=["in_file"],
                       name="pngname")
 
-    costname = MapNode(util.Rename(format_string="func2anat_cost.dat"),
+    costname = MapNode(Rename(format_string="func2anat_cost.dat"),
                        iterfield=["in_file"],
                        name="costname")
 
-    tkregname = MapNode(util.Rename(format_string="func2anat_tkreg.dat"),
+    tkregname = MapNode(Rename(format_string="func2anat_tkreg.dat"),
                         iterfield=["in_file"],
                         name="tkregname")
 
@@ -640,6 +652,15 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2"):
         (flirtname,    outputnode,   [("out_file", "flirt_mat")]),
         (report,       outputnode,   [("out", "report")]),
         ])
+
+    # Possibly connect the full_fov image
+    if partial_fov:
+        bbregister.connect([
+            (inputnode, mean_fullfov,
+                [("full_fov_epi", "in_file")]),
+            (mean_fullfov, func2anat,
+                [("out_file", "intermediate_file")]),
+                ])
 
     return bbregister
 
@@ -702,6 +723,31 @@ def spline_reslice(timeseries, ref_file, aff_mats):
     cmd.extend(resliced_frames)
     call(cmd)
 
+    return out_file
+
+
+def maybe_mean(in_file):
+    """Mean over time if image is 4D otherwise pass it right back out."""
+    from os.path import getcwd
+    from nibabel import load, Nifti1Image
+    from nipype.utils.filemanip import fname_presuffix
+
+    # Load in the file and get the shape
+    img = load(in_file):
+    img_shape = img.get_shape()
+
+    # If it's 3D just pass it right back out
+    if len(img_shape) <= 3 or img_shape[3] == 1:
+        return in_file
+
+    # Otherwise, mean over time dimension and write a new file
+    data = img.get_data()
+    mean_data = data.mean(axis=3)
+    mean_img = Nifti1Image(mean_data, img.get_affine(), img.get_header())
+
+    # Write the mean image to disk and return the filename
+    out_file = fname_presuffix(in_file, suffix="_mean", newpath=getcwd())
+    mean_img.to_filename(out_file)
     return out_file
 
 

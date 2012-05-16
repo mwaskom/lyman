@@ -69,16 +69,23 @@ def main(arglist):
                               slice_order=exp["slice_order"],
                               TR=exp["TR"],
                               smooth_fwhm=exp["smooth_fwhm"],
-                              highpass_sigma=exp["hpf_sigma"])
+                              highpass_sigma=exp["hpf_sigma"],
+                              partial_fov=exp["partial_fov"])
 
     # Collect raw nifti data
+    outfields = ["timeseries"]
+    if exp["partial_fov"]:
+        outfields.append("full_fov_epi")
     preproc_source = Node(DataGrabber(infields=["subject_id"],
-                                      outfields=["timeseries"],
+                                      outfields=outfields,
                                       base_directory=project["data_dir"],
                                       template=exp["source_template"],
                                       sort_filelist=True),
                           name="preproc_source")
-    preproc_source.inputs.template_args = dict(timeseries=[["subject_id"]])
+    preproc_template_args = dict(timeseries=[["subject_id"]])
+    if exp["partial_fov"]:
+        preproc_template_args["full_fov_epi"] = [["subject_id"]]
+    preproc_source.inputs.template_args = preproc_template_args
 
     # Convenience class to handle some sterotyped connections
     # between run-specific nodes (defined here) and the inputs
