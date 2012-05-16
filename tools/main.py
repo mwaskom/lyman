@@ -12,7 +12,7 @@ from nipype.interfaces.utility import IdentityInterface
 
 
 class InputWrapper(object):
-
+    """Implements connections between DataGrabber and workflow inputs."""
     def __init__(self, workflow, subject_node, grabber_node, input_node):
 
         self.wf = workflow
@@ -22,7 +22,6 @@ class InputWrapper(object):
 
     def connect_inputs(self):
         """Connect stereotyped inputs to the input IdentityInterface."""
-
         # Connect subject_id to input and grabber nodes
         self.wf.connect(self.subj_node, "subject_id",
                         self.grab_node, "subject_id")
@@ -40,7 +39,7 @@ class InputWrapper(object):
 
 
 class OutputWrapper(object):
-
+    """Implements connections between workflow outputs and DataSink."""
     def __init__(self, workflow, subject_node, sink_node, output_node):
 
         self.wf = workflow
@@ -107,7 +106,6 @@ class OutputWrapper(object):
 
 def find_mapnodes(workflow):
     """Given a workflow, return a list of MapNode names."""
-
     mapnode_names = []
     wf_nodes = nx.nodes(workflow._graph)
     for node in wf_nodes:
@@ -119,7 +117,6 @@ def find_mapnodes(workflow):
 
 def find_nested_workflows(workflow):
     """Given a workflow, find nested workflow objects."""
-
     nested_workflows = []
     wf_nodes = nx.nodes(workflow._graph)
     for node in wf_nodes:
@@ -130,7 +127,7 @@ def find_nested_workflows(workflow):
 
 
 def gather_project_info():
-
+    """Try to import a project.py module and convert to a dictionary."""
     # This seems safer than just catching an import error, since maybe
     # someone will copy another set of scripts and just delete the
     # project.py without knowing anything about .pyc files
@@ -203,14 +200,14 @@ def verify_experiment_info(exp_dict):
 
 
 def determine_subjects(subject_arg):
-
+    """Given list of names or file with list of names, return the list."""
     if op.isfile(subject_arg[0]):
         return np.loadtxt(subject_arg[0], str).tolist()
     return subject_arg
 
 
 def determine_engine(args):
-
+    """Read command line args and return Workflow.run() args."""
     plugin_dict = dict(linear="Linear", multiproc="MultiProc",
                        ipython="IPython", torque="PBS")
 
@@ -226,7 +223,7 @@ def determine_engine(args):
 
 
 def make_subject_source(subject_list):
-
+    """Generate a source node with iterables over a subject_id list."""
     return Node(IdentityInterface(fields=["subject_id"]),
                 iterables=("subject_id", subject_list),
                 overwrite=True,
@@ -234,7 +231,7 @@ def make_subject_source(subject_list):
 
 
 def crashdump_config(wf, dump_dir):
-
+    """Configure workflow to dump crashfiles somewhere."""
     version = nipype.__version__
     if version > "0.4.1":
         wf.config["execution"]["crashdump_dir"] = dump_dir
@@ -250,23 +247,35 @@ def run_workflow(wf, name=None, args=None):
 
 
 def find_contrast_number(contrast_name, contrast_names):
+    """Find index in contrast list for given contrast name.
 
+    Contains a hack to handle mask registration.
+
+    """
     if contrast_name == "_mask":
         return 0
     return contrast_names.index(contrast_name) + 1
 
 
 def reg_template(contrast, mask_template, model_template):
-
+    """Implement a hack to grab mask files for registration."""
     return mask_template if contrast == "_mask" else model_template
 
 
 def reg_template_args(contrast, mask_args, model_args):
-
+    """Implement a hack to grab mask files for registration."""
     return mask_args if contrast == "_mask" else model_args
 
 
 def write_workflow_report(workflow_name, report_template, report_dict):
+    """Generic function to take write .rst files and convert to pdf/html.
+
+    Accepts a report template and dictionary. Writes rst once with
+    full paths for image files and generates a pdf, then strips
+    leading path components and writes again, generating an html
+    file that exepects to live in the same directory as report images.
+
+    """
     from os.path import exists, basename
     from subprocess import check_output
 
@@ -362,6 +371,7 @@ def cluster_to_rst(localmax_file):
 
 
 def locate_peaks(vox_coords):
+    """Find most probable region in HarvardOxford Atlas of a vox coord."""
     from os import environ
     import os.path as op
     import numpy as np
@@ -398,6 +408,7 @@ def locate_peaks(vox_coords):
 
 
 def shorten_name(region_name, atlas):
+    """Implement regexp sub for verbose Harvard Oxford Atlas region."""
     import re
     from . import (harvard_oxford_ctx_subs,
                    harvard_oxford_sub_subs)
@@ -409,6 +420,12 @@ def shorten_name(region_name, atlas):
 
 
 def vox_to_mni(vox_coords):
+    """Given ijk voxel coordinates, return xyz from image affine.
+
+    The _to_mni part is rather a misnomer, although this at the moment
+    only gets used in the group volume workflows.
+
+    """
     import numpy as np
     from nibabel import load
     from nipype.interfaces.fsl import Info
