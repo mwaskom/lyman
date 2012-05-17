@@ -733,7 +733,7 @@ def maybe_mean(in_file):
     from nipype.utils.filemanip import fname_presuffix
 
     # Load in the file and get the shape
-    img = load(in_file):
+    img = load(in_file)
     img_shape = img.get_shape()
 
     # If it's 3D just pass it right back out
