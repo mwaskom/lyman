@@ -22,6 +22,9 @@ PROJECT_CONF = """\
 #
 # Configuration file for %(project_name)s built on %(now)s
 
+# Default experiment name
+default_exp = %(default_exp)s
+
 # Data directory is where the input data lives
 data_dir = '%(data_dir)s'
 
@@ -49,6 +52,10 @@ def is_path(x):
     if op.exists(x) and not op.isdir(x):
         raise ValidationError("Please enter a valid path name.")
     return op.abspath(x)
+
+def nonnull_string(s):
+    if s is not None:
+        return "'s'"
 
 def nonempty(x):
     if not x:
@@ -151,6 +158,8 @@ Please enter values for the following settings (just press Enter to
 accept a default value, if one is given in brackets).'''
 
     do_prompt(d, "project_name", "Project name")
+
+    do_prompt(d, "defualt_exp", "Default experiment", None, nonnull_string)
 
     do_prompt(d, "data_dir", "Data tree path", "../data", is_path)
 
