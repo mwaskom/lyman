@@ -159,7 +159,7 @@ accept a default value, if one is given in brackets).'''
 
     do_prompt(d, "project_name", "Project name")
 
-    do_prompt(d, "defualt_exp", "Default experiment", None, nonnull_string)
+    do_prompt(d, "default_exp", "Default experiment", None, nonnull_string)
 
     do_prompt(d, "data_dir", "Data tree path", "../data", is_path)
 
@@ -180,13 +180,6 @@ accept a default value, if one is given in brackets).'''
     conf_text = PROJECT_CONF % d
     f.write(conf_text.encode("utf-8"))
     f.close()
-
-    try:
-        import project
-        print "It works!"
-    except ImportError:
-        print "Try again, fucker!"
-        
 
 if __name__ == "__main__":
     main()
