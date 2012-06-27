@@ -1,5 +1,7 @@
+import os
 import re
 import sys
+import imp
 import os.path as op
 
 import numpy as np
@@ -132,7 +134,7 @@ def gather_project_info():
     # someone will copy another set of scripts and just delete the
     # project.py without knowing anything about .pyc files
     if op.exists("project.py"):
-        import project
+        project = imp.load_source("project", "project.py")
         return dict(
             [(k, v) for k, v in project.__dict__.items()
                 if not re.match("__.*__", k)])
@@ -148,11 +150,10 @@ def gather_experiment_info(experiment_name, altmodel=None):
     if altmodel is not None:
         module_name = "-".join([experiment_name, altmodel])
     try:
-        exp = __import__("experiments." + module_name,
-                         fromlist=["experiments"])
-    except ImportError:
-        print "ERROR: Could not import experiments/%s.py" % module_name
-        sys.exit()
+        exp = imp.load_source(module_name, module_name + ".py")
+    except IOError:
+        print "ERROR: Could not import %s.py" % module_name
+        sys.exit(1)
 
     # Create an experiment dict stripping the OOP hooks
     exp_dict = dict(
