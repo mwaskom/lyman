@@ -176,7 +176,7 @@ def gather_experiment_info(experiment_name, altmodel=None):
 
     # Setup the hrf_bases dictionary
     exp_dict["hrf_bases"] = {exp_dict["hrf_model"]:
-                                {"derivs": exp_dict["hrf_derivs"]}}
+                             {"derivs": exp_dict["hrf_derivs"]}}
 
     # Build contrasts list if neccesary
     if "contrasts" not in exp_dict:
@@ -196,7 +196,7 @@ def verify_experiment_info(exp_dict):
         raise ValueError("units must be 'secs' or 'scans'")
 
     if (exp_dict["slice_time_correction"]
-        and exp_dict["slice_order"] not in ["up", "down"]):
+            and exp_dict["slice_order"] not in ["up", "down"]):
         raise ValueError("slice_order must be 'up' or 'down'")
 
 
@@ -329,7 +329,7 @@ def cluster_to_rst(localmax_file):
         clust_head = f.readline().split()
         _ = clust_head.pop(1)
     clust_a = np.loadtxt(localmax_file, str,
-                        delimiter="\t", skiprows=1)
+                         delimiter="\t", skiprows=1)
     if not clust_a.size:
         with open(out_file, "w") as f:
             f.write("")
@@ -510,8 +510,7 @@ harvard_oxford_sub_names = [
     'R Pallidum',
     'R Hippocampus',
     'R Amygdala',
-    'R Accumbens',
-    ]
+    'R Accumbens']
 
 harvard_oxford_ctx_names = [
     'Front Pole',
@@ -561,5 +560,4 @@ harvard_oxford_ctx_names = [
     'Heschl"s G',
     'Planum Tempe',
     'Supracalc Ctx',
-    'Occ Pole',
-    ]
+    'Occ Pole']
