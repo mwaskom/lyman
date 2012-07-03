@@ -506,8 +506,6 @@ def create_art_workflow(name="art"):
 
     # Define the workflow outputs
     out_fields = ["outlier_volumes", "intensity_plot"]
-    if make_movie:
-        out_fields.append("timeseries_movie")
 
     outputnode = Node(util.IdentityInterface(fields=out_fields),
                       name="outputs")
@@ -529,14 +527,6 @@ def create_art_workflow(name="art"):
         (plotmean, outputnode,
             [("intensity_plot", "intensity_plot")]),
         ])
-
-    if make_movie:
-        artifact.connect([
-            (inputnode,    tsmovie,      [("raw_timeseries", "in_file")]),
-            (art,          tsmovie,      [("intensity_files", "plot_file")]),
-            (tsmovie,      moviename,    [("out_file", "in_file")]),
-            (moviename,    outputnode,   [("out_file", "timeseries_movie")]),
-            ])
 
     return artifact
 
