@@ -1,0 +1,39 @@
+#! /bin/bash
+
+# Usage exit
+if [ $# -eq 0 ] || [ "$1" = '-h' ]
+then
+    echo "USAGE: recon_qc <subject_id>"
+    echo 
+    echo "This will open up Freeview with the resconstruction"
+    echo "files you'll want to be looking at when you"
+    echo "quality control your surface reconstruction."
+    echo
+    echo "Written by Michael Waskom -- mwaskom@stanford.edu"
+    exit 1
+fi
+
+# Make sure the subject exists
+if  [ ! -e $SUBJECTS_DIR/$1 ]
+then
+    echo "Subject $1 does not exist in $SUBJECTS_DIR"
+    exit 1
+fi
+
+# Tell the annoying terminal output to get lost
+exec > /dev/null 2>&1
+
+# Set convenient subject path
+SD=$SUBJECTS_DIR/$1
+
+# Build the command line
+# Volume stuff first
+ARGS="-v $SD/mri/aseg.mgz:colormap=lut $SD/mri/T1.mgz $SD/mri/brainmask.mgz"
+# Then surfaces
+ARGS="$ARGS -f $SD/surf/lh.white $SD/surf/rh.white"
+ARGS="$ARGS $SD/surf/lh.pial:edgecolor=red $SD/surf/rh.pial:edgecolor=red"
+# Finally set the viewport
+ARGS="$ARGS -viewport coronal"
+
+# Now fire 'er up
+freeview $ARGS

@@ -1,0 +1,211 @@
+#! /usr/bin/env python
+"""
+This program will generate an animated gif 'flythrough' of a brain that has
+been processed with Freesurfer's recon-all. By default it displays the positioning
+of the white and pial surfaces, but it can also display the aseg or wmparc.  
+
+If the Nibabel package is installed, it will intuitively figure out where in the
+volume the brain begins and ends. Otherwise, you may end up with a fair amount
+of empty frames.
+
+If the '-out' option is not set, it will write a file to the 'gifs' directory
+in your subjects directory named according to which recon output is displayed.
+
+Note that this requires that your SUBJECTS_DIR environment directory is set
+properly and that graphics are enabled on your system.
+
+Written by Michael Waskom; mwaskom@mit.edu
+"""
+
+import os
+import sys
+import shutil
+import argparse
+import subprocess
+from tempfile import mkdtemp
+
+def main():
+   
+    # Check some things before starting
+    if not "SUBJECTS_DIR" in os.environ:
+        sys.exit("Subjects directory environment variable not set")
+    if not "DISPLAY" in os.environ:
+        sys.exit("Display not set -- tkmedit cannot open")
+
+    if not any((args.aseg, args.wmparc)):
+        args.surfs = True
+    else:
+        args.surfs = False
+
+    if args.aseg and args.wmparc:
+        sys.exit("ERROR: cannot specify both aseg and wmparc")
+
+    # Set up the output
+    if not args.out:
+        moviedir = os.path.join(os.environ["SUBJECTS_DIR"], args.subject, "gifs")
+        if not os.path.exists(moviedir):
+            os.mkdir(moviedir)
+            if args.verbose:
+                print "Creating ",moviedir
+        if args.surfs:
+            gif = "surf_movie.gif"
+        elif args.aseg:
+            gif = "aseg_movie.gif"
+        elif args.wmparc:
+            gif = "wmparc_movie.gif"
+        args.out = os.path.join(moviedir, gif)
+    if not os.path.isabs(args.out):
+        args.out = os.path.abspath(args.out)
+    
+    if args.verbose:
+        print "Final movie will be ",args.out
+
+    # Create a unique working directory and move to it
+    origdir = os.getcwd()
+    tempdir = mkdtemp()
+    if args.verbose:
+        print "Operating in ",tempdir
+
+    try:
+        os.chdir(tempdir)
+
+        start = 0
+        end = 0
+        # If Nibabel is installed, we can use it to figure out where the
+        # volume starts and stops in terms of coronal slices
+        # (I would like to do this on the command line, but am not 
+        # sure how to with fslstats, aside from using fslsplit 256 times...
+        try:
+            import nibabel as nib
+            import numpy as np
+            srcimg = os.path.join(os.environ["SUBJECTS_DIR"],args.subject,"mri","brainmask.mgz")
+            runcmd(["mri_convert", srcimg, "brainmask.nii.gz"])
+            img = nib.load("brainmask.nii.gz")
+            data = img.get_data()
+            for slice in range(256):
+                stuff = np.any(data[:,:,slice])
+                if not start and stuff:
+                    start = slice
+                elif start and not stuff:
+                    end = slice
+                    break
+
+        except ImportError:
+            pass
+
+        # Figure out what we want to be looking at,
+        # write a tcl script to do it,
+        # and set up the tkmedit options string
+        if args.surfs:
+            write_surf_script(start, end)
+            opts = "lh.white -aux-surface rh.white"
+        elif args.aseg or args.wmparc:
+            write_aseg_script(start, end)
+            if args.aseg:
+                opts = "-aseg"
+            elif args.wmparc:
+                opts = "-wmparc"
+        else:
+            sys.exit("Something has gone horribly wrong")
+
+        # Run tkmedit to generate a series of tifs
+        runcmd(["tkmedit", args.subject, "brainmask.mgz", opts, "-tcl movie.tcl"])
+        
+        # Convert these tifs to gifs
+        for frame in range(start, end+1):
+            runcmd(["convert", "movie-%03d.tif"%frame, "movie-%03d.gif"%frame])
+
+        # Stack the gifs into a movie
+        runcmd(["whirlgif","-o", args.out, "-loop 100 movie-*.gif"])
+
+
+    finally:
+        # Exit neatly
+        os.chdir(origdir)
+        if args.cleanup:
+            shutil.rmtree(tempdir)
+        else:
+            print "Temp dir %s not removed"%tempdir
+
+def write_surf_script(start, end):
+    """This will write a tcl script to the current directory that will:
+    - turn off the 'orig' surface
+    - make the pial surface blue and the white surface red
+    - save a screenshot of every coronal slice from the start to the end
+      (where the brain starts and ends is determined externally and passed in)
+
+    """
+    script = ["ToggleAndSendDisplayFlag flag_OriginalSurface"]
+    surfdict = {0:"255 0 0", 2:"0 0 255"}
+    for hemi in [0, 1]:
+        for surf in [0, 2]:
+            script.append("SetSurfaceLineColor %d %d %s"%(hemi, surf, surfdict[surf]))
+    for axis in ["X", "Y"]:
+        script.append("set n%s $gnVol%s(cursor)"%(axis, axis))
+    script.extend(["for { set nSlice %d } { $nSlice <= %d } { incr nSlice 1 } {"%(start,end),
+                   "set nZ $nSlice",
+                   "SetCursor 0 $nX $nY $nZ",
+                   "RedrawScreen",
+                   "SaveTIFF movie-[format \"%03d\" $nSlice].tif", "}",
+                   "exit"])
+
+    fid = open("movie.tcl", "w")
+    fid.write("\n".join(script))
+
+def write_aseg_script(start, end):
+    """This will write a tcl script to the current directory that will
+       save a screenshot of every coronal slice from the start to the end
+       (where the brain starts and ends is determined externally and passed in).
+       There's actually nothing aseg specific in here...
+
+    """
+    script = []
+    for axis in ["X", "Y"]:
+        script.append("set n%s $gnVol%s(cursor)"%(axis, axis))
+    script.extend(["for { set nSlice %d } { $nSlice <= %d } { incr nSlice 1 } {"%(start,end),
+                   "set nZ $nSlice",
+                   "SetCursor 0 $nX $nY $nZ",
+                   "RedrawScreen",
+                   "SaveTIFF movie-[format \"%03d\" $nSlice].tif", "}",
+                   "exit"])
+
+    fid = open("movie.tcl", "w")
+    fid.write("\n".join(script))
+
+def runcmd(cmdline, return_stdout=False):
+    """Use the subprocess.Popen class to run a command"""
+    cmd = " ".join(cmdline)
+    if args.verbose:
+        print cmd
+
+    proc = subprocess.Popen(cmd, 
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            env=os.environ,
+                            shell=True,
+                            cwd=os.getcwd())
+               
+    stdout, stderr = proc.communicate()
+
+    # Some of these programs are annoying about stderr
+    if stderr and not "WARNING" in stderr and not cmdline[0] in ["whirlgif","tkmedit"]:
+        raise RuntimeError(stderr)
+
+    if args.verbose:
+        print stdout
+    if return_stdout:
+        return stdout
+
+
+if __name__ == "__main__":
+    # Parse the command line and go, if we're using this in script mode
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-subject", help="subject", required=True)
+    parser.add_argument("-aseg", action="store_true", help="check aseg instead of surfs")
+    parser.add_argument("-wmparc", action="store_true", help="check wmparc instead of surfs")
+    parser.add_argument("-out", help="gif file to write")
+    parser.add_argument("-verbose", action="store_true", help="verbose output")
+    parser.add_argument("-nocleanup", dest="cleanup", action="store_false",
+                        help="don't remove temp directory")
+    args = parser.parse_args()
+    main()

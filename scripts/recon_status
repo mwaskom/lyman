@@ -1,0 +1,121 @@
+#! /usr/bin/env python
+"""
+Print information about the status of the Freesurfer reconstruction process.
+
+Note: The progress in terms of stage numbers is reported for Freesurfer 5.0.0,
+and may be slightly inaccurate for older versions.
+
+Written by Michael Waskom, mwaskom@mit.edu
+"""
+
+import os
+import re
+import sys
+import argparse
+from os.path import join as pjoin
+from glob import glob
+from datetime import datetime
+from cPickle import load
+
+
+def main(cmdline):
+    
+    # Parse commandline
+    args = parse_cmdline(cmdline)
+
+    # Figure out the subjects directory
+    if args.subjects_dir:
+        subjects_dir = args.subjects_dir
+    else:
+        subjects_dir = os.environ["SUBJECTS_DIR"]
+
+    # Get the subject list
+    if args.subject_template:
+        if "*" in args.subject_template or "?" in args.subject_template:
+            template = args.subject_template
+        else:
+            template = "%s*"%args.subject_template
+    else:
+        template = "*"
+
+    subjects = glob(pjoin(subjects_dir, template))
+    subjects = [p.split("/")[-1] for p in subjects if p]
+    subjects = [s for s in subjects if not "fsaverage" in s]
+    subjects.sort()
+
+    if args.subject:
+        if not all([s for s in args.subject if s in subjects]):
+            sys.exit("\nNo subject directory found for %s\n"%args.subject)
+        else:
+            subjects = args.subject
+
+    # Function to return the status log path
+    status_log = lambda s:pjoin(subjects_dir, s, "scripts", "recon-all-status.log")
+
+    # Get the current time
+    now = datetime.now()
+
+    # Get the status number lookup dictionary
+    try:
+        fid = open(pjoin(os.path.split(__file__)[0],"recon_status_table.pckl"))
+        stagenumber = load(fid)
+    except IOError:
+        stagenumber = {}
+
+    # Iterate through the subjects and print status messages
+    for s in subjects:
+        if not os.path.exists(status_log(s)):
+            if args.all:
+                print "%s: No recon log"%s
+        else:
+            try:
+                status = [l for l in open(status_log(s)) if l.strip()][-1].strip()
+            except IOError:
+                print "%s: Could not open status log"
+                continue
+            timelist = status.split()[-6:]
+            timestamp = datetime.strptime(" ".join(timelist), "%a %b %d %H:%M:%S %Z %Y") 
+            if status.startswith("#@#"):
+                uptime = now - timestamp
+                stage = " ".join(status.split()[1:-6])
+                try:
+                    prog = "(%d/62)"%stagenumber[stage]
+                except KeyError:
+                    prog = ""
+                print "%s: Stage - %s  %s  Uptime - %s"%(s, stage, prog, str(uptime)[:-7])
+            else:
+                if not args.inprogress:
+                    if not args.recent or ((now - timestamp).days < 5):
+                        msg = status.replace("recon-all -s %s "%s,"")[:-9]
+                        msg = msg.replace("finished","Finished")
+                        msg = msg.replace("exited","Exited")
+                        msg = msg.replace("without error ","")
+                        print "%s: %s"%(s, msg)
+
+def parse_cmdline(cmdline):
+    
+    # Parse the command line
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        usage="USAGE: recon_status [OPTIONS]")
+
+    parser.add_argument("-inprogress", action="store_true",
+                        help="only print status if recon is currently running")
+    parser.add_argument("-recent", action="store_true",
+                        help="print status if running or finished in the past 5 days")
+    parser.add_argument("-all", action="store_true",
+                        help="show subjects even if they have no recon log file")
+    parser.add_argument("-subject", dest="subject", nargs="*",
+                        help="show status for specific subject(s)")
+    parser.add_argument("-dir", metavar="SUBJECTSDIR", dest="subjects_dir",
+                        help="override environment subjects directory")
+    parser.add_argument("-template", metavar="TEMPLATE",dest="subject_template",
+                        help="template for subject ids (possibly useful with -all)")
+                        
+    return parser.parse_args(cmdline)
+
+
+
+if __name__ == "__main__":
+
+    main(sys.argv[1:])

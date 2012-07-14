@@ -1,0 +1,71 @@
+#! /usr/bin/env python
+import os
+import sys
+import subprocess
+import shutil
+from tempfile import mkdtemp
+
+def runcmd(cmd, v):
+    """Run a command using subprocess."""
+    cmdline = " ".join(cmd)
+    if v:
+        print cmdline
+    proc = subprocess.Popen(cmdline,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            env=os.environ,
+                            shell=True)
+    res = proc.communicate()
+    if v:
+        print "\n".join(proc.communicate*())
+
+def main(args):
+    """Slice an image in MNI space in several orthogonal planes."""
+    
+    if len(args) < 3:
+        sys.exit("USAGE: %s <in_file> <out_file>"%os.path.basename(__file__))
+    image = os.path.abspath(args[1])
+    out_png = os.path.abspath(args[2])
+    target_brain = os.path.join(os.environ["FSLDIR"], "data", "standard", "avg152T1_brain.nii.gz")
+
+    origdir = os.getcwd()
+    tmpdir = mkdtemp()
+    os.chdir(tmpdir)
+    
+    v = False
+    if "-v" in args:
+        v = True
+
+    planes = ["x","y","z"]
+    options = []
+    for plane in planes:
+        for slice in ["%.2f"%i for i in .15,.3,.45,.5,.55,.7,.85]:
+            if not(plane == "x" and slice == "0.50"):
+                options.append((plane,slice))
+
+    shots = ["%s-%s.png"%i for i in options]
+
+    for i, shot in enumerate(shots):
+        cmd = ["/usr/share/fsl/4.1/bin/slicer", 
+               image,
+               target_brain,
+               "-%s"%options[i][0],
+               options[i][1],
+               shot]
+        runcmd(cmd, v)
+    for i in range(3):
+        cmd = ["pngappend"]
+        cmd.append(" + ".join([s for s in shots if s.startswith(planes[i])]))
+        rowimg = "row-%d.png"%i
+        cmd.append(rowimg)
+        shots.append(rowimg)
+        runcmd(cmd,v)
+    cmd = ["pngappend"]
+    cmd.append(" - ".join(["row-%d.png"%i for i in range(3)]))
+    cmd.append(out_png)
+    runcmd(cmd,v)
+    os.chdir(origdir)
+    shutil.rmtree(tmpdir)
+
+if __name__ == "__main__":
+    main(sys.argv)

@@ -1,0 +1,111 @@
+#! /usr/bin/env python
+"""Written by Mike Waskom, mwaskom@mit.edu"""
+import os
+import sys
+import time
+from glob import glob
+import numpy as np
+
+
+def main():
+
+    proc_lengths = {}
+    log_files = get_log_files()
+    for lf in log_files:
+        statuslist = file_to_status_list(lf)
+        procs = [s for i, s in enumerate(statuslist) if i in get_process_indices(statuslist)]
+        for status in procs:
+            name = get_process_name(status)
+            if not exited_with_errors(status, statuslist):
+                length = get_process_length(status, statuslist)
+                if name in proc_lengths:
+                    proc_lengths[name].append(length)
+                else:
+                    proc_lengths[name] = [length]
+
+    repr = ""
+    total = 0
+    padding = max([len(p) for p in proc_lengths]) + 3
+    for proc in proc_lengths:
+        mean = np.mean(proc_lengths[proc])
+        total += mean
+        std = np.std(proc_lengths[proc])
+        white1 = "".join([" " for i in range(padding - len(proc))])
+        white2 = "".join([" " for i in range(10 - len("%.3f"%mean))])
+        repr = "%s%s:%s%.2f%s%.2f\n"%(repr,proc,white1,mean,white2,std)
+    repr = "\n".join(["\nProc                               Mean     Std",
+                      "----                               ----     ---",repr])
+    print repr
+
+def get_log_files(directory="."):
+    
+    files = glob("*/scripts/recon-all-status.log")
+    files = [f for f in files if not f.startswith("fsaverage")]
+    if files:
+        return files
+    else:
+        sys.exit("Current directory does not appear to be a Freesurfer subjects directory")
+
+def file_to_status_list(filename):
+
+    return open(filename).read().split("\n")
+
+def get_process_indices(statuslist):
+
+    idxs = [i for i, status in enumerate(statuslist) if (
+        status.startswith("#@#") and not status.startswith("#@# Qdec"))]
+    return idxs
+
+def is_hemi_specific(status):
+
+    splitstatus = status.split()
+    if splitstatus[-7] in ["lh", "rh"]:
+        return True
+    return False
+
+def get_hemi(status):
+    
+    return status[:-7]
+
+def get_process_name(status):
+
+    if is_hemi_specific(status):
+        status = status.split()
+        return " ".join(status[1:-7])
+    status = status.split()
+    return " ".join(status[1:-6])
+
+def get_timestamp(status):
+
+    timestr = " ".join(status.split()[-6:])
+    timestruct = time.strptime(timestr, "%a %b %d %H:%M:%S %Z %Y")
+    return time.mktime(timestruct)
+
+def exited_with_errors(status, statuslist):
+    
+    idx = [i for i, s in enumerate(statuslist) if statuslist[i] == status][0]
+    for l in range(idx+1, len(statuslist)):
+        if statuslist[l].startswith("#@#"):
+            return False
+        elif statuslist[l].startswith("recon-all finished without error"):
+            return False
+        elif "with ERRORS" in statuslist[l]:
+            return True
+        elif statuslist[l].startswith("New invocation of recon-all"):
+            return True
+    return True
+
+def get_process_length(status, statuslist):
+
+    idx = [i for i, s in enumerate(statuslist) if status == s][0]
+    if exited_with_errors(status, statuslist):
+        raise ReconError
+    else:
+        procstart = get_timestamp(status)
+        procend = get_timestamp(statuslist[idx + 1])
+        return (procend - procstart)/60
+
+if __name__ == "__main__":
+
+    main()
+
