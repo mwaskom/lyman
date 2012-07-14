@@ -67,11 +67,11 @@ def main(arglist):
             # Otherwise it's done
             donefor = (now - timestamp).days
             if not args.inprogress and not (args.recent and donefor > 5):
-                    msg = status.replace("recon-all -s %s " % s, "")[:-9]
-                    msg = msg.replace("finished", "Finished")
-                    msg = msg.replace("exited", "Exited")
-                    msg = msg.replace("without error ", "")
-                    print "%s: %s" % (subj, msg)
+                msg = status.replace("recon-all -s %s " % s, "")[:-9]
+                msg = msg.replace("finished", "Finished")
+                msg = msg.replace("exited", "Exited")
+                msg = msg.replace("without error ", "")
+                print "%s: %s" % (subj, msg)
 
 
 def parse_cmdline(arglist):
