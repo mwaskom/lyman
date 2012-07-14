@@ -1,4 +1,39 @@
 #! /usr/bin/env python
+"""Create masks in native functional space from a variety of sources.
+
+Currently this can start with ROIs defined as a surface label on
+fsaverage, labels defined on each subject's native surface, ROIs
+defined on the high-res volume in Freesurfer space, or a statistical
+volume from a subject-level analysis.
+
+You can always pass a filepath (possibly with ``subj`` and ``hemi``
+string format keys to -orig and the program will work out what to
+do from the file type and other arugments. Alternatively, if files
+are in expected places (Freesurfer data hierarchy, lyman analysis
+hierarchy) there are shortcuts for the corresponding image type.
+
+The processing is almost entirely dependent on external binaries
+from FSL and Freesurfer, so both must be availible.
+
+The resulting masks are defined in the space of the first functional
+run. This is also the target of the ``-regspace epi`` registration
+in the main lyman fmri workflows.
+
+The processing here is closely tied to these fmri workflows and requires
+subject-level preprocessing to have been performed. This program
+should be executed from a directory containing a project.py file
+that defines the relevant data and analysis paths.
+
+The script will also write a mosiac png with the mask overlaid on
+the mean functional image defining the epi space. Additionally, it
+will write a json file with the command line argument dictionary
+for provenence tracking.
+
+If an IPython cluster is running, the processing will be executed
+in parallel by default on all availible engines. This can be avoided
+by using the -serial option.
+
+"""
 import sys
 import json
 import time
@@ -112,44 +147,7 @@ def main(arglist):
 
 def parse_args(arglist):
     """Handle the command line."""
-    help_text = dedent("""\
-    Create masks in native functional space from a variety of sources.
-
-    Currently this can start with ROIs defined as a surface label on
-    fsaverage, labels defined on each subject's native surface, ROIs
-    defined on the high-res volume in Freesurfer space, or a statistical
-    volume from a subject-level analysis.
-
-    You can always pass a filepath (possibly with ``subj`` and ``hemi``
-    string format keys to -orig and the program will work out what to
-    do from the file type and other arugments. Alternatively, if files
-    are in expected places (Freesurfer data hierarchy, lyman analysis
-    hierarchy) there are shortcuts for the corresponding image type.
-
-    The processing is almost entirely dependent on external binaries
-    from FSL and Freesurfer, so both must be availible.
-
-    The resulting masks are defined in the space of the first functional
-    run. This is also the target of the ``-regspace epi`` registration
-    in the main lyman fmri workflows.
-
-    The processing here is closely tied to these fmri workflows and requires
-    subject-level preprocessing to have been performed. This program
-    should be executed from a directory containing a project.py file
-    that defines the relevant data and analysis paths.
-
-    The script will also write a mosiac png with the mask overlaid on
-    the mean functional image defining the epi space. Additionally, it
-    will write a json file with the command line argument dictionary
-    for provenence tracking.
-
-    If an IPython cluster is running, the processing will be executed
-    in parallel by default on all availible engines. This can be avoided
-    by using the -serial option.
-
-    """)
-
-    parser = argparse.ArgumentParser(description=help_text,
+    parser = argparse.ArgumentParser(description=__doc__,
                 formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Necessary arguments
