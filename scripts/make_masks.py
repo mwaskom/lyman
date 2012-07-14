@@ -38,7 +38,6 @@ import sys
 import json
 import time
 import os.path as op
-from textwrap import dedent
 import argparse
 
 from lyman import MaskFactory
@@ -52,24 +51,18 @@ def main(arglist):
     # Determine the type of processing we will do
     # First look for shortcut keys
     if args.label is not None:
-        if args.native:
-            orig_type = "native_label"
-        else:
-            orig_type = "fsaverage_label"
+        orig_type = "native_label" if args.label else "fsaverage_label"
     elif args.contrast is not None:
         orig_type = "stat_volume"
     elif args.aseg is not None:
         orig_type = "index_volume"
     # Otherwise we have to figure it out from the other arguments
     elif args.orig is not None and args.orig.endswith(".label"):
-        if args.native:
-            orig_type = "native_label"
-        else:
-            orig_type = "fsaverage_label"
-    elif args.roi_id is not None:
-        orig_type = "index_volume"
+        orig_type = "native_label" if args.label else "fsaverage_label"
     elif args.thresh is not None:
         orig_type = "stat_volume"
+    elif args.roi_id is not None:
+        orig_type = "index_volume"
     else:
         raise ValueError("Could not determine orig type from arguments.")
 
@@ -148,7 +141,7 @@ def main(arglist):
 def parse_args(arglist):
     """Handle the command line."""
     parser = argparse.ArgumentParser(description=__doc__,
-                formatter_class=argparse.RawDescriptionHelpFormatter)
+        formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Necessary arguments
     parser.add_argument("-s", "-subjects", nargs="*", dest="subjects",
@@ -175,7 +168,6 @@ def parse_args(arglist):
     parser.add_argument("-proj", nargs=4,
                         help="projection args passed directly mri_label2vol")
     parser.add_argument("-save-native", action="store_true")
-    # Add in shortcuts for e.g. graymid sampling
 
     # Atlas-type image relevant images
     parser.add_argument("-aseg", action="store_true",
