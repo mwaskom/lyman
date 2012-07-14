@@ -104,7 +104,7 @@ def main(arglist):
     # Get the current date
     args.created = time.asctime()
     # Write provenence information
-    for subj in args.subjects:
+    for subj in factory.subject_list:
         json_file = op.join(factory.data_dir, subj, "masks/%s.json" % args.roi)
         with open(json_file, "w") as fid:
             json.dump(args.__dict__, fid, sort_keys=True)
