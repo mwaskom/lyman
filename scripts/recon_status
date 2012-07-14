@@ -1,121 +1,93 @@
 #! /usr/bin/env python
-"""
-Print information about the status of the Freesurfer reconstruction process.
-
-Note: The progress in terms of stage numbers is reported for Freesurfer 5.0.0,
-and may be slightly inaccurate for older versions.
-
-Written by Michael Waskom, mwaskom@mit.edu
-"""
-
+"""Show the status of Freesurfer recon-all processing."""
 import os
-import re
 import sys
 import argparse
-from os.path import join as pjoin
+import os.path as op
 from glob import glob
 from datetime import datetime
-from cPickle import load
+import numpy as np
 
 
-def main(cmdline):
-    
+def main(arglist):
+
     # Parse commandline
-    args = parse_cmdline(cmdline)
+    args = parse_cmdline(arglist)
 
     # Figure out the subjects directory
-    if args.subjects_dir:
+    if args.subjects_dir is not None:
         subjects_dir = args.subjects_dir
     else:
         subjects_dir = os.environ["SUBJECTS_DIR"]
 
-    # Get the subject list
-    if args.subject_template:
-        if "*" in args.subject_template or "?" in args.subject_template:
-            template = args.subject_template
-        else:
-            template = "%s*"%args.subject_template
+    if args.subjects:
+        # Possibly look up a specific set of subjects
+        subjects = args.subjects
+        subj_logs = [op.join(subjects_dir, s,
+                             "scripts/recon-all-status.log")
+                     for s in args.subjects]
     else:
-        template = "*"
-
-    subjects = glob(pjoin(subjects_dir, template))
-    subjects = [p.split("/")[-1] for p in subjects if p]
-    subjects = [s for s in subjects if not "fsaverage" in s]
-    subjects.sort()
-
-    if args.subject:
-        if not all([s for s in args.subject if s in subjects]):
-            sys.exit("\nNo subject directory found for %s\n"%args.subject)
-        else:
-            subjects = args.subject
-
-    # Function to return the status log path
-    status_log = lambda s:pjoin(subjects_dir, s, "scripts", "recon-all-status.log")
+        # Otherwise look at everyone with a log
+        subj_logs = glob(op.join(subjects_dir, "*",
+                         "scripts/recon-all-status.log"))
+        subjects = [p.split("/")[-3] for p in subj_logs]
+        try:
+            subjects.remove("fsaverage")
+        except ValueError:
+            pass
+        sorter = np.argsort(subjects)
+        subjects = np.array(subjects)[sorter]
+        subj_logs = np.array(subjects)[sorter]
 
     # Get the current time
     now = datetime.now()
 
-    # Get the status number lookup dictionary
-    try:
-        fid = open(pjoin(os.path.split(__file__)[0],"recon_status_table.pckl"))
-        stagenumber = load(fid)
-    except IOError:
-        stagenumber = {}
-
     # Iterate through the subjects and print status messages
-    for s in subjects:
-        if not os.path.exists(status_log(s)):
-            if args.all:
-                print "%s: No recon log"%s
+    for subj, log in zip(subjects, subj_logs):
+        try:
+            log_file = open(log)
+        except IOError:
+            print "%s: Could not open status log"
+            continue
+        log_entries = log_file.readlines()
+        log_file.close()
+        # Prune off empty lines
+        while not log_entries[-1]:
+            log_entries.pop()
+        status = log_entries[-1]
+        timestr = " ".join(status.split()[-6:])
+        timestamp = datetime.strptime(timestr)
+
+        if status.startswith("#@#"):
+            # This string means it's still going
+            uptime = str(now - timestamp)[:-7]
+            stage = " ".join(status.split()[1:-6])
+            print "%s: Stage - %s  Uptime - %s" % (subj, stage, uptime)
         else:
-            try:
-                status = [l for l in open(status_log(s)) if l.strip()][-1].strip()
-            except IOError:
-                print "%s: Could not open status log"
-                continue
-            timelist = status.split()[-6:]
-            timestamp = datetime.strptime(" ".join(timelist), "%a %b %d %H:%M:%S %Z %Y") 
-            if status.startswith("#@#"):
-                uptime = now - timestamp
-                stage = " ".join(status.split()[1:-6])
-                try:
-                    prog = "(%d/62)"%stagenumber[stage]
-                except KeyError:
-                    prog = ""
-                print "%s: Stage - %s  %s  Uptime - %s"%(s, stage, prog, str(uptime)[:-7])
-            else:
-                if not args.inprogress:
-                    if not args.recent or ((now - timestamp).days < 5):
-                        msg = status.replace("recon-all -s %s "%s,"")[:-9]
-                        msg = msg.replace("finished","Finished")
-                        msg = msg.replace("exited","Exited")
-                        msg = msg.replace("without error ","")
-                        print "%s: %s"%(s, msg)
+            # Otherwise it's done
+            donefor = (now - timestamp).days
+            if not args.inprogress and not (args.recent and donefor > 5):
+                    msg = status.replace("recon-all -s %s " % s, "")[:-9]
+                    msg = msg.replace("finished", "Finished")
+                    msg = msg.replace("exited", "Exited")
+                    msg = msg.replace("without error ", "")
+                    print "%s: %s" % (subj, msg)
 
-def parse_cmdline(cmdline):
-    
-    # Parse the command line
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        usage="USAGE: recon_status [OPTIONS]")
 
-    parser.add_argument("-inprogress", action="store_true",
-                        help="only print status if recon is currently running")
-    parser.add_argument("-recent", action="store_true",
-                        help="print status if running or finished in the past 5 days")
-    parser.add_argument("-all", action="store_true",
-                        help="show subjects even if they have no recon log file")
-    parser.add_argument("-subject", dest="subject", nargs="*",
+def parse_cmdline(arglist):
+
+    parser = argparse.ArgumentParser(description=__doc__)
+
+    parser.add_argument("-dir", dest="subjects_dir",
+                        help="override SUBJECTS_DIR variable")
+    parser.add_argument("-subjects", nargs="*", metavar="SUBJ",
                         help="show status for specific subject(s)")
-    parser.add_argument("-dir", metavar="SUBJECTSDIR", dest="subjects_dir",
-                        help="override environment subjects directory")
-    parser.add_argument("-template", metavar="TEMPLATE",dest="subject_template",
-                        help="template for subject ids (possibly useful with -all)")
-                        
-    return parser.parse_args(cmdline)
-
+    parser.add_argument("-inprogress", action="store_true",
+                        help="skip if recon is finished")
+    parser.add_argument("-recent", action="store_true",
+                        help="skip if finished more than 5 days ago")
+    return parser.parse_args(arglist)
 
 
 if __name__ == "__main__":
-
     main(sys.argv[1:])
