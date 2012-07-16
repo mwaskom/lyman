@@ -51,7 +51,7 @@ def main(arglist):
     # Determine the type of processing we will do
     # First look for shortcut keys
     if args.label is not None:
-        orig_type = "native_label" if args.label else "fsaverage_label"
+        orig_type = "native_label" if args.native else "fsaverage_label"
     elif args.contrast is not None:
         orig_type = "stat_volume"
     elif args.aseg is not None:
@@ -65,6 +65,8 @@ def main(arglist):
         orig_type = "index_volume"
     else:
         raise ValueError("Could not determine orig type from arguments.")
+    if args.debug:
+        print "Processing type: %s" % orig_type
 
     # Initialise a factory object
     factory = MaskFactory(args.subjects, args.exp, args.roi, orig_type,
