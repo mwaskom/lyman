@@ -17,22 +17,46 @@ def event_designs(evs, ntp, tr=2, hrf_model="canonical",
     ev_ids = [np.zeros(evs[:, 0].size) * i for i in range(n_ev)]
     ev_ids = np.concatenate(ev_ids)
     stim_idxs = np.concatenate([np.arange(len(ev)) for ev in evs])
-    master_sched = np.vstack(evs)
-    master_sched = np.column_stack((master_sched[:, 0], ev_ids, stim_idxs))
+    master_sched = np.row_stack(evs)
+    master_sched = np.column_stack((master_sched, ev_ids, stim_idxs))
     timesorter = np.argsort(master_sched[:, 0])
     master_sched = master_sched[timesorter]
 
     frametimes = np.linspace(0, ntp - tr, ntp / tr)
 
-    for ii, (time, ev_id, stim_idx) in enumerate(master_sched):
+    n_cond = len(evs)
+    for ii, row in enumerate(master_sched):
+        time, dur, amp, ev_id, stim_idx = row
         ev_interest = evs[ev_id][stim_idx]
         ev_interest = np.atleast_2d(ev_interest).T
 
-        reg_interest, _ = hrf.compute_regressor(ev_interest,
-                                                hrf_model,
-                                                frametimes)
+        design_mat, _ = hrf.compute_regressor(ev_interest,
+                                              hrf_model,
+                                              frametimes)
 
-        yield reg_interest
+        if split_confounds:
+            for cond in range(n_cond):
+                conf_sched = master_sched[master_sched[:, 3] == cond]
+                if n_cond == ev_id:
+                    if ii < len(master_sched):
+                        conf_sched = conf_sched[:stim_idx, stim_idx + 1:]
+                    else:
+                        conf_sched = conf_sched[:-1]
+                conf_reg, _ = hrf.compute_regressor(conf_sched[:, :3].T,
+                                                    hrf_model,
+                                                    frametimes)
+                design_mat = np.column_stack((design_mat, conf_reg))
+        else:
+            if ii < len(master_sched):
+                conf_sched = master_sched[:ii, ii + 1:]
+            else:
+                conf_sched = master_sched[:-1]
+            conf_reg, _  = hrf.compute_regressor(conf_sched[:, :3].T,
+                                                 hrf_model,
+                                                 frametimes)
+            design_mat = np.column_stack((design_mat, conf_reg))
+
+        yield design_mat
 
 
 def deconvolve_event(X, data):
