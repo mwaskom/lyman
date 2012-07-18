@@ -123,7 +123,7 @@ class MaskFactory(object):
         # the subject's label directory
         if save_native:
             save_temp = op.join(self.data_dir, "%(subj)s", "label",
-                                "%(hemi)s" + self.roi_name + ".label")
+                                "%(hemi)s." + self.roi_name + ".label")
             for subj in self.subject_list:
                 for hemi in hemis:
                     args = dict(subj=subj, hemi=hemi)

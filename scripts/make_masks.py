@@ -97,7 +97,8 @@ def main(arglist):
         elif orig_type == "fsaverage_label":
             label_temp = op.join(factory.data_dir, "fsaverage",
                                  "label", file_temp)
-            factory.from_common_label(label_temp, hemis, proj_args)
+            factory.from_common_label(label_temp, hemis,
+                                      proj_args, args.save_native)
 
     # Index volumes (atlas type)
     elif orig_type == "index_volume":
@@ -169,7 +170,8 @@ def parse_args(arglist):
                         help="shortcut for projection arguments")
     parser.add_argument("-proj", nargs=4,
                         help="projection args passed directly mri_label2vol")
-    parser.add_argument("-save-native", action="store_true")
+    parser.add_argument("-save_native", action="store_true",
+                        help="save label file after warping from common space")
 
     # Atlas-type image relevant images
     parser.add_argument("-aseg", action="store_true",
