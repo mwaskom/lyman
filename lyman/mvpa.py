@@ -1,8 +1,8 @@
 from __future__ import division
-import moss
 import numpy as np
 import scipy as sp
 import nipy.modalities.fmri.hemodynamic_models as hrf
+import moss
 
 
 def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128,
@@ -31,25 +31,27 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128,
         array of deconvolved parameter estimates
 
     """
+    # Possibly filter the data
     if hpf_cutoff is None:
         data -= data.mean(axis=0)
     else:
         data = moss.fsl_highpass_filter(data, hpf_cutoff,
                                         tr, copy=False)
-
-    coef_list = []
-
     ntp = data.shape[0]
-    for ii, X_i in enumerate(event_designs(evs, ntp, tr,
-                                           split_confounds,
-                                           hrf_model)):
+
+    # Devoncolve the parameter estimate for each event
+    coef_list = []
+    for X_i in event_designs(evs, ntp, tr, split_confounds, hrf_model):
+        # Filter each design matrix
         if hpf_cutoff is None:
             X_i -= X_i.mean(axis=0)
         else:
             X_i = moss.fsl_highpass_filter(X_i, hpf_cutoff,
                                            tr, copy=False)
+        # Fit on OLS model
         beta_i, _, _, _ = np.linalg.lstsq(X_i, data)
-        coef_list.append(beta_i)
+        # Take the beta for the first regressor
+        coef_list.append(beta_i[0])
 
     return np.array(coef_list)
 
