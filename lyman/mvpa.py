@@ -48,7 +48,7 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128,
         else:
             X_i = moss.fsl_highpass_filter(X_i, hpf_cutoff,
                                            tr, copy=False)
-        # Fit on OLS model
+        # Fit an OLS model
         beta_i, _, _, _ = np.linalg.lstsq(X_i, data)
         # Take the beta for the first regressor
         coef_list.append(beta_i[0])
