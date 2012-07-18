@@ -29,7 +29,7 @@ if __name__ == "__main__":
         license=LICENSE,
         version=VERSION,
         download_url=DOWNLOAD_URL,
-        packages=['lyman',
+        packages=['lyman', 'lyman.tests',
                   'lyman.workflows', 'lyman.workflows.tests',
                   'lyman.tools', 'lyman.tools.tests'],
         scripts=['scripts/run_fmri.py', 'scripts/run_group.py',

@@ -1,64 +1,118 @@
 from __future__ import division
+import moss
 import numpy as np
 import scipy as sp
 import nipy.modalities.fmri.hemodynamic_models as hrf
 
 
-def iterated_deconvolution(schedule, data):
-    """Deconvolve stimulus events from an ROI data matrix."""
-    pass
+def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128,
+                           split_confounds=True, hrf_model="canonical"):
+    """Deconvolve stimulus events from an ROI data matrix.
+
+    Parameters
+    ----------
+    data : ntp x n_feat
+        array of fMRI data from an ROI
+    evs : sequence of n x 3 arrays
+        list of (onset, duration, amplitude) event specifications
+    tr : int
+        time resolution in seconds
+    hpf_cutoff : float
+        filter cutoff in seconds or None to skip filter
+        data and design are de-meaned in either case
+    split_confounds : boolean
+        if true, confound regressors are separated by event type
+    hrf_model : string
+        nipy hrf_model specification name
+
+    Returns
+    -------
+    coef_array : n_ev x n_feat array
+        array of deconvolved parameter estimates
+
+    """
+    if hpf_cutoff is None:
+        data -= data.mean(axis=0)
+    else:
+        data = moss.fsl_highpass_filter(data, hpf_cutoff,
+                                        tr, copy=False)
+
+    coef_list = []
+
+    ntp = data.shape[0]
+    for ii, X_i in enumerate(event_designs(evs, ntp, tr,
+                                           split_confounds,
+                                           hrf_model)):
+        if hpf_cutoff is None:
+            X_i -= X_i.mean(axis=0)
+        else:
+            X_i = moss.fsl_highpass_filter(X_i, hpf_cutoff,
+                                           tr, copy=False)
+        beta_i, _, _, _ = np.linalg.lstsq(X_i, data)
+        coef_list.append(beta_i)
+
+    return np.array(coef_list)
 
 
-def event_designs(evs, ntp, tr=2, hrf_model="canonical",
-                  split_confounds=True):
-    """Generator function to return event-wise design matrices."""
-    evs = np.asarray(evs)
-    n_ev = len(evs)
-    ev_ids = [np.zeros(evs[:, 0].size) * i for i in range(n_ev)]
-    ev_ids = np.concatenate(ev_ids)
-    stim_idxs = np.concatenate([np.arange(len(ev)) for ev in evs])
-    master_sched = np.row_stack(evs)
-    master_sched = np.column_stack((master_sched, ev_ids, stim_idxs))
-    timesorter = np.argsort(master_sched[:, 0])
-    master_sched = master_sched[timesorter]
+def event_designs(evs, ntp, tr=2, split_confounds=True,
+                  hrf_model="canonical"):
+    """Generator function to return event-wise design matrices.
 
-    frametimes = np.linspace(0, ntp - tr, ntp / tr)
+    Parameters
+    ----------
+    evs : sequence of n x 3 arrays
+        list of (onset, duration, amplitude) event secifications
+    ntp : int
+        total number of timepoints in experiment
+    tr : int
+        time resolution in seconds
+    split_confounds : boolean
+        if true, confound regressors are separated by event type
+    hrf_model : string
+        nipy hrf_model specification name
 
+    Yields
+    ------
+    design_mat : ntp x (2 or n event + 1) array
+        yields a design matrix to deconvolve each event
+        with the event of interest as the first column
+
+    """
     n_cond = len(evs)
-    for ii, row in enumerate(master_sched):
-        time, dur, amp, ev_id, stim_idx = row
-        ev_interest = evs[ev_id][stim_idx]
-        ev_interest = np.atleast_2d(ev_interest).T
+    master_sched = moss.make_master_schedule(evs)
 
+    # Create a vector of frame onset times
+    frametimes = np.linspace(0, ntp * tr - tr, ntp)
+
+    # Generator loop
+    for ii, row in enumerate(master_sched):
+        # Unpack the schedule row
+        time, dur, amp, ev_id, stim_idx = row
+
+        # Generate the regressor for the event of interest
+        ev_interest = np.atleast_2d(row[:3]).T
         design_mat, _ = hrf.compute_regressor(ev_interest,
                                               hrf_model,
                                               frametimes)
 
+        # Build the confound regressors
         if split_confounds:
+            # Possibly one for each event type
             for cond in range(n_cond):
-                conf_sched = master_sched[master_sched[:, 3] == cond]
-                if n_cond == ev_id:
-                    if ii < len(master_sched):
-                        conf_sched = conf_sched[:stim_idx, stim_idx + 1:]
-                    else:
-                        conf_sched = conf_sched[:-1]
+                cond_idx = master_sched[:, 3] == cond
+                conf_sched = master_sched[cond_idx]
+                if cond == ev_id:
+                    conf_sched = np.delete(conf_sched, stim_idx, 0)
                 conf_reg, _ = hrf.compute_regressor(conf_sched[:, :3].T,
                                                     hrf_model,
                                                     frametimes)
                 design_mat = np.column_stack((design_mat, conf_reg))
         else:
-            if ii < len(master_sched):
-                conf_sched = master_sched[:ii, ii + 1:]
-            else:
-                conf_sched = master_sched[:-1]
-            conf_reg, _  = hrf.compute_regressor(conf_sched[:, :3].T,
-                                                 hrf_model,
-                                                 frametimes)
+            # Or a single confound regressor
+            conf_sched = np.delete(master_sched, ii, 0)
+            conf_reg, _ = hrf.compute_regressor(conf_sched[:, :3].T,
+                                                hrf_model,
+                                                frametimes)
             design_mat = np.column_stack((design_mat, conf_reg))
 
         yield design_mat
-
-
-def deconvolve_event(X, data):
-    """Given a design matrix for a particular event return a row of betas."""
-    pass
