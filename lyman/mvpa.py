@@ -5,8 +5,9 @@ import nipy.modalities.fmri.hemodynamic_models as hrf
 import moss
 
 
-def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128,
-                           split_confounds=True, hrf_model="canonical"):
+def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
+                           copy_data=False, split_confounds=True,
+                           hrf_model="canonical"):
     """Deconvolve stimulus events from an ROI data matrix.
 
     Parameters
@@ -17,9 +18,11 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128,
         list of (onset, duration, amplitude) event specifications
     tr : int
         time resolution in seconds
-    hpf_cutoff : float
+    hpf_cutoff : float or None
         filter cutoff in seconds or None to skip filter
-        data and design are de-meaned in either case
+    filter_data : bool
+        if False data is assumed to have been filtered
+    copy_data : if False data is filtered in place
     split_confounds : boolean
         if true, confound regressors are separated by event type
     hrf_model : string
@@ -32,22 +35,21 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128,
 
     """
     # Possibly filter the data
-    if hpf_cutoff is None:
-        data -= data.mean(axis=0)
-    else:
+    if hpf_cutoff is not None and filter_data:
         data = moss.fsl_highpass_filter(data, hpf_cutoff,
                                         tr, copy=False)
+    # Demean by feature
+    data -= data.mean(axis=0)
     ntp = data.shape[0]
 
     # Devoncolve the parameter estimate for each event
     coef_list = []
     for X_i in event_designs(evs, ntp, tr, split_confounds, hrf_model):
         # Filter each design matrix
-        if hpf_cutoff is None:
-            X_i -= X_i.mean(axis=0)
-        else:
+        if hpf_cutoff is not None:
             X_i = moss.fsl_highpass_filter(X_i, hpf_cutoff,
                                            tr, copy=False)
+        X_i -= X_i.mean(axis=0)
         # Fit an OLS model
         beta_i, _, _, _ = np.linalg.lstsq(X_i, data)
         # Take the beta for the first regressor
