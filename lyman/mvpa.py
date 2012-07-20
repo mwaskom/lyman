@@ -35,20 +35,24 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
 
     """
     # Possibly filter the data
-    if hpf_cutoff is not None and filter_data:
-        data = moss.fsl_highpass_filter(data, hpf_cutoff,
-                                        tr, copy=False)
+    ntp = data.shape[0]
+    if hpf_cutoff is not None:
+        F = moss.fsl_highpass_matrix(ntp, hpf_cutoff, tr)
+        if filter_data:
+            if copy_data:
+                data = data.copy()
+            for j, col in enumerate(data.T):
+                data[:, j] = np.dot(F, col)
     # Demean by feature
     data -= data.mean(axis=0)
-    ntp = data.shape[0]
 
     # Devoncolve the parameter estimate for each event
     coef_list = []
     for X_i in event_designs(evs, ntp, tr, split_confounds, hrf_model):
         # Filter each design matrix
         if hpf_cutoff is not None:
-            X_i = moss.fsl_highpass_filter(X_i, hpf_cutoff,
-                                           tr, copy=False)
+            for j, col in enumerate(X_i.T):
+                X_i[:, j] = np.dot(F, col)
         X_i -= X_i.mean(axis=0)
         # Fit an OLS model
         beta_i, _, _, _ = np.linalg.lstsq(X_i, data)
