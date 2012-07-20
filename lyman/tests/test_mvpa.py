@@ -48,3 +48,21 @@ def test_event_confounds():
     mat = gen.next()
     peak = np.argmax(mat[:, 0])
     nose.tools.assert_not_equal(mat[peak, 0], mat[peak, 1])
+
+
+def test_deconvolved_shape():
+    """Test shape of deconvolution output."""
+    data = np.random.randn(16, 10)
+    deonv = mvpa.iterated_deconvolution(data, evs)
+    assert_equal(deonv.shape, (4, 10))
+
+
+def test_deconvolve_estimate():
+    """Roughly test deconvolution performance."""
+    data = np.random.randn(16, 10)
+    data[4:7] += 50
+    data[10:13] += 50
+    deconv = mvpa.iterated_deconvolution(data, evs)
+    high = deconv[(0, 2)]
+    low = deconv[(1, 3)]
+    nose.tools.assert_greater(high, low)
