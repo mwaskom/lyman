@@ -42,6 +42,20 @@ def test_design_columns():
     assert(all([i == n_cols for i in n_col_list]))
 
 
+def test_fir_design():
+    """Check assumptions when using FIR deconvolution."""
+    gen = mvpa.event_designs(evs, 20, 2, True, "fir", 5)
+    mat = gen.next()
+    ncol = mat.shape[1]
+    assert_equal(ncol, 15)
+    nose.tools.assert_less_equal(mat.max(), 1)
+    assert_array_equal(mat.min(axis=0), np.zeros(ncol))
+    r1 = np.argwhere(mat[:, 0])
+    r2 = np.argwhere(mat[:, 1])
+    rdiff = r1 - r2
+    assert(np.all(rdiff <= 0))
+
+
 def test_event_confounds():
     """Test that event of interest is removed from confound columns."""
     gen = mvpa.event_designs(evs, 15, split_confounds=False)

@@ -7,7 +7,7 @@ import moss
 
 def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
                            copy_data=False, split_confounds=True,
-                           hrf_model="canonical"):
+                           hrf_model="canonical", fir_bins=12):
     """Deconvolve stimulus events from an ROI data matrix.
 
     Parameters
@@ -27,6 +27,8 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
         if true, confound regressors are separated by event type
     hrf_model : string
         nipy hrf_model specification name
+    fir_bins : none or int
+        number of bins if hrf_model is "fir"
 
     Returns
     -------
@@ -47,21 +49,25 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
 
     # Devoncolve the parameter estimate for each event
     coef_list = []
-    for X_i in event_designs(evs, ntp, tr, split_confounds, hrf_model):
+    for X_i in event_designs(evs, ntp, tr, split_confounds,
+                             hrf_model, fir_bins):
         # Filter each design matrix
         if hpf_cutoff is not None:
             X_i = np.dot(F, X_i)
         X_i -= X_i.mean(axis=0)
         # Fit an OLS model
         beta_i, _, _, _ = np.linalg.lstsq(X_i, data)
-        # Take the beta for the first regressor
-        coef_list.append(beta_i[0])
+        # Select the relevant betas
+        if hrf_model == "fir":
+            coef_list.append(np.hstack(beta_i[:fir_bins]))
+        else:
+            coef_list.append(beta_i[0])
 
-    return np.array(coef_list)
+    return np.vstack(coef_list)
 
 
 def event_designs(evs, ntp, tr=2, split_confounds=True,
-                  hrf_model="canonical"):
+                  hrf_model="canonical", fir_bins=12):
     """Generator function to return event-wise design matrices.
 
     Parameters
@@ -76,6 +82,8 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
         if true, confound regressors are separated by event type
     hrf_model : string
         nipy hrf_model specification name
+    fir_bins : none or int
+        number of bins if hrf_model is "fir"
 
     Yields
     ------
@@ -90,6 +98,12 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
     # Create a vector of frame onset times
     frametimes = np.linspace(0, ntp * tr - tr, ntp)
 
+    # Set up FIR bins, maybe
+    if hrf_model == "fir":
+        fir_delays = np.linspace(0, tr * (fir_bins - 1), fir_bins)
+    else:
+        fir_delays = None
+
     # Generator loop
     for ii, row in enumerate(master_sched):
         # Unpack the schedule row
@@ -99,7 +113,8 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
         ev_interest = np.atleast_2d(row[:3]).T
         design_mat, _ = hrf.compute_regressor(ev_interest,
                                               hrf_model,
-                                              frametimes)
+                                              frametimes,
+                                              fir_delays=fir_delays)
 
         # Build the confound regressors
         if split_confounds:
@@ -111,14 +126,16 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
                     conf_sched = np.delete(conf_sched, stim_idx, 0)
                 conf_reg, _ = hrf.compute_regressor(conf_sched[:, :3].T,
                                                     hrf_model,
-                                                    frametimes)
+                                                    frametimes,
+                                                    fir_delays=fir_delays)
                 design_mat = np.column_stack((design_mat, conf_reg))
         else:
             # Or a single confound regressor
             conf_sched = np.delete(master_sched, ii, 0)
             conf_reg, _ = hrf.compute_regressor(conf_sched[:, :3].T,
                                                 hrf_model,
-                                                frametimes)
+                                                frametimes,
+                                                fir_delays=fir_delays)
             design_mat = np.column_stack((design_mat, conf_reg))
 
         yield design_mat
