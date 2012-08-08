@@ -80,3 +80,42 @@ def test_deconvolve_estimate():
     high = deconv[(0, 2)]
     low = deconv[(1, 3)]
     nose.tools.assert_greater(high, low)
+
+
+def test_extract_dataset():
+    """Test simple case."""
+    evs = [np.array([[1, 0, 1],
+                     [2, 0, 1]]),
+           np.array([[3, 0, 1]])]
+    ts = np.random.randn(5, 5, 5, 4)
+    mask = ts[..., 0] > .5
+    X, y = mvpa.extract_dataset(evs, ts, mask, 1)
+
+    assert_array_equal(y, np.array([0, 0, 1]))
+
+    should_be = sp.stats.zscore(ts[mask].T[np.array([1, 2, 3])])
+    assert_array_equal(X, should_be)
+
+
+def test_extract_sizes():
+    """Test different frame sizes."""
+    evs = [np.array([[1, 0, 1],
+                     [2, 0, 1]]),
+           np.array([[3, 0, 1]])]
+    ts = np.random.randn(5, 5, 5, 4)
+    mask = ts[..., 0] > .5
+
+    X_1, y_1 = mvpa.extract_dataset(evs, ts, mask, 1)
+    assert_equal(X_1.shape, (3, mask.sum()))
+
+    X_1, y_1 = mvpa.extract_dataset(evs, ts, mask, 1, [-1, 0])
+    assert_equal(X_1.shape, (2, 3, mask.sum()))
+
+
+@raises(ValueError)
+def test_extract_mask_error():
+    """Make sure mask is enforced as boolean."""
+    evs = [[[1], [0], [1]]]
+    ts = np.random.randn(10, 10, 10, 5)
+    mask = np.random.rand(10, 10, 10)
+    mvpa.extract_dataset(evs, ts, mask)

@@ -139,3 +139,54 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
             design_mat = np.column_stack((design_mat, conf_reg))
 
         yield design_mat
+
+
+def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
+    """Extract model and targets for single run of fMRI data.
+
+    Parameters
+    ----------
+    evs : event sequence
+        each element in the sequence is n_ev x 3 array of
+        onset, duration, amplitude
+    timeseries : 4D numpy array
+        BOLD data
+    mask : 3D boolean array
+        ROI mask
+    tr : int
+        acquistion TR
+    frames : sequence of ints, optional
+        extract frames relative to event onsets or at onsets if None
+
+    Returns
+    -------
+    X : (n_frame) x n_samp x n_feat array
+        model matrix (zscored by feature)
+        if n_frame is 1, matrix is 2D
+    y : n_ev vector
+        target vector
+
+    """
+    sched = moss.make_master_schedule(evs)
+
+    if frames is None:
+        frames = [0]
+
+    # Double check mask datatype
+    if not mask.dtype == np.bool:
+        raise ValueError("Mask must be boolean array")
+
+    # Initialize the outputs
+    X = np.zeros((len(frames), sched.shape[0], mask.sum()))
+    y = sched[:, 3].astype(int)
+
+    # Extract the ROI into a 2D n_tr x n_feat
+    roi_data = timeseries[mask].T
+
+    # Build the data array
+    for i, frame in enumerate(frames):
+        onsets = (sched[:, 0] / tr).astype(int)
+        onsets += frame
+        X[i, ...] = sp.stats.zscore(roi_data[onsets])
+
+    return X.squeeze(), y
