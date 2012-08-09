@@ -1,8 +1,12 @@
 from __future__ import division
+import os.path as op
+from glob import glob
 import numpy as np
 import scipy as sp
+import nibabel as nib
 import nipy.modalities.fmri.hemodynamic_models as hrf
 import moss
+from lyman import gather_project_info, gather_experiment_info
 
 
 def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
@@ -190,3 +194,59 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
         X[i, ...] = sp.stats.zscore(roi_data[onsets])
 
     return X.squeeze(), y
+
+
+def fmri_dataset(subj, exp_name, mask_name, ev_template,
+                 event_names, frames=None):
+    """Build decoding dataset from predictable lyman outputs.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    """
+    project = gather_project_info()
+    exp = gather_experiment_info(exp_name)
+
+    # Determine number of runs from glob
+    ts_dir = op.join(project["analysis_dir"], exp_name, subj,
+                     "reg", "epi", "unsmoothed")
+    n_runs = len(glob(op.join(ts_dir, "run_*")))
+
+    # Initialize outputs
+    X, y, runs = [], [], []
+
+    # Load mask file
+    mask_file = op.join(project["data_dir"], subj, "masks",
+                        "%s.nii.gz" % mask_name)
+    mask_data = nib.load(mask_file).get_data().astype(bool)
+
+    # Make each runs' dataset
+    for r_i in range(n_runs):
+        ts_file = op.join(ts_dir, "run_%d" % (r_i + 1),
+                          "timeseries_xfm.nii.gz")
+        ts_data = nib.load(ts_file).get_data()
+
+        ev_file = op.join(project["data_dir"], subj, "events",
+                          ev_template % (r_i + 1))
+        ev_dict = np.load(ev_file)
+        evs = [ev_dict[ev] for ev in event_names]
+
+        # Use the basic extractor function
+        X_i, y_i = extract_dataset(evs, ts_data, mask_data,
+                                   exp["TR"], frames)
+
+        # Just add to list
+        X.append(X_i)
+        y.append(y_i)
+        runs.append(np.ones_like(y_i) * r_i)
+
+    # Stick the list items together for final dataset
+    X = np.concatenate(X, axis=1)
+    y = np.concatenate(y)
+    runs = np.concatenate(runs)
+
+    # Return as dictionary
+    return dict(X=X, y=y, runs=runs)
