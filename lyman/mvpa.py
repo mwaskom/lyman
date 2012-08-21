@@ -197,7 +197,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, exp_name, mask_name, event_file,
+def fmri_dataset(subj, mask_name, event_file, exp_name=None,
                  event_names=None, frames=None, force_extract=False):
     """Build decoding dataset from predictable lyman outputs.
 
@@ -213,13 +213,13 @@ def fmri_dataset(subj, exp_name, mask_name, event_file,
     ----------
     subj : string
         subject id
-    exp_name : string
-        lyman experiment name where timecourse data can be found
-        in analysis hierarchy
     mask_name : string
         name of ROI mask that can be found in data hierachy
     event_file : string
         event file name in data hierachy
+    exp_name : string, optional
+        lyman experiment name where timecourse data can be found
+        in analysis hierarchy
     event_names : list of strings, optional
         list of event names if do not want to use all event
         specifications in event file
@@ -238,8 +238,11 @@ def fmri_dataset(subj, exp_name, mask_name, event_file,
     project = gather_project_info()
     exp = gather_experiment_info(exp_name)
 
+    if exp_name is None:
+        exp_name = project["default_exp"]
+
     # Find the relevant disk location
-    data_file = op.join(project["ANALYSIS_DIR"],
+    data_file = op.join(project["analysis_dir"],
                         exp_name, subj, "mvpa",
                         mask_name + "-" + event_file + ".npz")
 
@@ -291,7 +294,7 @@ def fmri_dataset(subj, exp_name, mask_name, event_file,
         runs.append(np.ones_like(y_i) * r_i)
 
     # Stick the list items together for final dataset
-    if frames is not None and len(frames > 1):
+    if frames is not None and len(frames) > 1:
         X = np.concatenate(X, axis=1)
     else:
         X = np.concatenate(X, axis=0)
