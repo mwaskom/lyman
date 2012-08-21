@@ -129,19 +129,12 @@ def find_nested_workflows(workflow):
 
 
 def gather_project_info():
-    """Try to import a project.py module and convert to a dictionary."""
-    # This seems safer than just catching an import error, since maybe
-    # someone will copy another set of scripts and just delete the
-    # project.py without knowing anything about .pyc files
-    if op.exists("project.py"):
-        project = imp.load_source("project", "project.py")
-        return dict(
-            [(k, v) for k, v in project.__dict__.items()
-                if not re.match("__.*__", k)])
-
-    print "ERROR: Did not find a project.py file in this directory."
-    print "You must run setup_project.py before using the analysis scripts."
-    sys.exit()
+    """Import project information based on environment settings."""
+    proj_file = op.join(os.environ["LYMAN_DIR"], "project.py")
+    project = imp.load_source("project", proj_file)
+    return dict(
+        [(k, v) for k, v in project.__dict__.items()
+            if not re.match("__.*__", k)])
 
 
 def gather_experiment_info(experiment_name, altmodel=None):
@@ -149,11 +142,8 @@ def gather_experiment_info(experiment_name, altmodel=None):
     module_name = experiment_name
     if altmodel is not None:
         module_name = "-".join([experiment_name, altmodel])
-    try:
-        exp = imp.load_source(module_name, module_name + ".py")
-    except IOError:
-        print "ERROR: Could not import %s.py" % module_name
-        sys.exit(1)
+    exp_file = op.join(os.environ["LYMAN_DIR"], module_name + ".py")
+    exp = imp.load_source(module_name, exp_file)
 
     # Create an experiment dict stripping the OOP hooks
     exp_dict = dict(
