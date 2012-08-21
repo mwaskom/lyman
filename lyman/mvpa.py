@@ -1,4 +1,5 @@
 from __future__ import division
+import os
 import os.path as op
 from glob import glob
 import numpy as np
@@ -158,7 +159,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     mask : 3D boolean array
         ROI mask
     tr : int
-        acquistion TR
+        acquistion TR (in seconds)
     frames : sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
 
@@ -196,19 +197,61 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, exp_name, mask_name, ev_template,
-                 event_names, frames=None):
+def fmri_dataset(subj, exp_name, mask_name, event_file,
+                 event_names=None, frames=None, force_extract=False):
     """Build decoding dataset from predictable lyman outputs.
+
+    This function will make use of the LYMAN_DIR environment variable
+    to access information about where the relevant data live, so that
+    must be set properly.
+
+    If it finds an existing dataset file in the predictable location,
+    it will use that file unless ``force_extract`` is True. Extraction
+    will always write a dataset file, possibly overwriting old data.
 
     Parameters
     ----------
+    subj : string
+        subject id
+    exp_name : string
+        lyman experiment name where timecourse data can be found
+        in analysis hierarchy
+    mask_name : string
+        name of ROI mask that can be found in data hierachy
+    event_file : string
+        event file name in data hierachy
+    event_names : list of strings, optional
+        list of event names if do not want to use all event
+        specifications in event file
+    frames : sequence of ints, optional
+        extract frames relative to event onsets or at onsets if None
+    force_extract : boolean, optional
+        enforce that a dataset is created from nifti files even
+        if a corresponding dataset file already exists
 
     Returns
     -------
+    data : dictionary
+        dictionary with X, y, and runs entries
 
     """
     project = gather_project_info()
     exp = gather_experiment_info(exp_name)
+
+    # Find the relevant disk location
+    data_file = op.join(project["ANALYSIS_DIR"],
+                        exp_name, subj, "mvpa",
+                        mask_name + "-" + event_file + ".npz")
+
+    # Make sure the target location exists
+    try:
+        os.mkdir(op.split(data_file)[0])
+    except OSError:
+        pass
+
+    if op.exists(data_file) and not force_extract:
+        data_obj = np.load(data_file)
+        return dict(data_obj.items())
 
     # Determine number of runs from glob
     ts_dir = op.join(project["analysis_dir"], exp_name, subj,
@@ -223,16 +266,20 @@ def fmri_dataset(subj, exp_name, mask_name, ev_template,
                         "%s.nii.gz" % mask_name)
     mask_data = nib.load(mask_file).get_data().astype(bool)
 
+    # Load the event information
+    event_fpath = op.join(project["data_dir"], subj, "events",
+                          "%s.npz" % event_file)
+    event_data = np.load(event_fpath)
+    if event_names is None:
+        event_names = event_data.keys()
+
     # Make each runs' dataset
     for r_i in range(n_runs):
         ts_file = op.join(ts_dir, "run_%d" % (r_i + 1),
                           "timeseries_xfm.nii.gz")
         ts_data = nib.load(ts_file).get_data()
 
-        ev_file = op.join(project["data_dir"], subj, "events",
-                          ev_template % (r_i + 1))
-        ev_dict = np.load(ev_file)
-        evs = [ev_dict[ev] for ev in event_names]
+        evs = [event_data[ev][r_i] for ev in event_names]
 
         # Use the basic extractor function
         X_i, y_i = extract_dataset(evs, ts_data, mask_data,
@@ -244,9 +291,14 @@ def fmri_dataset(subj, exp_name, mask_name, ev_template,
         runs.append(np.ones_like(y_i) * r_i)
 
     # Stick the list items together for final dataset
-    X = np.concatenate(X, axis=1)
+    if frames is not None and len(frames > 1):
+        X = np.concatenate(X, axis=1)
+    else:
+        X = np.concatenate(X, axis=0)
     y = np.concatenate(y)
     runs = np.concatenate(runs)
 
-    # Return as dictionary
-    return dict(X=X, y=y, runs=runs)
+    # Save to disk and return
+    data_dict = dict(X=X, y=y, runs=runs)
+    np.savez(data_file, **data_dict)
+    return data_dict
