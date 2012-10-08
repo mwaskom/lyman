@@ -2,10 +2,15 @@ from __future__ import division
 import os
 import os.path as op
 from glob import glob
+
 import numpy as np
 import scipy as sp
 import nibabel as nib
 import nipy.modalities.fmri.hemodynamic_models as hrf
+
+from sklearn.cross_validation import (cross_val_score,
+                                      LeaveOneOut, LeaveOneLabelOut)
+
 import moss
 from lyman import gather_project_info, gather_experiment_info
 
@@ -236,10 +241,9 @@ def fmri_dataset(subj, mask_name, event_file, exp_name=None,
 
     """
     project = gather_project_info()
-    exp = gather_experiment_info(exp_name)
-
     if exp_name is None:
         exp_name = project["default_exp"]
+    exp = gather_experiment_info(exp_name)
 
     # Find the relevant disk location
     data_file = op.join(project["analysis_dir"],
@@ -305,3 +309,160 @@ def fmri_dataset(subj, mask_name, event_file, exp_name=None,
     data_dict = dict(X=X, y=y, runs=runs)
     np.savez(data_file, **data_dict)
     return data_dict
+
+
+def load_datasets(roi, event, classes=None, frames=None, collapse=None,
+                  force_extract=False, subjects=None, dv=None):
+    """Load datasets for a group of subjects, possibly in parallel.
+
+    Parameters
+    ----------
+    roi : string
+        roi name as corresponding to mask in data hierarchy
+    event : string
+        event schedule name as corresponding to events file
+        in data hierarchy
+    frames : int or sequence
+        frames relative to stimulus onsets in event file to extract
+    collapse : int or slice
+        if int, returns that element in first dimension
+        if slice, take mean over the slice
+        otherwise return whatever was in the data file
+    force_extract : boolean, optional
+        whether to force extraction from nifti data even if dataset
+        files are found in analysis hierarchy
+    subjects : sequence of strings, optional
+        sequence of subjects to return; if none reads subjects.txt file
+        from lyman directory and uses all defined there
+    dv : IPython cluster direct view, optional
+        if provided, executes in parallel using the cluster
+
+    Returns
+    -------
+    data : list of dicts
+       list of mvpa dictionaries
+
+    """
+    if subjects is None:
+        subj_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
+        subjects = np.loadtxt(subj_file, str)
+
+    # Allow to run in serial or parallel
+    if dv is None:
+        import __builtin__
+        map = __builtin__.map
+    else:
+        map = dv.map_sync
+
+    # Set up lists for the map to work
+    roi = [roi for s in subjects]
+    event = [event for s in subjects]
+    exp = [None for s in subjects]
+    names = [classes for s in subjects]
+    frames = [frames for s in subjects]
+    force = [force_extract for s in subjects]
+
+    # Actually do the loading
+    data = map(fmri_dataset, subjects, roi, event,
+               exp, names, frames, force)
+
+    # Potentially collapse across some stimulus frames
+    if collapse is not None:
+        for dset in data:
+            if isinstance(collapse, int):
+                dset["X"] = dset["X"][collapse]
+            else:
+                dset["X"] = dset["X"][collapse].mean(axis=0)
+
+    return data
+
+
+def decode(datasets, model, split_pred=None, cv_method="run",
+           n_jobs=1, dv=None):
+    """Perform decoding on a sequence of datasets.
+
+    Parameters
+    ----------
+    datasets : sequence of dicts
+        one dataset per subject
+    model : scikit-learn estimator
+        model to decode with
+    spit_pred : array or sequence of arrays, optional
+        bin prediction accuracies by the index values in the array.
+        can pass one array to use for all datasets, or a list
+        of arrays with the same length as the dataset list.
+        splits will form last axis of returned accuracy array.
+        n_jobs will have no effect when this is used, but can
+        still run in parallel over subjects using IPython.
+    cv_method : run | sample | cv arg for cross_val_score
+        cross validate over runs, over samples (leave-one-out)
+        or otherwise something that can be provided to the cv
+        argument for sklearn.cross_val_score
+    n_jobs : int, optional
+        number of jobs for sklean internal parallelization
+    dv : IPython cluster direct view, optional
+        IPython cluster to decode in parallel
+
+    Return
+    ------
+    all_scores : array
+        array where first dimension is subjects and second
+        dimension may be timepoints
+
+    """
+    if dv is None:
+        import __builtin__
+        map = __builtin__.map
+    else:
+        map = dv.map_sync
+
+    # Underlying decoding function
+    def _decode(data, model, split_pred, cv_method, n_jobs):
+        X = data["X"]
+        y = data["y"]
+        runs = data["runs"]
+        indices = True if split_pred is None else False
+        if cv_method == "run":
+            cv = LeaveOneLabelOut(runs, indices=indices)
+        elif cv_method == "sample":
+            cv = LeaveOneOut(len(y), indices=indices)
+        else:
+            cv = cv_method
+        if X.ndim < 3:
+            X = [X]
+        scores = []
+        for X_i in X:
+            if split_pred is None:
+                score = cross_val_score(model, X_i, y, cv=cv,
+                                        n_jobs=n_jobs).mean()
+                scores.append(score)
+            else:
+                n_bins = len(np.unique(split_pred))
+                bin_scores = [[] for i in range(n_bins)]
+                for train, test in cv:
+                    model.fit(X_i[train], y[train])
+                    for bin in range(n_bins):
+                        idx = np.logical_and(test, split_pred == bin)
+                        bin_score = model.score(X_i[idx], y[idx])
+                        bin_scores[bin].append(bin_score)
+                scores.append(np.mean(bin_scores, axis=1))
+        return np.squeeze(scores)
+
+    # Set up the lists for the map
+    model = [model for d in datasets]
+
+    try:
+        if len(np.array(cv_method)) != len(datasets):
+            cv_method = [cv_method for d in datasets]
+    except TypeError:
+        cv_method = [cv_method for d in datasets]
+
+    if len(np.shape(split_pred)) < 2:
+        split_pred = [split_pred for d in datasets]
+
+    n_jobs = [n_jobs for d in datasets]
+
+    # Do the decoding
+    all_scores = map(_decode, datasets, model,
+                     split_pred, cv_method, n_jobs)
+    return np.array(all_scores)

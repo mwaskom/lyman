@@ -1,6 +1,10 @@
 import inspect
 import numpy as np
 import scipy as sp
+from scipy import stats
+from sklearn.naive_bayes import GaussianNB
+from sklearn.cross_validation import (LeaveOneOut, LeaveOneLabelOut,
+                                      StratifiedKFold)
 
 from numpy.testing import assert_array_equal, assert_array_almost_equal
 import nose.tools
@@ -12,6 +16,14 @@ evs = [np.array([[6, 0, 1],
                  [18, 0, 1]]),
        np.array([[12, 0, 1],
                  [24, 0, 1]])]
+
+datasets = [dict(X=stats.norm(0, 1).rvs((24, 12)),
+                 y=stats.bernoulli(.5).rvs(24),
+                 runs=np.repeat([0, 1], 12)) for i in range(3)]
+
+datasets_3d = [dict(X=stats.norm(0, 1).rvs((4, 24, 12)),
+                    y=stats.bernoulli(.5).rvs(24),
+                    runs=np.repeat([0, 1], 12)) for i in range(3)]
 
 
 def test_design_generator():
@@ -119,3 +131,56 @@ def test_extract_mask_error():
     ts = np.random.randn(10, 10, 10, 5)
     mask = np.random.rand(10, 10, 10)
     mvpa.extract_dataset(evs, ts, mask)
+
+
+def test_decode_shapes():
+    """Test that we get expected shapes from decode function."""
+    model = GaussianNB()
+    accs = mvpa.decode(datasets, model)
+    assert_equal(accs.shape, (3,))
+    accs = mvpa.decode(datasets_3d, model)
+    assert_equal(accs.shape, (3, 4))
+
+    splits = stats.bernoulli(.5).rvs(24)
+    accs = mvpa.decode(datasets, model, splits)
+    assert_equal(accs.shape, (3, 2))
+    accs = mvpa.decode(datasets_3d, model, splits)
+    assert_equal(accs.shape, (3, 4, 2))
+
+
+def test_decode_options():
+    """Test some other options for the decode function."""
+    model = GaussianNB()
+    mvpa.decode(datasets, model)
+    mvpa.decode(datasets_3d, model)
+    splits = stats.bernoulli(.5).rvs(24)
+    mvpa.decode(datasets, model, splits)
+    mvpa.decode(datasets, model, cv_method="sample")
+    mvpa.decode(datasets, model, cv_method=5)
+    mvpa.decode(datasets, model, cv_method=LeaveOneOut(24))
+    mvpa.decode(datasets, model, n_jobs=2)
+
+
+def test_decode_cross_val():
+    """Test that cv_method strings are correct."""
+    model = GaussianNB()
+
+    acc1 = mvpa.decode(datasets, model, cv_method="run")
+    cv = [LeaveOneLabelOut(d["runs"]) for d in datasets]
+    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    assert_array_equal(acc1, acc2)
+
+    acc1 = mvpa.decode(datasets, model, cv_method="sample")
+    cv = [LeaveOneOut(24) for d in datasets]
+    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    assert_array_equal(acc1, acc2)
+
+    acc1 = mvpa.decode(datasets, model, cv_method=LeaveOneOut(24))
+    cv = [LeaveOneOut(24) for d in datasets]
+    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    assert_array_equal(acc1, acc2)
+
+    acc1 = mvpa.decode(datasets, model, cv_method=4)
+    cv = [StratifiedKFold(d["y"], 4) for d in datasets]
+    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    assert_array_equal(acc1, acc2)
