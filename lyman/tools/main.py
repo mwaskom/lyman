@@ -139,8 +139,9 @@ def gather_project_info():
 
 def gather_experiment_info(experiment_name, altmodel=None):
     """Import an experiment module and add some formatted information."""
-    module_name = experiment_name
-    if altmodel is not None:
+    if altmodel is None:
+        module_name = experiment_name
+    else:
         module_name = "-".join([experiment_name, altmodel])
     exp_file = op.join(os.environ["LYMAN_DIR"], module_name + ".py")
     exp = imp.load_source(module_name, exp_file)
