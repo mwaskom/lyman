@@ -457,7 +457,9 @@ def decode(datasets, model, split_pred=None, cv_method="run",
     except TypeError:
         cv_method = [cv_method for d in datasets]
 
-    if len(np.shape(split_pred)) < 2:
+    try:
+        len(split_pred[0])
+    except TypeError:
         split_pred = [split_pred for d in datasets]
 
     n_jobs = [n_jobs for d in datasets]
