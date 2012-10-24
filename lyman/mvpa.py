@@ -322,6 +322,8 @@ def load_datasets(roi, event, classes=None, frames=None, collapse=None,
     event : string
         event schedule name as corresponding to events file
         in data hierarchy
+    classes : list of strings
+        list of event names in events npz archive to read
     frames : int or sequence
         frames relative to stimulus onsets in event file to extract
     collapse : int or slice
