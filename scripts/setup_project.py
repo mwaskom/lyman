@@ -10,8 +10,8 @@ borrowed from there too.
 import sys, os, time
 import os.path as op
 
-from tools.console import (purple, bold, red, teal, turquoise,
-                          color_terminal, nocolor)
+from lyman.tools.console import (purple, bold, red, teal, turquoise,
+                                 color_terminal, nocolor)
 
 TERM_ENCODING = getattr(sys.stdin, 'encoding', None)
 
