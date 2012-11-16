@@ -470,3 +470,43 @@ def decode(datasets, model, split_pred=None, cv_method="run",
     all_scores = map(_decode, datasets, model,
                      split_pred, cv_method, n_jobs)
     return np.array(all_scores)
+
+
+def permutation_classifier_test(data, model, n_iter=1000, cv_method="run",
+                                dv=None):
+
+    if dv is None:
+        import __builtin__
+        map = __builtin__.map
+    else:
+        map = dv.map_sync
+
+    X = data["X"]
+    y = data["y"]
+    runs = data["runs"]
+    if cv_method == "run":
+        cv = LeaveOneLabelOut(runs)
+    elif cv_method == "sample":
+        cv = LeaveOneOut(len(y))
+    else:
+        cv = cv_method
+    if X.ndim < 3:
+        X = [X]
+
+    def _perm_decode(X, y, cv, model):
+        n_samples = len(y)
+        perm = np.random.permutation(n_samples)
+        y_perm = y[perm]
+        perm_acc = cross_val_score(model, X, y_perm, cv=cv).mean()
+        return perm_acc
+
+    scores = []
+    for X_i in X:
+        X_p = [X_i for i in range(n_iter)]
+        y_p = [y for i in range(n_iter)]
+        cv_p = [cv for i in range(n_iter)]
+        model_p = [model for i in range(n_iter)]
+        tr_scores = map(_perm_decode, model_p, X_p, y_p, cv_p)
+        scores.append(tr_scores)
+
+    return scores
