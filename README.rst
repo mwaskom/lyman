@@ -1,4 +1,4 @@
-Nipype fMRI Analysis Ecosystem
+Python fMRI Analysis Ecosystem
 ==============================
 
 This repository contains a set of Python-based code for analyzing
@@ -39,9 +39,17 @@ Basic Workflow
 
 - run_group.py: perform basic group level mixed effects analyses
 
-Note
-----
+License
+-------
 
-Surface-based workflows are not currently operational, although
-some surface information is used (e.g. for functional coregistration)
+Simplified BSD
+
+Notes
+-----
+
+Although all are welcome to use this code in their own work, it is not officially
+"released" in any capacity and many elements of it are under active development and
+subject to change at any time.
+
+Please submit bug reports/feature ideas through the Github issues framework.
 
