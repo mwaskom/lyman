@@ -25,21 +25,23 @@ Python
 
 - rst2pdf
 
-- Docutils 0.7 or 0.9 (rst2pdf does not work with 0.8, which is the version currently in the PyPi)
+- Docutils 0.7 or 0.9 (rst2pdf does not work with 0.8)
 
 Basic Workflow
 --------------
 
-- All stages of processing assume that your anatomical data have been processed in Freesurfer (recon-all)
+- All stages of processing assume that your anatomical data have been
+  processed in Freesurfer (recon-all)
 
-- run_warp.py > anatomical normalization
+- run_warp.py: perform anatomical normalization
 
-- run_fmri.py > subject-level functional analyses
+- run_fmri.py: perform subject-level functional analyses
 
-- run_group.py > basic group level mixed effects analyses
+- run_group.py: perform basic group level mixed effects analyses
 
 Note
 ----
 
-Surface-based workflows are not currently operational, although some surface information is used (e.g. for functional coregistration)
+Surface-based workflows are not currently operational, although
+some surface information is used (e.g. for functional coregistration)
 
