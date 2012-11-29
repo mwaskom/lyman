@@ -7,6 +7,7 @@ from sklearn.cross_validation import (LeaveOneOut, LeaveOneLabelOut,
                                       StratifiedKFold)
 
 from numpy.testing import assert_array_equal, assert_array_almost_equal
+import numpy.testing as npt
 import nose.tools
 from nose.tools import assert_equal, raises
 
@@ -184,3 +185,48 @@ def test_decode_cross_val():
     cv = [StratifiedKFold(d["y"], 4) for d in datasets]
     acc2 = mvpa.decode(datasets, model, cv_method=cv)
     assert_array_equal(acc1, acc2)
+
+
+def test_classifier_permutations():
+    """Test basic functions of classifier_permutations."""
+    data = dict(X=stats.norm(0, 1).rvs((100, 12)),
+                y=stats.bernoulli(.5).rvs(100),
+                runs=np.repeat([0, 1], 50))
+    model = GaussianNB()
+    perm_vals = mvpa.classifier_permutations(data, model)
+    perm_mean = perm_vals.mean()
+
+    # Test that the mean is close to chance (this is probabilistic)
+    nose.tools.assert_greater(.1, np.abs(perm_mean - 0.5))
+
+    # Test that the distribution looks normal (this is probabilistic)
+    val, p = stats.normaltest(perm_vals)
+    nose.tools.assert_greater(p, 0.05)
+
+
+def test_permutation_dimension():
+    """Test that we can have a time dimension and it's where we expect."""
+    data = datasets_3d[0]
+    n_perm = 30
+    model = GaussianNB()
+    perm_vals = mvpa.classifier_permutations(data, model, n_perm)
+    nose.tools.assert_equal(perm_vals.shape, (n_perm, len(data["X"])))
+
+
+def test_permutation_seed():
+    """Test that we can give a particular random seed to the permuter."""
+    data = datasets[0]
+    model = GaussianNB()
+    seed = 1
+    out_a = mvpa.classifier_permutations(data, model, random_seed=seed)
+    out_b = mvpa.classifier_permutations(data, model, random_seed=seed)
+    assert_array_equal(out_a, out_b)
+
+
+def test_permutation_number():
+    """Test size of permutation vectors."""
+    data = datasets[0]
+    model = GaussianNB()
+    for n_iter in np.random.randint(10, 250, 5):
+        out = mvpa.classifier_permutations(data, model, n_iter)
+        nose.tools.assert_equal(len(out), n_iter)

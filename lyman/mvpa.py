@@ -2,6 +2,7 @@ from __future__ import division
 import os
 import os.path as op
 from glob import glob
+import re
 
 import numpy as np
 import scipy as sp
@@ -472,15 +473,40 @@ def decode(datasets, model, split_pred=None, cv_method="run",
     return np.array(all_scores)
 
 
-def permutation_classifier_test(data, model, n_iter=1000, cv_method="run",
-                                dv=None):
+def classifier_permutations(data, model, n_iter=1000, cv_method="run",
+                            random_seed=None, dv=None):
+    """Randomly shuffle class labels and obtain model accuracy many times.
 
+    Parameters
+    ----------
+    data : dict
+        single-subject dataset dictionary
+    model : scikit-learn estimator
+        model object to fit
+    n_iter : int
+        number of permutation iterations
+    cv_method : run | sample | cv arg for cross_val_score
+        cross validate over runs, over samples (leave-one-out)
+        or otherwise something that can be provided to the cv
+        argument for sklearn.cross_val_score
+    random_state : int
+        seed for random state to obtain stable permutations
+    dv : IPython direct view
+        view onto IPython cluster for parallel execution over iterations
+
+    Returns
+    -------
+    scores : n_iter x n_tp array
+        array of null model scores
+
+    """
     if dv is None:
         import __builtin__
         map = __builtin__.map
     else:
         map = dv.map_sync
 
+    # Set up the data properly
     X = data["X"]
     y = data["y"]
     runs = data["runs"]
@@ -493,20 +519,99 @@ def permutation_classifier_test(data, model, n_iter=1000, cv_method="run",
     if X.ndim < 3:
         X = [X]
 
-    def _perm_decode(X, y, cv, model):
-        n_samples = len(y)
-        perm = np.random.permutation(n_samples)
+    def _perm_decode(model, X, y, cv, perm):
+        """Internal func for parallel purposes."""
         y_perm = y[perm]
         perm_acc = cross_val_score(model, X, y_perm, cv=cv).mean()
         return perm_acc
 
+    # Make lists to send into map()
+    model_p = [model for i in range(n_iter)]
+    y_p = [y for i in range(n_iter)]
+    cv_p = [cv for i in range(n_iter)]
+
+    rs = np.random.RandomState(random_seed)
+    n_samp = len(y)
+    perms = [rs.permutation(n_samp) for i in range(n_iter)]
+
     scores = []
     for X_i in X:
         X_p = [X_i for i in range(n_iter)]
-        y_p = [y for i in range(n_iter)]
-        cv_p = [cv for i in range(n_iter)]
-        model_p = [model for i in range(n_iter)]
-        tr_scores = map(_perm_decode, model_p, X_p, y_p, cv_p)
+        tr_scores = map(_perm_decode, model_p, X_p, y_p, cv_p, perms)
         scores.append(tr_scores)
 
-    return scores
+    return np.array(scores).T
+
+
+def permutation_cache(datasets, roi, event, model, n_iter=1000, cv_method="run",
+                      force_run=False, random_seed=None,
+                      exp_name=None, subjects=None, dv=None):
+    """Excecute permutations or read in cached values for a group.
+
+    Parameters
+    ----------
+    datasets : list of dictionaries
+        each item in the list is an mvpa dictionary
+    roi : string
+        name of region
+    event : string
+        name of event
+    model : scikit-learn estimator
+        model object to fit
+    n_iter : int
+        number of permutation iterations
+    cv_method : run | sample | cv arg for cross_val_score
+        cross validate over runs, over samples (leave-one-out)
+        or otherwise something that can be provided to the cv
+        argument for sklearn.cross_val_score
+    force_run : bool
+        execute processing even if cache file exists
+    random_state : int
+        seed for random state to obtain stable permutations
+    exp_name : string
+        experiment name if not default
+    subjects : sequence of strings
+        list of subject ids
+    dv : IPython direct view
+        view onto IPython cluster for parallel execution over iterations
+
+    Returns
+    -------
+    group_scores : list of arrays
+        permutation array for each item in datasets
+
+    """
+    project = gather_project_info()
+    if subjects is None:
+        subj_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
+        subjects = np.loadtxt(subj_file, str)
+
+    if exp_name is None:
+        exp_name = project["default_exp"]
+
+    model_name = re.match("(.+)\(", str(model)).group(1)
+
+    perm_template = op.join(project["analysis_dir"], exp_name,
+                            "%s", "mvpa", "%s_%s_%s_shuffle.npy")
+
+    group_scores = []
+    for i_s, data in enumerate(datasets):
+
+        perm_file = perm_template % (subjects[i_s], roi, event, model_name)
+
+        do_perm = False
+        if not op.exists(perm_file):
+            do_perm = True
+        elif len(np.load(perm_file)) != n_iter:
+            do_perm = True
+
+        if do_perm or force_run:
+            scores = classifier_permutations(data, model, n_iter, cv_method,
+                                             random_seed, dv)
+            np.save(perm_file, scores)
+        else:
+            scores = np.load(perm_file)
+
+        group_scores.append(scores)
+
+    return group_scores
