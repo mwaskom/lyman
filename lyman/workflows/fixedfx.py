@@ -138,7 +138,7 @@ def create_dof_image(copes, dof_files):
     from os.path import abspath
     from numpy import ones, int16
     from nibabel import load, Nifti1Image
-    from workflows.fixedfx import force_list
+    from lyman.workflows.fixedfx import force_list
     copes = force_list(copes)
     dof_files = force_list(dof_files)
     cope_imgs = map(load, copes)
@@ -166,7 +166,7 @@ def create_ffx_mask(masks, background_file):
     from nibabel import load, Nifti1Image
     from numpy import zeros
     from subprocess import call
-    from workflows.fixedfx import force_list
+    from lyman.workflows.fixedfx import force_list
     masks = force_list(masks)
     mask_imgs = map(load, masks)
     data_shape = list(mask_imgs[0].shape) + [len(mask_imgs)]
@@ -208,7 +208,7 @@ def create_ffx_mask(masks, background_file):
 def write_ffx_report(subject_id, mask_png, zstat_pngs, contrast):
     import time
     from lyman.tools import write_workflow_report
-    from workflows.reporting import ffx_report_template
+    from lyman.workflows.reporting import ffx_report_template
 
     # Fill in the report template dict
     report_dict = dict(now=time.asctime(),

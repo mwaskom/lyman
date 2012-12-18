@@ -859,7 +859,7 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
     import time
     from nibabel import load
     from lyman.tools import write_workflow_report
-    from workflows.reporting import preproc_report_template
+    from lyman.workflows.reporting import preproc_report_template
 
     # Gather some attributes of the input timeseries
     input_image = load(input_timeseries)

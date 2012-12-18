@@ -244,7 +244,7 @@ def write_mfx_report(subject_list, l1_contrast, mask_png,
                      zstat_pngs, peak_tables, boxplots, contrasts):
     import time
     from lyman.tools import write_workflow_report
-    from workflows.reporting import mfx_report_template
+    from lyman.workflows.reporting import mfx_report_template
 
     # Fill in the initial report template dict
     report_dict = dict(now=time.asctime(),

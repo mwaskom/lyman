@@ -360,7 +360,7 @@ def write_model_report(subject_id, design_image, design_corr,
     """Write model report info to rst and convert to pdf/html."""
     import time
     from lyman.tools import write_workflow_report
-    from workflows.reporting import model_report_template
+    from lyman.workflows.reporting import model_report_template
 
     # Fill in the initial report template dict
     report_dict = dict(now=time.asctime(),
