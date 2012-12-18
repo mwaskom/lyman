@@ -243,7 +243,7 @@ def mfx_boxplot(cope_file, localmax_file):
 def write_mfx_report(subject_list, l1_contrast, mask_png,
                      zstat_pngs, peak_tables, boxplots, contrasts):
     import time
-    from tools import write_workflow_report
+    from lyman.tools import write_workflow_report
     from workflows.reporting import mfx_report_template
 
     # Fill in the initial report template dict

@@ -207,7 +207,7 @@ def create_ffx_mask(masks, background_file):
 
 def write_ffx_report(subject_id, mask_png, zstat_pngs, contrast):
     import time
-    from tools import write_workflow_report
+    from lyman.tools import write_workflow_report
     from workflows.reporting import ffx_report_template
 
     # Fill in the report template dict

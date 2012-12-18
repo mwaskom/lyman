@@ -359,7 +359,7 @@ def write_model_report(subject_id, design_image, design_corr,
                        residual, zstat_pngs, contrast_names):
     """Write model report info to rst and convert to pdf/html."""
     import time
-    from tools import write_workflow_report
+    from lyman.tools import write_workflow_report
     from workflows.reporting import model_report_template
 
     # Fill in the initial report template dict
