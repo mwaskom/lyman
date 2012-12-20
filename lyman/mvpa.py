@@ -2,6 +2,7 @@ from __future__ import division
 import os
 import os.path as op
 from glob import glob
+from hashlib import sha1
 import re
 
 import numpy as np
@@ -182,6 +183,8 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
 
     if frames is None:
         frames = [0]
+    elif not hasattr(frames, "__len__"):
+        frames = [frames]
 
     # Double check mask datatype
     if not mask.dtype == np.bool:
@@ -203,37 +206,32 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, mask_name, event_file, exp_name=None,
-                 event_names=None, frames=None, force_extract=False):
+def fmri_dataset(subj, problem, mask_name, roi_name=None,
+                 exp_name=None, frames=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
     to access information about where the relevant data live, so that
     must be set properly.
 
-    If it finds an existing dataset file in the predictable location,
-    it will use that file unless ``force_extract`` is True. Extraction
-    will always write a dataset file, possibly overwriting old data.
+    This function caches its results and, on repeated calls,
+    hashes the arguments and checks those against the has value
+    associated with the stored data. The hashing process considers
+    the timestamp on the relevant data files, but not the data itself.
 
     Parameters
     ----------
     subj : string
         subject id
+    problem : string
+        problem name corresponding to set of event types
     mask_name : string
         name of ROI mask that can be found in data hierachy
-    event_file : string
-        event file name in data hierachy
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy
-    event_names : list of strings, optional
-        list of event names if do not want to use all event
-        specifications in event file
-    frames : sequence of ints, optional
+    frames : int or sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
-    force_extract : boolean, optional
-        enforce that a dataset is created from nifti files even
-        if a corresponding dataset file already exists
 
     Returns
     -------
@@ -246,48 +244,65 @@ def fmri_dataset(subj, mask_name, event_file, exp_name=None,
         exp_name = project["default_exp"]
     exp = gather_experiment_info(exp_name)
 
-    # Find the relevant disk location
-    data_file = op.join(project["analysis_dir"],
-                        exp_name, subj, "mvpa",
-                        mask_name + "-" + event_file + ".npz")
+    if roi_name is None:
+        roi_name = mask_name
+
+    # Find the relevant disk location for the dataaset file
+    ds_file = op.join(project["analysis_dir"],
+                      exp_name, subj, "mvpa",
+                      problem, roi_name, "dataset.npz")
 
     # Make sure the target location exists
     try:
-        os.mkdir(op.split(data_file)[0])
+        os.makedirs(op.dirname(ds_file))
     except OSError:
         pass
 
-    if op.exists(data_file) and not force_extract:
-        data_obj = np.load(data_file)
-        return dict(data_obj.items())
-
-    # Determine number of runs from glob
+    # Get paths to the relevant files
+    mask_file = op.join(project["data_dir"], subj, "masks",
+                        "%s.nii.gz" % mask_name)
+    problem_file = op.join(project["data_dir"], subj, "events",
+                           "%s.npz" % problem)
     ts_dir = op.join(project["analysis_dir"], exp_name, subj,
                      "reg", "epi", "unsmoothed")
     n_runs = len(glob(op.join(ts_dir, "run_*")))
+    ts_files = [op.join(ts_dir, "run_%d" % (r_i + 1),
+                        "timeseries_xfm.nii.gz") for r_i in range(n_runs)]
 
-    # Initialize outputs
+    # Get the hash value for this dataset
+    ds_hash = sha1()
+    ds_hash.update(mask_name)
+    ds_hash.update(str(op.getmtime(mask_file)))
+    ds_hash.update(str(op.getmtime(problem_file)))
+    for ts_file in ts_files:
+        ds_hash.update(str(op.getmtime(ts_file)))
+    ds_hash.update(str(frames))
+
+    # If the file exists and the hash matches, convert to a dict and return
+    if op.exists(ds_file):
+        ds_obj = np.load(ds_file)
+        if ds_hash.hexdigest() == str(ds_obj["hash"]):
+            dataset = ds_obj.items()
+            for k, v in dataset.items():
+                if v.dtype.kind == "S":
+                    dataset[k] = str(v)
+            return dataset
+
+    # Othersies, initialize outputs
     X, y, runs = [], [], []
 
     # Load mask file
-    mask_file = op.join(project["data_dir"], subj, "masks",
-                        "%s.nii.gz" % mask_name)
     mask_data = nib.load(mask_file).get_data().astype(bool)
 
     # Load the event information
-    event_fpath = op.join(project["data_dir"], subj, "events",
-                          "%s.npz" % event_file)
-    event_data = np.load(event_fpath)
-    if event_names is None:
-        event_names = event_data.keys()
+    problem_data = np.load(problem_file)
+    event_names = problem_data["event_names"]
 
     # Make each runs' dataset
     for r_i in range(n_runs):
-        ts_file = op.join(ts_dir, "run_%d" % (r_i + 1),
-                          "timeseries_xfm.nii.gz")
-        ts_data = nib.load(ts_file).get_data()
+        ts_data = nib.load(ts_files[r_i]).get_data()
 
-        evs = [event_data[ev][r_i] for ev in event_names]
+        evs = [problem_data[ev][r_i] for ev in event_names]
 
         # Use the basic extractor function
         X_i, y_i = extract_dataset(evs, ts_data, mask_data,
@@ -307,9 +322,10 @@ def fmri_dataset(subj, mask_name, event_file, exp_name=None,
     runs = np.concatenate(runs)
 
     # Save to disk and return
-    data_dict = dict(X=X, y=y, runs=runs)
-    np.savez(data_file, **data_dict)
-    return data_dict
+    dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
+                   problem=problem, frames=frames, hash=ds_hash.hexdigest())
+    np.savez(ds_file, **dataset)
+    return dataset
 
 
 def load_datasets(roi, event, classes=None, frames=None, collapse=None,
@@ -376,12 +392,143 @@ def load_datasets(roi, event, classes=None, frames=None, collapse=None,
                 dset["X"] = dset["X"][collapse]
             else:
                 dset["X"] = dset["X"][collapse].mean(axis=0)
+    dset["collapse"] = collapse
 
     return data
 
 
-def decode(datasets, model, split_pred=None, cv_method="run",
-           n_jobs=1, dv=None):
+def _hash_decoder(ds, model):
+    """Hash the inputs to a decoding analysis."""
+    ds_hash = sha1()
+    ds_hash.update(ds["X"].data)
+    ds_hash.update(ds["y"].data)
+    ds_hash.update(ds["runs"])
+    ds_hash.update(str(model))
+    return ds_hash.hexdigest()
+
+
+def decode_subject(dataset, model, split_pred=None, split_name=None,
+                   exp_name=None, cv_method="run", n_jobs=1):
+    """Perform decoding on a single dataset.
+
+    This function hashes the relevant inputs and uses that to store
+    persistant data over multiple executions.
+
+    Parameters
+    ----------
+    dataset : dict
+        decoding dataset
+    model : scikit-learn estimator
+        model to decode with
+    spit_pred : array or sequence of arrays, optional
+        bin prediction accuracies by the index values in the array.
+        can pass one array to use for all datasets, or a list
+        of arrays with the same length as the dataset list.
+        splits will form last axis of returned accuracy array.
+        n_jobs will have no effect when this is used, but can
+        still run in parallel over subjects using IPython.
+    split_name : string
+        name to associate with split results file
+    cv_method : run | sample | cv arg for cross_val_score
+        cross validate over runs, over samples (leave-one-out)
+        or otherwise something that can be provided to the cv
+        argument for sklearn.cross_val_score
+    exp_name : string
+        name of experiment, if not default
+    n_jobs : int, optional
+        number of jobs for sklean internal parallelization
+    dv : IPython cluster direct view, optional
+        IPython cluster to decode in parallel
+
+    Return
+    ------
+    scores : array
+        squeezed array of scores with (n_split, n_tp) dimensions
+
+    """
+    project = gather_project_info()
+
+    # Find the relevant disk location for the results file
+    roi_name = dataset["roi_name"]
+    problem = dataset["problem"]
+    subj = dataset["subj"]
+
+    res_path = op.join(project["analysis_dir"],
+                       exp_name, subj, "mvpa",
+                       problem, roi_name)
+
+    # Naming the file is sort of clumsy
+    model_str = re.match("(.+)\(", str(model))
+    collapse = dataset["collapse"]
+    if collapse is not None:
+        if isinstance(collapse, slice):
+            collapse_str = "%s-%s" % (collapse.start, collapse.stop)
+        else:
+            collapse_str = str(collapse)
+    else:
+        collapse_str = ""
+    if split_pred is not None and split_name is None:
+        split_str = "split"
+    else:
+        split_str = ""
+    res_fname = "_".join([model_str, collapse_str, split_str, ".npz"])
+    res_fname - re.sub("_{2,}", "_", res_fname)
+    res_file = op.join(res_path, res_fname)
+
+    # Hash the inputs to the decoder
+    decoder_hash = _hash_decoder(dataset, model)
+
+    # If the file exists and the hash matches, load and return
+    if op.exists(res_file):
+        res_obj = np.load(res_file)
+        if decoder_hash.hexdigest() == str(res_obj["hash"]):
+            return res_obj["scores"]
+
+    # Get direct references to the data
+    X = dataset["X"]
+    y = dataset["y"]
+    runs = dataset["runs"]
+
+    # Set up the cross-validation
+    indices = True if split_pred is None else False
+    if cv_method == "run":
+        cv = LeaveOneLabelOut(runs, indices=indices)
+    elif cv_method == "sample":
+        cv = LeaveOneOut(len(y), indices=indices)
+    else:
+        cv = cv_method
+
+    if X.ndim < 3:
+        X = [X]
+
+    # Do the decoding
+    scores = []
+    for X_i in X:
+        if split_pred is None:
+            score = cross_val_score(model, X_i, y, cv=cv,
+                                    n_jobs=n_jobs).mean()
+            scores.append(score)
+        else:
+            n_bins = len(np.unique(split_pred))
+            bin_scores = [[] for i in range(n_bins)]
+            for train, test in cv:
+                model.fit(X_i[train], y[train])
+                for bin in range(n_bins):
+                    idx = np.logical_and(test, split_pred == bin)
+                    bin_score = model.score(X_i[idx], y[idx])
+                    bin_scores[bin].append(bin_score)
+            scores.append(np.mean(bin_scores, axis=1))
+    scores = np.squeeze(scores)
+
+    # Save the scores to disk
+    res_dict = dict(scores=scores, hash=decoder_hash)
+    np.save(res_file, **res_dict)
+
+    return scores
+
+
+def decode_group(datasets, model, split_pred=None, split_name=None,
+                 cv_method="run", exp_name=None, n_jobs=1, dv=None):
     """Perform decoding on a sequence of datasets.
 
     Parameters
@@ -397,10 +544,14 @@ def decode(datasets, model, split_pred=None, cv_method="run",
         splits will form last axis of returned accuracy array.
         n_jobs will have no effect when this is used, but can
         still run in parallel over subjects using IPython.
+    split_name : string
+        name to associate with split results file
     cv_method : run | sample | cv arg for cross_val_score
         cross validate over runs, over samples (leave-one-out)
         or otherwise something that can be provided to the cv
         argument for sklearn.cross_val_score
+    exp_name : string
+        name of experiment, if not default
     n_jobs : int, optional
         number of jobs for sklean internal parallelization
     dv : IPython cluster direct view, optional
@@ -419,38 +570,6 @@ def decode(datasets, model, split_pred=None, cv_method="run",
     else:
         map = dv.map_sync
 
-    # Underlying decoding function
-    def _decode(data, model, split_pred, cv_method, n_jobs):
-        X = data["X"]
-        y = data["y"]
-        runs = data["runs"]
-        indices = True if split_pred is None else False
-        if cv_method == "run":
-            cv = LeaveOneLabelOut(runs, indices=indices)
-        elif cv_method == "sample":
-            cv = LeaveOneOut(len(y), indices=indices)
-        else:
-            cv = cv_method
-        if X.ndim < 3:
-            X = [X]
-        scores = []
-        for X_i in X:
-            if split_pred is None:
-                score = cross_val_score(model, X_i, y, cv=cv,
-                                        n_jobs=n_jobs).mean()
-                scores.append(score)
-            else:
-                n_bins = len(np.unique(split_pred))
-                bin_scores = [[] for i in range(n_bins)]
-                for train, test in cv:
-                    model.fit(X_i[train], y[train])
-                    for bin in range(n_bins):
-                        idx = np.logical_and(test, split_pred == bin)
-                        bin_score = model.score(X_i[idx], y[idx])
-                        bin_scores[bin].append(bin_score)
-                scores.append(np.mean(bin_scores, axis=1))
-        return np.squeeze(scores)
-
     # Set up the lists for the map
     model = [model for d in datasets]
 
@@ -464,11 +583,12 @@ def decode(datasets, model, split_pred=None, cv_method="run",
         len(split_pred[0])
     except TypeError:
         split_pred = [split_pred for d in datasets]
+    split_name = [split_name for d in datasets]
 
     n_jobs = [n_jobs for d in datasets]
 
     # Do the decoding
-    all_scores = map(_decode, datasets, model,
+    all_scores = map(decode_subject, datasets, model,
                      split_pred, cv_method, n_jobs)
     return np.array(all_scores)
 
@@ -532,7 +652,6 @@ def classifier_permutations(data, model, n_iter=1000, cv_method="run",
 
     # Permute within run
     rs = np.random.RandomState(random_seed)
-    n_samp = len(y)
 
     perms = []
     for i in range(n_iter):
@@ -552,8 +671,8 @@ def classifier_permutations(data, model, n_iter=1000, cv_method="run",
     return np.array(scores).T
 
 
-def permutation_cache(datasets, roi, event, model, n_iter=1000, cv_method="run",
-                      force_run=False, random_seed=None,
+def permutation_cache(datasets, roi, event, model, n_iter=1000,
+                      cv_method="run", force_run=False, random_seed=None,
                       exp_name=None, subjects=None, dv=None):
     """Excecute permutations or read in cached values for a group.
 
