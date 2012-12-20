@@ -2,7 +2,7 @@ from __future__ import division
 import os
 import os.path as op
 from glob import glob
-from hashlib import sha1
+import hashlib
 import re
 
 import numpy as np
@@ -206,7 +206,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, problem, mask_name, roi_name=None,
+def fmri_dataset(subj, problem, roi_name, mask_name=None,
                  exp_name=None, frames=None):
     """Build decoding dataset from predictable lyman outputs.
 
@@ -215,7 +215,7 @@ def fmri_dataset(subj, problem, mask_name, roi_name=None,
     must be set properly.
 
     This function caches its results and, on repeated calls,
-    hashes the arguments and checks those against the has value
+    hashes the arguments and checks those against the hash value
     associated with the stored data. The hashing process considers
     the timestamp on the relevant data files, but not the data itself.
 
@@ -225,8 +225,11 @@ def fmri_dataset(subj, problem, mask_name, roi_name=None,
         subject id
     problem : string
         problem name corresponding to set of event types
-    mask_name : string
-        name of ROI mask that can be found in data hierachy
+    roi_name : string
+        ROI name associated with data
+    mask_name : string, optional
+        name of ROI mask that can be found in data hierachy,
+        uses roi_name if absent
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy
@@ -270,7 +273,7 @@ def fmri_dataset(subj, problem, mask_name, roi_name=None,
                         "timeseries_xfm.nii.gz") for r_i in range(n_runs)]
 
     # Get the hash value for this dataset
-    ds_hash = sha1()
+    ds_hash = hashlib.sha1()
     ds_hash.update(mask_name)
     ds_hash.update(str(op.getmtime(mask_file)))
     ds_hash.update(str(op.getmtime(problem_file)))
@@ -282,7 +285,7 @@ def fmri_dataset(subj, problem, mask_name, roi_name=None,
     if op.exists(ds_file):
         ds_obj = np.load(ds_file)
         if ds_hash.hexdigest() == str(ds_obj["hash"]):
-            dataset = ds_obj.items()
+            dataset = dict(ds_obj.items())
             for k, v in dataset.items():
                 if v.dtype.kind == "S":
                     dataset[k] = str(v)
@@ -328,28 +331,28 @@ def fmri_dataset(subj, problem, mask_name, roi_name=None,
     return dataset
 
 
-def load_datasets(roi, event, classes=None, frames=None, collapse=None,
-                  force_extract=False, subjects=None, dv=None):
+def load_datasets(problem, roi_name, mask_name=None, frames=None,
+                  collapse=None, exp_name=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
     Parameters
     ----------
-    roi : string
-        roi name as corresponding to mask in data hierarchy
-    event : string
-        event schedule name as corresponding to events file
-        in data hierarchy
-    classes : list of strings
-        list of event names in events npz archive to read
+    problem : string
+        problem name corresponding to set of event types
+    roi_name : string
+        ROI name associated with data
+    mask_name : string, optional
+        name of ROI mask that can be found in data hierachy,
+        uses roi_name if absent
     frames : int or sequence
         frames relative to stimulus onsets in event file to extract
     collapse : int or slice
         if int, returns that element in first dimension
-        if slice, take mean over the slice
-        otherwise return whatever was in the data file
-    force_extract : boolean, optional
-        whether to force extraction from nifti data even if dataset
-        files are found in analysis hierarchy
+        if slice, take mean over the slice (both relative to
+        frames, not to the actual onsets) otherwise return each frame
+    exp_name : string, optional
+        lyman experiment name where timecourse data can be found
+        in analysis hierarchy
     subjects : sequence of strings, optional
         sequence of subjects to return; if none reads subjects.txt file
         from lyman directory and uses all defined there
@@ -374,32 +377,31 @@ def load_datasets(roi, event, classes=None, frames=None, collapse=None,
         map = dv.map_sync
 
     # Set up lists for the map to work
-    roi = [roi for s in subjects]
-    event = [event for s in subjects]
-    exp = [None for s in subjects]
-    names = [classes for s in subjects]
+    problem = [problem for s in subjects]
+    roi_name = [roi_name for s in subjects]
+    mask_name = [mask_name for s in subjects]
     frames = [frames for s in subjects]
-    force = [force_extract for s in subjects]
+    exp_name = [exp_name for s in subjects]
 
     # Actually do the loading
-    data = map(fmri_dataset, subjects, roi, event,
-               exp, names, frames, force)
+    data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
+               exp_name, frames)
 
     # Potentially collapse across some stimulus frames
-    if collapse is not None:
-        for dset in data:
+    for dset in data:
+        if collapse is not None:
             if isinstance(collapse, int):
                 dset["X"] = dset["X"][collapse]
             else:
                 dset["X"] = dset["X"][collapse].mean(axis=0)
-    dset["collapse"] = collapse
+        dset["collapse"] = collapse
 
     return data
 
 
 def _hash_decoder(ds, model):
     """Hash the inputs to a decoding analysis."""
-    ds_hash = sha1()
+    ds_hash = hashlib.sha1()
     ds_hash.update(ds["X"].data)
     ds_hash.update(ds["y"].data)
     ds_hash.update(ds["runs"])
@@ -408,7 +410,7 @@ def _hash_decoder(ds, model):
 
 
 def decode_subject(dataset, model, split_pred=None, split_name=None,
-                   exp_name=None, cv_method="run", n_jobs=1):
+                   cv_method="run", exp_name=None, n_jobs=1):
     """Perform decoding on a single dataset.
 
     This function hashes the relevant inputs and uses that to store
@@ -447,6 +449,8 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
 
     """
     project = gather_project_info()
+    if exp_name is None:
+        exp_name = project["default_exp"]
 
     # Find the relevant disk location for the results file
     roi_name = dataset["roi_name"]
@@ -458,7 +462,7 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
                        problem, roi_name)
 
     # Naming the file is sort of clumsy
-    model_str = re.match("(.+)\(", str(model))
+    model_str = re.match("(.+)\(", str(model)).group(1)
     collapse = dataset["collapse"]
     if collapse is not None:
         if isinstance(collapse, slice):
@@ -471,8 +475,9 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         split_str = "split"
     else:
         split_str = ""
-    res_fname = "_".join([model_str, collapse_str, split_str, ".npz"])
-    res_fname - re.sub("_{2,}", "_", res_fname)
+    res_fname = "_".join([model_str, collapse_str, split_str])
+    res_fname = re.sub("_{2,}", "_", res_fname)
+    res_fname = res_fname.strip("_") + ".npz"
     res_file = op.join(res_path, res_fname)
 
     # Hash the inputs to the decoder
@@ -481,7 +486,7 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
     # If the file exists and the hash matches, load and return
     if op.exists(res_file):
         res_obj = np.load(res_file)
-        if decoder_hash.hexdigest() == str(res_obj["hash"]):
+        if decoder_hash == str(res_obj["hash"]):
             return res_obj["scores"]
 
     # Get direct references to the data
@@ -522,7 +527,7 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
 
     # Save the scores to disk
     res_dict = dict(scores=scores, hash=decoder_hash)
-    np.save(res_file, **res_dict)
+    np.savez(res_file, **res_dict)
 
     return scores
 
@@ -585,11 +590,12 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
         split_pred = [split_pred for d in datasets]
     split_name = [split_name for d in datasets]
 
+    exp_name = [exp_name for d in datasets]
     n_jobs = [n_jobs for d in datasets]
 
     # Do the decoding
     all_scores = map(decode_subject, datasets, model,
-                     split_pred, cv_method, n_jobs)
+                     split_pred, split_name, cv_method, exp_name, n_jobs)
     return np.array(all_scores)
 
 
