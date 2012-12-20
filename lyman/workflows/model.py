@@ -279,7 +279,7 @@ def design_corr(in_file, ev_files, n_runs):
     f = plt.figure(figsize=(5, 5))
     ax = f.add_subplot(111)
     ax.matshow(np.abs(np.corrcoef(X.T)), vmin=0, vmax=1, cmap="hot")
-    run = int(re.match(r"run(\d).mat", basename(in_file)).group(1))
+    run = int(re.match(r"run(\d+).mat", basename(in_file)).group(1))
     pat = "ev_(\w+)_%d_\d+.txt" % run
     if n_runs > 1:
         ev_files = ev_files[run]
