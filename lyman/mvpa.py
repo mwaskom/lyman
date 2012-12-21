@@ -280,11 +280,12 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
     for ts_file in ts_files:
         ds_hash.update(str(op.getmtime(ts_file)))
     ds_hash.update(str(frames))
+    ds_hash = ds_hash.hexdigest()
 
     # If the file exists and the hash matches, convert to a dict and return
     if op.exists(ds_file):
         ds_obj = np.load(ds_file)
-        if ds_hash.hexdigest() == str(ds_obj["hash"]):
+        if ds_hash == str(ds_obj["hash"]):
             dataset = dict(ds_obj.items())
             for k, v in dataset.items():
                 if v.dtype.kind == "S":
@@ -326,7 +327,8 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
 
     # Save to disk and return
     dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
-                   problem=problem, frames=frames, hash=ds_hash.hexdigest())
+                   event_names=event_names, problem=problem, frames=frames,
+                   hash=ds_hash)
     np.savez(ds_file, **dataset)
     return dataset
 
