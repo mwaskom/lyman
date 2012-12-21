@@ -18,13 +18,13 @@ evs = [np.array([[6, 0, 1],
        np.array([[12, 0, 1],
                  [24, 0, 1]])]
 
-datasets = [dict(X=stats.norm(0, 1).rvs((24, 12)),
-                 y=stats.bernoulli(.5).rvs(24),
-                 runs=np.repeat([0, 1], 12)) for i in range(3)]
+dataset = dict(X=stats.norm(0, 1).rvs((24, 12)),
+               y=stats.bernoulli(.5).rvs(24),
+               runs=np.repeat([0, 1], 12))
 
-datasets_3d = [dict(X=stats.norm(0, 1).rvs((4, 24, 12)),
-                    y=stats.bernoulli(.5).rvs(24),
-                    runs=np.repeat([0, 1], 12)) for i in range(3)]
+dataset_3d = dict(X=stats.norm(0, 1).rvs((4, 24, 12)),
+                  y=stats.bernoulli(.5).rvs(24),
+                  runs=np.repeat([0, 1], 12))
 
 
 def test_design_generator():
@@ -137,96 +137,51 @@ def test_extract_mask_error():
 def test_decode_shapes():
     """Test that we get expected shapes from decode function."""
     model = GaussianNB()
-    accs = mvpa.decode(datasets, model)
-    assert_equal(accs.shape, (3,))
-    accs = mvpa.decode(datasets_3d, model)
-    assert_equal(accs.shape, (3, 4))
+    accs = mvpa._decode_subject(dataset, model)
+    assert_equal(accs.shape, (1,))
+    accs = mvpa._decode_subject(dataset_3d, model)
+    assert_equal(accs.shape, (4,))
 
     splits = stats.bernoulli(.5).rvs(24)
-    accs = mvpa.decode(datasets, model, splits)
-    assert_equal(accs.shape, (3, 2))
-    accs = mvpa.decode(datasets_3d, model, splits)
-    assert_equal(accs.shape, (3, 4, 2))
+    accs = mvpa._decode_subject(dataset, model, splits)
+    assert_equal(accs.shape, (2,))
+    accs = mvpa._decode_subject(dataset_3d, model, splits)
+    assert_equal(accs.shape, (4, 2))
 
 
 def test_decode_options():
     """Test some other options for the decode function."""
     model = GaussianNB()
-    mvpa.decode(datasets, model)
-    mvpa.decode(datasets_3d, model)
+    mvpa._decode_subject(dataset, model)
+    mvpa._decode_subject(dataset_3d, model)
     splits = stats.bernoulli(.5).rvs(24)
-    mvpa.decode(datasets, model, splits)
-    mvpa.decode(datasets, model, cv_method="sample")
-    mvpa.decode(datasets, model, cv_method=5)
-    mvpa.decode(datasets, model, cv_method=LeaveOneOut(24))
-    mvpa.decode(datasets, model, n_jobs=2)
+    mvpa._decode_subject(dataset, model, splits)
+    mvpa._decode_subject(dataset, model, cv_method="sample")
+    mvpa._decode_subject(dataset, model, cv_method=5)
+    mvpa._decode_subject(dataset, model, cv_method=LeaveOneOut(24))
+    mvpa._decode_subject(dataset, model, n_jobs=2)
 
 
 def test_decode_cross_val():
     """Test that cv_method strings are correct."""
     model = GaussianNB()
 
-    acc1 = mvpa.decode(datasets, model, cv_method="run")
-    cv = [LeaveOneLabelOut(d["runs"]) for d in datasets]
-    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    acc1 = mvpa._decode_subject(dataset, model, cv_method="run")
+    cv = LeaveOneLabelOut(dataset["runs"])
+    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
     assert_array_equal(acc1, acc2)
 
-    acc1 = mvpa.decode(datasets, model, cv_method="sample")
-    cv = [LeaveOneOut(24) for d in datasets]
-    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    acc1 = mvpa._decode_subject(dataset, model, cv_method="sample")
+    cv = LeaveOneOut(24)
+    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
     assert_array_equal(acc1, acc2)
 
-    acc1 = mvpa.decode(datasets, model, cv_method=LeaveOneOut(24))
-    cv = [LeaveOneOut(24) for d in datasets]
-    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    acc1 = mvpa._decode_subject(dataset, model, cv_method=LeaveOneOut(24))
+    cv = LeaveOneOut(24)
+    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
     assert_array_equal(acc1, acc2)
 
-    acc1 = mvpa.decode(datasets, model, cv_method=4)
-    cv = [StratifiedKFold(d["y"], 4) for d in datasets]
-    acc2 = mvpa.decode(datasets, model, cv_method=cv)
+    acc1 = mvpa._decode_subject(dataset, model, cv_method=4)
+    cv = StratifiedKFold(dataset["y"], 4)
+    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
     assert_array_equal(acc1, acc2)
-
-
-def test_classifier_permutations():
-    """Test basic functions of classifier_permutations."""
-    data = dict(X=stats.norm(0, 1).rvs((100, 12)),
-                y=stats.bernoulli(.5).rvs(100),
-                runs=np.repeat([0, 1], 50))
-    model = GaussianNB()
-    perm_vals = mvpa.classifier_permutations(data, model)
-    perm_mean = perm_vals.mean()
-
-    # Test that the mean is close to chance (this is probabilistic)
-    nose.tools.assert_greater(.1, np.abs(perm_mean - 0.5))
-
-    # Test that the distribution looks normal (this is probabilistic)
-    val, p = stats.normaltest(perm_vals)
-    nose.tools.assert_greater(p, 0.05)
-
-
-def test_permutation_dimension():
-    """Test that we can have a time dimension and it's where we expect."""
-    data = datasets_3d[0]
-    n_perm = 30
-    model = GaussianNB()
-    perm_vals = mvpa.classifier_permutations(data, model, n_perm)
-    nose.tools.assert_equal(perm_vals.shape, (n_perm, len(data["X"])))
-
-
-def test_permutation_seed():
-    """Test that we can give a particular random seed to the permuter."""
-    data = datasets[0]
-    model = GaussianNB()
-    seed = 1
-    out_a = mvpa.classifier_permutations(data, model, random_seed=seed)
-    out_b = mvpa.classifier_permutations(data, model, random_seed=seed)
-    assert_array_equal(out_a, out_b)
-
-
-def test_permutation_number():
-    """Test size of permutation vectors."""
-    data = datasets[0]
-    model = GaussianNB()
-    for n_iter in np.random.randint(10, 250, 5):
-        out = mvpa.classifier_permutations(data, model, n_iter)
-        nose.tools.assert_equal(len(out), n_iter)
