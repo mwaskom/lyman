@@ -399,14 +399,95 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     return data
 
 
-def _hash_decoder(ds, model):
+def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
+    """Get a path to where files storing decoding results will live."""
+    project = gather_project_info()
+    if exp_name is None:
+        exp_name = project["default_exp"]
+
+    roi_name = dataset["roi_name"]
+    problem = dataset["problem"]
+    subj = dataset["subj"]
+
+    res_path = op.join(project["analysis_dir"],
+                       exp_name, subj, "mvpa",
+                       problem, roi_name)
+
+    model_str = re.match("(.+)\(", str(model)).group(1)
+    collapse = dataset["collapse"]
+
+    collapse_str, split_str, shuffle_str = "", "", ""
+    if collapse is not None:
+        if isinstance(collapse, slice):
+            collapse_str = "%s-%s" % (collapse.start, collapse.stop)
+        else:
+            collapse_str = str(collapse)
+    if split_pred is not None and split_name is None:
+        split_str = "split"
+    if shuffle:
+        shuffle_str = "shuffle"
+
+    res_fname = "_".join([model_str, collapse_str, split_str, shuffle_str])
+    res_fname = re.sub("_{2,}", "_", res_fname)
+    res_fname = res_fname.strip("_") + ".npz"
+    res_fname = op.join(res_path, res_fname)
+
+    return res_fname
+
+
+def _hash_decoder(ds, model, random_seed=None):
     """Hash the inputs to a decoding analysis."""
     ds_hash = hashlib.sha1()
     ds_hash.update(ds["X"].data)
     ds_hash.update(ds["y"].data)
     ds_hash.update(ds["runs"])
     ds_hash.update(str(model))
+    if random_seed is not None:
+        ds_hash.update(str(random_seed))
     return ds_hash.hexdigest()
+
+
+def _decode_subject(dataset, model, split_pred=None, split_name=None,
+                    cv_method="run", n_jobs=1):
+    """Internal decoding function to allow for simpler testing."""
+    # TODO maybe move this to moss?
+
+    # Get direct references to the data
+    X = dataset["X"]
+    y = dataset["y"]
+    runs = dataset["runs"]
+
+    # Set up the cross-validation
+    indices = True if split_pred is None else False
+    if cv_method == "run":
+        cv = LeaveOneLabelOut(runs, indices=indices)
+    elif cv_method == "sample":
+        cv = LeaveOneOut(len(y), indices=indices)
+    else:
+        cv = cv_method
+
+    if X.ndim < 3:
+        X = [X]
+
+    # Do the decoding
+    scores = []
+    for X_i in X:
+        if split_pred is None:
+            score = cross_val_score(model, X_i, y, cv=cv,
+                                    n_jobs=n_jobs).mean()
+            scores.append(score)
+        else:
+            n_bins = len(np.unique(split_pred))
+            bin_scores = [[] for i in range(n_bins)]
+            for train, test in cv:
+                model.fit(X_i[train], y[train])
+                for bin in range(n_bins):
+                    idx = np.logical_and(test, split_pred == bin)
+                    bin_score = model.score(X_i[idx], y[idx])
+                    bin_scores[bin].append(bin_score)
+            scores.append(np.mean(bin_scores, axis=1))
+    scores = np.atleast_1d(np.squeeze(scores))
+    return scores
 
 
 def decode_subject(dataset, model, split_pred=None, split_name=None,
@@ -448,37 +529,9 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         squeezed array of scores with (n_split, n_tp) dimensions
 
     """
-    project = gather_project_info()
-    if exp_name is None:
-        exp_name = project["default_exp"]
-
-    # Find the relevant disk location for the results file
-    roi_name = dataset["roi_name"]
-    problem = dataset["problem"]
-    subj = dataset["subj"]
-
-    res_path = op.join(project["analysis_dir"],
-                       exp_name, subj, "mvpa",
-                       problem, roi_name)
-
-    # Naming the file is sort of clumsy
-    model_str = re.match("(.+)\(", str(model)).group(1)
-    collapse = dataset["collapse"]
-    if collapse is not None:
-        if isinstance(collapse, slice):
-            collapse_str = "%s-%s" % (collapse.start, collapse.stop)
-        else:
-            collapse_str = str(collapse)
-    else:
-        collapse_str = ""
-    if split_pred is not None and split_name is None:
-        split_str = "split"
-    else:
-        split_str = ""
-    res_fname = "_".join([model_str, collapse_str, split_str])
-    res_fname = re.sub("_{2,}", "_", res_fname)
-    res_fname = res_fname.strip("_") + ".npz"
-    res_file = op.join(res_path, res_fname)
+    # Get a path to the results will live
+    res_file = _results_fname(dataset, model, split_pred, split_name,
+                              exp_name, False)
 
     # Hash the inputs to the decoder
     decoder_hash = _hash_decoder(dataset, model)
@@ -489,41 +542,10 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         if decoder_hash == str(res_obj["hash"]):
             return res_obj["scores"]
 
-    # Get direct references to the data
-    X = dataset["X"]
-    y = dataset["y"]
-    runs = dataset["runs"]
-
-    # Set up the cross-validation
-    indices = True if split_pred is None else False
-    if cv_method == "run":
-        cv = LeaveOneLabelOut(runs, indices=indices)
-    elif cv_method == "sample":
-        cv = LeaveOneOut(len(y), indices=indices)
-    else:
-        cv = cv_method
-
-    if X.ndim < 3:
-        X = [X]
-
-    # Do the decoding
-    scores = []
-    for X_i in X:
-        if split_pred is None:
-            score = cross_val_score(model, X_i, y, cv=cv,
-                                    n_jobs=n_jobs).mean()
-            scores.append(score)
-        else:
-            n_bins = len(np.unique(split_pred))
-            bin_scores = [[] for i in range(n_bins)]
-            for train, test in cv:
-                model.fit(X_i[train], y[train])
-                for bin in range(n_bins):
-                    idx = np.logical_and(test, split_pred == bin)
-                    bin_score = model.score(X_i[idx], y[idx])
-                    bin_scores[bin].append(bin_score)
-            scores.append(np.mean(bin_scores, axis=1))
-    scores = np.squeeze(scores)
+    # Do the decoding with a private function so we can test it
+    # without dealing with all the persistance stuff
+    scores = _decode_subject(dataset, model, split_pred, split_name,
+                             cv_method, n_jobs)
 
     # Save the scores to disk
     res_dict = dict(scores=scores, hash=decoder_hash)
@@ -599,113 +621,28 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
     return np.array(all_scores)
 
 
-def classifier_permutations(data, model, n_iter=1000, cv_method="run",
-                            random_seed=None, dv=None):
-    """Randomly shuffle class labels and obtain model accuracy many times.
+def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
+                            random_seed=None, exp_name=None, dv=None):
+    """Do a randomization test on a set of classifiers with cached results.
 
-    Parameters
-    ----------
-    data : dict
-        single-subject dataset dictionary
-    model : scikit-learn estimator
-        model object to fit
-    n_iter : int
-        number of permutation iterations
-    cv_method : run | sample | cv arg for cross_val_score
-        cross validate over runs, over samples (leave-one-out)
-        or otherwise something that can be provided to the cv
-        argument for sklearn.cross_val_score
-    random_state : int
-        seed for random state to obtain stable permutations
-    dv : IPython direct view
-        view onto IPython cluster for parallel execution over iterations
-
-    Returns
-    -------
-    scores : n_iter x n_tp array
-        array of null model scores
-
-    """
-    if dv is None:
-        import __builtin__
-        map = __builtin__.map
-    else:
-        map = dv.map_sync
-
-    # Set up the data properly
-    X = data["X"]
-    y = data["y"]
-    runs = data["runs"]
-    if cv_method == "run":
-        cv = LeaveOneLabelOut(runs)
-    elif cv_method == "sample":
-        cv = LeaveOneOut(len(y))
-    else:
-        cv = cv_method
-    if X.ndim < 3:
-        X = [X]
-
-    def _perm_decode(model, X, y, cv, perm):
-        """Internal func for parallel purposes."""
-        y_perm = y[perm]
-        perm_acc = cross_val_score(model, X, y_perm, cv=cv).mean()
-        return perm_acc
-
-    # Make lists to send into map()
-    model_p = [model for i in range(n_iter)]
-    y_p = [y for i in range(n_iter)]
-    cv_p = [cv for i in range(n_iter)]
-
-    # Permute within run
-    rs = np.random.RandomState(random_seed)
-
-    perms = []
-    for i in range(n_iter):
-        perm_i = []
-        for run in np.unique(runs):
-            perm_r = rs.permutation(np.sum(runs == run))
-            perm_r += np.sum(runs == run - 1)
-            perm_i.append(perm_r)
-        perms.append(np.concatenate(perm_i))
-
-    scores = []
-    for X_i in X:
-        X_p = [X_i for i in range(n_iter)]
-        tr_scores = map(_perm_decode, model_p, X_p, y_p, cv_p, perms)
-        scores.append(tr_scores)
-
-    return np.array(scores).T
-
-
-def permutation_cache(datasets, roi, event, model, n_iter=1000,
-                      cv_method="run", force_run=False, random_seed=None,
-                      exp_name=None, subjects=None, dv=None):
-    """Excecute permutations or read in cached values for a group.
+    The randomizations can be distributed over an IPython cluster using
+    the ``dv`` argument. Note that unlike the decode_group function,
+    the parallelization occurs within, rather than over subjects.
 
     Parameters
     ----------
     datasets : list of dictionaries
         each item in the list is an mvpa dictionary
-    roi : string
-        name of region
-    event : string
-        name of event
-    model : scikit-learn estimator
-        model object to fit
     n_iter : int
         number of permutation iterations
     cv_method : run | sample | cv arg for cross_val_score
         cross validate over runs, over samples (leave-one-out)
         or otherwise something that can be provided to the cv
         argument for sklearn.cross_val_score
-    force_run : bool
-        execute processing even if cache file exists
     random_state : int
         seed for random state to obtain stable permutations
     exp_name : string
         experiment name if not default
-    subjects : sequence of strings
-        list of subject ids
     dv : IPython direct view
         view onto IPython cluster for parallel execution over iterations
 
@@ -715,37 +652,30 @@ def permutation_cache(datasets, roi, event, model, n_iter=1000,
         permutation array for each item in datasets
 
     """
-    project = gather_project_info()
-    if subjects is None:
-        subj_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
-        subjects = np.loadtxt(subj_file, str)
-
-    if exp_name is None:
-        exp_name = project["default_exp"]
-
-    model_name = re.match("(.+)\(", str(model)).group(1)
-
-    perm_template = op.join(project["analysis_dir"], exp_name,
-                            "%s", "mvpa", "%s_%s_%s_shuffle.npy")
-
     group_scores = []
     for i_s, data in enumerate(datasets):
 
-        perm_file = perm_template % (subjects[i_s], roi, event, model_name)
+        # Get a path to the results will live
+        res_file = _results_fname(data, model, None, None, exp_name, True)
 
-        do_perm = False
-        if not op.exists(perm_file):
-            do_perm = True
-        elif len(np.load(perm_file)) != n_iter:
-            do_perm = True
+        # Hash the inputs to the decoder
+        decoder_hash = _hash_decoder(data, model, random_seed)
 
-        if do_perm or force_run:
-            scores = classifier_permutations(data, model, n_iter, cv_method,
-                                             random_seed, dv)
-            np.save(perm_file, scores)
-        else:
-            scores = np.load(perm_file)
+        # If the file exists and the hash matches, load and return
+        if op.exists(res_file):
+            res_obj = np.load(res_file)
+            if decoder_hash == str(res_obj["hash"]):
+                return res_obj["scores"]
+
+        # Otherwise, do the test for this dataset
+        p_vals, scores = moss.randomize_classifier(data, model, n_iter,
+                                                   cv_method, random_seed,
+                                                   return_dist=True, dv=dv)
+
+        # Save the scores to disk
+        res_dict = dict(scores=scores, hash=decoder_hash)
+        np.savez(res_file, **res_dict)
 
         group_scores.append(scores)
 
-    return group_scores
+    return np.array(group_scores)
