@@ -708,13 +708,6 @@ def write_realign_report(realign_params, rms_files):
     sns.set()
 
     # Set some visual defaults on the fly
-    """
-    mpl.rcParams.update({'figure.figsize': (8, 2.5),
-                         'figure.subplot.left': .075,
-                         'figure.subplot.right': .95,
-                         'font.size': 8,
-                         'legend.labelspacing': .2})
-    """
     mpl.rcParams.update({"font.size": 8, "legend.labelspacing": .2})
 
     # Open up the RMS files and get the max motion
@@ -728,12 +721,12 @@ def write_realign_report(realign_params, rms_files):
             "#Absolute:\n%.4f\n#Relative\n%.4f\nTotal\n%.4f" % tuple(motion))
 
     # Write the motion plot
-    fig = plt.figure(figsize=(8, 10))
+    fig = plt.figure(figsize=(8, 9))
     ax = fig.add_subplot(311)
     ax.plot(np.transpose(displace))
     ax.set_xlim((0, len(displace[0]) - 1))
     ax.legend(['abs', 'rel'], ncol=2)
-    ax.set_title('Mean Displacement (mm)')
+    ax.set_title('Displacement (mm)')
 
     # Open up the realignment parameters
     params = np.loadtxt(realign_params)
@@ -768,16 +761,14 @@ def write_art_plot(intensity_file, outlier_file):
     import numpy as np
     import matplotlib as mpl
     import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set()
 
     # Set some visual defaults on the fly
-    mpl.rcParams.update({'figure.figsize': (8, 2.5),
-                         'figure.subplot.left': .075,
-                         'figure.subplot.right': .95,
-                         'font.size': 8,
-                         'legend.labelspacing': .2})
+    mpl.rcParams.update({'font.size': 8, 'legend.labelspacing': .2})
 
     # Build the figure
-    fig = plt.figure()
+    fig = plt.figure(figsize=(9, 2.5))
     ax = fig.add_subplot(111)
 
     # Plot the global timecourse
@@ -804,7 +795,7 @@ def write_art_plot(intensity_file, outlier_file):
     try:
         outliers = np.loadtxt(outlier_file, ndmin=1)
         for out in outliers:
-            ax.axvline(out, color="r")
+            ax.axvline(out, color=sns.color_palette()[2])
     except IOError:
         pass
 
