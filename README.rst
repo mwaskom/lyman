@@ -21,6 +21,8 @@ Python
 
 - Core scientific Python environment (best to use the Enthought Python Distribution)
 
+- Nipy
+
 - Nibabel
 
 - rst2pdf

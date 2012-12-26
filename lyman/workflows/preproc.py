@@ -287,7 +287,7 @@ def create_realignment_workflow(name="realignment"):
 
     # Generate a report on the motion correction
     report_inputs = ["realign_params", "rms_files"]
-    report_outputs = ["motion_file", "disp_plot", "rot_plot", "trans_plot"]
+    report_outputs = ["motion_file", "plot_file"]
     mcreport = MapNode(util.Function(input_names=report_inputs,
                                      output_names=report_outputs,
                                      function=write_realign_report),
@@ -310,7 +310,7 @@ def create_realignment_workflow(name="realignment"):
                       name="parname")
 
     # Send out all the report data as one list
-    mergereport = Node(util.Merge(numinputs=5, axis="hstack"),
+    mergereport = Node(util.Merge(numinputs=3, axis="hstack"),
                        name="mergereport")
 
     # Define the outputs
@@ -340,11 +340,9 @@ def create_realignment_workflow(name="realignment"):
             [("out_file", "in_file")]),
         (mcreport, mergereport,
             [("motion_file", "in1"),
-             ("rot_plot", "in2"),
-             ("disp_plot", "in3"),
-             ("trans_plot", "in4")]),
+             ("plot_file", "in2")]),
         (exslicename, mergereport,
-            [("out_file", "in5")]),
+            [("out_file", "in3")]),
         (mcflirt, parname,
             [("par_file", "in_file")]),
         (parname, outputnode,
@@ -555,37 +553,14 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2",
                         iterfield=["source_file"],
                         name="func2anat")
 
-    # Set up a node to grab the target from the subjects directory
-    fssource = Node(io.FreeSurferSource(
-                    subjects_dir=fs.Info.subjectsdir()),
-                    name="fssource")
-    # Always overwrite the grab; shouldn't cascade
-    fssource.overwrite = True
-
-    # Convert the target to nifti
-    convert = Node(fs.MRIConvert(out_type="niigz"), name="convertbrain")
-
-    # Swap dimensions so stuff looks nice in the report
-    flipbrain = Node(fsl.SwapDimensions(new_dims=("RL", "PA", "IS")),
-                     name="flipbrain")
-
-    flipfunc = MapNode(fsl.SwapDimensions(new_dims=("RL", "PA", "IS")),
-                       iterfield=["in_file"],
-                       name="flipfunc")
-
-    # Slice up the registration
-    func2anatpng = MapNode(fsl.Slicer(middle_slices=True,
-                                      show_orientation=False,
-                                      scaling=.6,
-                                      label_slices=False),
+    # Make an image for quality control on the registration
+    regpng = MapNode(util.Function(input_names=["subject_id", "in_file"],
+                                   output_names=["out_file"],
+                                   function=write_coreg_plot),
                            iterfield=["in_file"],
-                           name="func2anatpng")
+                           name="regpng")
 
     # Rename some files
-    pngname = MapNode(Rename(format_string="func2anat.png"),
-                      iterfield=["in_file"],
-                      name="pngname")
-
     costname = MapNode(Rename(format_string="func2anat_cost.dat"),
                        iterfield=["in_file"],
                        name="costname")
@@ -614,18 +589,13 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2",
     bbregister.connect([
         (inputnode,    func2anat,    [("subject_id", "subject_id"),
                                       ("source_file", "source_file")]),
-        (inputnode,    fssource,     [("subject_id", "subject_id")]),
-        (func2anat,    flipfunc,     [("registered_file", "in_file")]),
-        (flipfunc,     func2anatpng, [("out_file", "in_file")]),
-        (fssource,     convert,      [("brain", "in_file")]),
-        (convert,      flipbrain,    [("out_file", "in_file")]),
-        (flipbrain,    func2anatpng, [("out_file", "image_edges")]),
-        (func2anatpng, pngname,      [("out_file", "in_file")]),
+        (inputnode,    regpng,       [("subject_id", "subject_id")]),
+        (func2anat,    regpng,       [("registered_file", "in_file")]),
         (func2anat,    tkregname,    [("out_reg_file", "in_file")]),
         (func2anat,    flirtname,    [("out_fsl_file", "in_file")]),
         (func2anat,    costname,     [("min_cost_file", "in_file")]),
         (costname,     report,       [("out_file", "in1")]),
-        (pngname,      report,       [("out_file", "in2")]),
+        (regpng,       report,       [("out_file", "in2")]),
         (tkregname,    outputnode,   [("out_file", "tkreg_mat")]),
         (flirtname,    outputnode,   [("out_file", "flirt_mat")]),
         (report,       outputnode,   [("out", "report")]),
@@ -734,13 +704,18 @@ def write_realign_report(realign_params, rms_files):
     import numpy as np
     import matplotlib as mpl
     import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set()
 
     # Set some visual defaults on the fly
+    """
     mpl.rcParams.update({'figure.figsize': (8, 2.5),
                          'figure.subplot.left': .075,
                          'figure.subplot.right': .95,
                          'font.size': 8,
                          'legend.labelspacing': .2})
+    """
+    mpl.rcParams.update({"font.size": 8, "legend.labelspacing": .2})
 
     # Open up the RMS files and get the max motion
     displace = map(np.loadtxt, rms_files)
@@ -752,50 +727,40 @@ def write_realign_report(realign_params, rms_files):
         f.write(
             "#Absolute:\n%.4f\n#Relative\n%.4f\nTotal\n%.4f" % tuple(motion))
 
-    # Write the displacement plot
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(np.array(displace).T)
+    # Write the motion plot
+    fig = plt.figure(figsize=(8, 10))
+    ax = fig.add_subplot(311)
+    ax.plot(np.transpose(displace))
     ax.set_xlim((0, len(displace[0]) - 1))
     ax.legend(['abs', 'rel'], ncol=2)
-    ax.set_title('MCFLIRT estimated mean displacement (mm)')
-
-    disp_plot = abspath("displacement_plot.png")
-    plt.savefig(disp_plot)
-    plt.close()
+    ax.set_title('Mean Displacement (mm)')
 
     # Open up the realignment parameters
     params = np.loadtxt(realign_params)
     xyz = ['x', 'y', 'z']
 
     # Write the rotation plot
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
+    ax = fig.add_subplot(312)
     ax.plot(params[:, :3])
     ax.plot(ax.get_xlim(), (0, 0), "k--")
     ax.set_xlim((0, params.shape[0] - 1))
     ax.legend(xyz, ncol=3)
-    ax.set_title('MCFLIRT estimated rotations (rad)')
-
-    rot_plot = abspath("rotation_plot.png")
-    plt.savefig(rot_plot)
-    plt.close()
+    ax.set_title('Rotations (rad)')
 
     # Write the translation plot
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
+    ax = fig.add_subplot(313)
     ax.plot(params[:, 3:])
     ax.set_xlim((0, params.shape[0] - 1))
     ax.plot(ax.get_xlim(), (0, 0), "k--")
     ax.legend(xyz, ncol=3)
-    ax.set_title('MCFLIRT estimated translations (mm)')
+    ax.set_title('Translations (mm)')
 
-    trans_plot = abspath("translation_plot.png")
-    plt.savefig(trans_plot)
+    plot_file = abspath("realignment_plots.png")
+    plt.savefig(plot_file)
 
     plt.close()
 
-    return motion_file, disp_plot, rot_plot, trans_plot
+    return motion_file, plot_file
 
 
 def write_art_plot(intensity_file, outlier_file):
@@ -851,6 +816,36 @@ def write_art_plot(intensity_file, outlier_file):
     return intensity_plot
 
 
+def write_coreg_plot(subject_id, in_file):
+    """Plot the wm surface edges on the mean functional."""
+    import os
+    import os.path as op
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import nibabel as nib
+    from nipy.labs import viz
+    bold_img = nib.load(in_file)
+    bold_data = bold_img.get_data()
+    aff = bold_img.get_affine()
+
+    subj_dir = os.environ["SUBJECTS_DIR"]
+    wm_file = op.join(subj_dir, subject_id, "mri/wm.mgz")
+    wm_data = nib.load(wm_file).get_data()
+
+    f = plt.figure(figsize=(12, 6))
+    cut_coords = np.linspace(-10, 70, 8).reshape(2, 4)
+    ax_positions = [(0, 0, 1, .5), (0, .5, 1, .5)]
+    for cc, ap in zip(cut_coords, ax_positions):
+        slicer = viz.plot_anat(bold_data, aff, cut_coords=cc,
+                               draw_cross=False, annotate=False,
+                               slicer="z", axes=ap, figure=f)
+        slicer.contour_map(wm_data, aff, colors="gold")
+
+    out_file = op.abspath("func2anat.png")
+    plt.savefig(out_file)
+    return out_file
+
+
 def write_preproc_report(subject_id, input_timeseries, realign_report,
                          mean_func_slices, intensity_plot, outlier_volumes,
                          coreg_report):
@@ -868,7 +863,7 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
 
     # Read in motion statistics
     motion_file = realign_report[0]
-    motion_info = [l.strip() for l in open(motion_file).readlines()]
+    motion_info = [l.strip() for l in open(motion_file)]
     max_abs_motion, max_rel_motion, total_motion = (motion_info[1],
                                                     motion_info[3],
                                                     motion_info[5])
@@ -880,16 +875,14 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
                        orig_timeseries_path=op.realpath(input_timeseries),
                        image_dimensions=image_dimensions,
                        image_timepoints=image_timepoints,
-                       example_func_slices=realign_report[4],
                        mean_func_slices=mean_func_slices,
                        intensity_plot=intensity_plot,
                        n_outliers=len(open(outlier_volumes).readlines()),
                        max_abs_motion=max_abs_motion,
                        max_rel_motion=max_rel_motion,
                        total_motion=total_motion,
-                       displacement_plot=realign_report[2],
-                       rotation_plot=realign_report[1],
-                       translation_plot=realign_report[3],
+                       realignment_plot=realign_report[1],
+                       example_func_slices=realign_report[2],
                        func_to_anat_cost=open(
                            coreg_report[0]).read().split()[0],
                        func_to_anat_slices=coreg_report[1])

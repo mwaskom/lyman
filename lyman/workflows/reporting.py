@@ -54,14 +54,7 @@ RMS Motion
 Motion Plots
 ------------
 
-.. image:: %(displacement_plot)s
-    :width: 6.5in
-
-.. image:: %(translation_plot)s
-    :width: 6.5in
-
-.. image:: %(rotation_plot)s
-    :width: 6.5in
+.. image:: %(realignment_plot)s
 
 Functional to Structural Coregistration
 ---------------------------------------
