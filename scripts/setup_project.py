@@ -55,7 +55,7 @@ def is_path(x):
 
 def nonnull_string(s):
     if s is not None:
-        return "'s'"
+        return "'%s'" % s
 
 def nonempty(x):
     if not x:
