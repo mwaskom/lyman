@@ -640,40 +640,6 @@ def max_motion_func(rms_files):
     return out_file
 
 
-def spline_reslice(timeseries, ref_file, aff_mats):
-    """Reslice with applywarp using mcflirt affine mats."""
-    from os import getcwd
-    from glob import glob
-    from subprocess import call
-    from nipype.utils.filemanip import fname_presuffix
-
-    # Split the timeseries by frame
-    cmd = ["fslsplit", timeseries, "frame", "-t"]
-    call(cmd)
-
-    # Grab the list of 3D images
-    frames = sorted(glob("frame*.nii.gz"))
-
-    # Reslice each image with its matrix
-    resliced_frames = []
-    for i, mat in enumerate(aff_mats):
-
-        out_frame = "resliced%04d.nii.gz" % i
-        cmd = ["applywarp", "-i", frames[i],
-               "--premat=%s" % mat, "-r", ref_file,
-               "-o", out_frame, "--interp=sinc"]
-        call(cmd)
-        resliced_frames.append(out_frame)
-
-    # Merge the 3D resliced images back into one file
-    out_file = fname_presuffix(timeseries, suffix="_mcf", newpath=getcwd())
-    cmd = ["fslmerge", "-t", out_file]
-    cmd.extend(resliced_frames)
-    call(cmd)
-
-    return out_file
-
-
 def maybe_mean(in_file):
     """Mean over time if image is 4D otherwise pass it right back out."""
     from os.path import getcwd
