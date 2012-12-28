@@ -247,8 +247,8 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
         exp_name = project["default_exp"]
     exp = gather_experiment_info(exp_name)
 
-    if roi_name is None:
-        roi_name = mask_name
+    if mask_name is None:
+        mask_name = roi_name
 
     # Find the relevant disk location for the dataaset file
     ds_file = op.join(project["analysis_dir"],
