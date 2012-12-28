@@ -1,6 +1,6 @@
 source_template = "%s/bold/scan??.nii.gz"
 
-nruns = 6
+n_runs = 6
 
 frames_to_toss = 6
 
