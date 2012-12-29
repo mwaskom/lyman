@@ -672,7 +672,8 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
         if op.exists(res_file):
             res_obj = np.load(res_file)
             if decoder_hash == str(res_obj["hash"]):
-                return res_obj["scores"]
+                group_scores.append(res_obj["scores"])
+                continue
 
         # Otherwise, do the test for this dataset
         p_vals, scores = moss.randomize_classifier(data, model, n_iter,
