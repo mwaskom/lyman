@@ -556,6 +556,10 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
 
     # Save the scores to disk
     res_dict = dict(scores=scores, hash=decoder_hash)
+    try:
+        os.makedirs(op.dirname(res_file))
+    except OSError:
+        pass
     np.savez(res_file, **res_dict)
 
     return scores
