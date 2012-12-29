@@ -424,8 +424,11 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
             collapse_str = "%s-%s" % (collapse.start, collapse.stop)
         else:
             collapse_str = str(collapse)
-    if split_pred is not None and split_name is None:
-        split_str = "split"
+    if split_pred is not None:
+        if split_name is None:
+            split_str = "split"
+        else:
+            split_str = split_name
     if shuffle:
         shuffle_str = "shuffle"
 
@@ -437,13 +440,15 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
     return res_fname
 
 
-def _hash_decoder(ds, model, random_seed=None):
+def _hash_decoder(ds, model, split_pred=None, random_seed=None):
     """Hash the inputs to a decoding analysis."""
     ds_hash = hashlib.sha1()
     ds_hash.update(ds["X"].data)
     ds_hash.update(ds["y"].data)
     ds_hash.update(ds["runs"])
     ds_hash.update(str(model))
+    if split_pred is not None:
+        ds_hash.update(split_pred.data)
     if random_seed is not None:
         ds_hash.update(str(random_seed))
     return ds_hash.hexdigest()
@@ -505,13 +510,9 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         decoding dataset
     model : scikit-learn estimator
         model to decode with
-    spit_pred : array or sequence of arrays, optional
+    spit_pred : array
         bin prediction accuracies by the index values in the array.
-        can pass one array to use for all datasets, or a list
-        of arrays with the same length as the dataset list.
-        splits will form last axis of returned accuracy array.
-        n_jobs will have no effect when this is used, but can
-        still run in parallel over subjects using IPython.
+        n_jobs will have no effect when this is used
     split_name : string
         name to associate with split results file
     cv_method : run | sample | cv arg for cross_val_score
@@ -531,12 +532,15 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         squeezed array of scores with (n_split, n_tp) dimensions
 
     """
+    # Ensure some inputs
+    split_pred = np.asarray(split_pred)
+
     # Get a path to the results will live
     res_file = _results_fname(dataset, model, split_pred, split_name,
                               exp_name, False)
 
     # Hash the inputs to the decoder
-    decoder_hash = _hash_decoder(dataset, model)
+    decoder_hash = _hash_decoder(dataset, model, split_pred)
 
     # If the file exists and the hash matches, load and return
     if op.exists(res_file):
@@ -661,7 +665,7 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
         res_file = _results_fname(data, model, None, None, exp_name, True)
 
         # Hash the inputs to the decoder
-        decoder_hash = _hash_decoder(data, model, random_seed)
+        decoder_hash = _hash_decoder(data, model, random_seed=random_seed)
 
         # If the file exists and the hash matches, load and return
         if op.exists(res_file):
