@@ -440,7 +440,7 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
     return res_fname
 
 
-def _hash_decoder(ds, model, split_pred=None, random_seed=None):
+def _hash_decoder(ds, model, split_pred=None, n_iter=None, random_seed=None):
     """Hash the inputs to a decoding analysis."""
     ds_hash = hashlib.sha1()
     ds_hash.update(ds["X"].data)
@@ -449,6 +449,8 @@ def _hash_decoder(ds, model, split_pred=None, random_seed=None):
     ds_hash.update(str(model))
     if split_pred is not None:
         ds_hash.update(split_pred.data)
+    if n_iter is not None:
+        ds_hash.update(str(n_iter))
     if random_seed is not None:
         ds_hash.update(str(random_seed))
     return ds_hash.hexdigest()
@@ -670,7 +672,7 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
         res_file = _results_fname(data, model, None, None, exp_name, True)
 
         # Hash the inputs to the decoder
-        decoder_hash = _hash_decoder(data, model, random_seed=random_seed)
+        decoder_hash = _hash_decoder(data, model, n_iter=n_iter, random_seed=random_seed)
 
         # If the file exists and the hash matches, load and return
         if op.exists(res_file):
