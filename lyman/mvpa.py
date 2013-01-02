@@ -619,9 +619,7 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
     except TypeError:
         cv_method = [cv_method for d in datasets]
 
-    try:
-        len(split_pred[0])
-    except TypeError:
+    if not np.iterable(split_pred[0]):
         split_pred = [split_pred for d in datasets]
     split_name = [split_name for d in datasets]
 
@@ -672,7 +670,8 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
         res_file = _results_fname(data, model, None, None, exp_name, True)
 
         # Hash the inputs to the decoder
-        decoder_hash = _hash_decoder(data, model, n_iter=n_iter, random_seed=random_seed)
+        decoder_hash = _hash_decoder(data, model, n_iter=n_iter,
+                                     random_seed=random_seed)
 
         # If the file exists and the hash matches, load and return
         if op.exists(res_file):

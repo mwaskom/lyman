@@ -198,6 +198,8 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
             data_ts, events_ts, n_bins)
 
         evoked_data = getattr(analyzer, calc_method).data
+        if evoked_data.ndim == 1:
+            evoked_data = np.array([evoked_data])
         if correct_baseline:
             evoked_data = evoked_data - evoked_data[:, 0, None]
         evoked.append(evoked_data)
