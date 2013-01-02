@@ -415,7 +415,7 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
                        exp_name, subj, "mvpa",
                        problem, roi_name)
 
-    model_str = re.match("(.+)\(", str(model)).group(1)
+    model_str = model.__class__.__name__
     collapse = dataset["collapse"]
 
     collapse_str, split_str, shuffle_str = "", "", ""
