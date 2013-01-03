@@ -9,6 +9,7 @@ import nitime as nit
 
 from lyman import gather_project_info
 
+
 def extract_subject(subj, mask_name, summary_func=np.mean,
                     exp_name=None):
     """Extract timeseries from within a mask, summarizing flexibly.
@@ -38,9 +39,9 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
     if exp_name is None:
         exp_name = project["default_exp"]
 
-    # Get a path to the file where 
+    # Get a path to the file where
     cache_dir = op.join(project["analysis_dir"],
-                      exp_name, subj, "evoked")
+                        exp_name, subj, "evoked")
 
     try:
         os.makedirs(cache_dir)
@@ -92,7 +93,7 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
         # Try to use the axis argument to summarize over voxels
         try:
             roi_data = summary_func(roi_data, axis=1)
-        # Catch a TypeError and just call the function 
+        # Catch a TypeError and just call the function
         # This lets us do e.g. a PCA
         except TypeError:
             roi_data = summary_func(roi_data)
@@ -175,7 +176,7 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
             onsets_i = [[r[:, 0] for r in d] for d in ev_data]
         else:
             onsets_i = onsets[i]
-            
+
         event_list = []
         data_list = []
         for run, run_data in enumerate(data_i["data"]):
