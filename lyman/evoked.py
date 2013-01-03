@@ -172,14 +172,16 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
             subj = data_i["subj"]
             event_obj = np.load(event_template % subj)
             ev_data = [event_obj[name] for name in event_obj["event_names"]]
-            onsets = [[r[:, 0] for r in d] for d in ev_data]
+            onsets_i = [[r[:, 0] for r in d] for d in ev_data]
+        else:
+            onsets_i = onsets[i]
             
         event_list = []
         data_list = []
         for run, run_data in enumerate(data_i["data"]):
 
             events_i = np.zeros_like(run_data)
-            for ev_id, ev_onsets in enumerate(onsets, 1):
+            for ev_id, ev_onsets in enumerate(onsets_i, 1):
                 run_onsets = ev_onsets[run] + offset
                 onset_frames = (run_onsets / tr).astype(int)
                 events_i[onset_frames] = ev_id
