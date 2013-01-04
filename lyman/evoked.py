@@ -1,3 +1,9 @@
+"""Functions for dealing with evoked BOLD response from brain regions.
+
+The functions in this module are integrated with the lyman hierarchy
+and use Python tools (nibabel and nitime) for processing.
+
+"""
 import os
 import os.path as op
 from glob import glob
@@ -8,6 +14,7 @@ import nibabel as nib
 import nitime as nit
 
 from lyman import gather_project_info
+
 
 def extract_subject(subj, mask_name, summary_func=np.mean,
                     exp_name=None):
@@ -38,9 +45,9 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
     if exp_name is None:
         exp_name = project["default_exp"]
 
-    # Get a path to the file where 
+    # Get a path to the file where
     cache_dir = op.join(project["analysis_dir"],
-                      exp_name, subj, "evoked")
+                        exp_name, subj, "evoked")
 
     try:
         os.makedirs(cache_dir)
@@ -92,7 +99,7 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
         # Try to use the axis argument to summarize over voxels
         try:
             roi_data = summary_func(roi_data, axis=1)
-        # Catch a TypeError and just call the function 
+        # Catch a TypeError and just call the function
         # This lets us do e.g. a PCA
         except TypeError:
             roi_data = summary_func(roi_data)
@@ -161,13 +168,47 @@ def extract_group(mask_name, summary_func=np.mean,
 def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
                      calc_method="FIR", offset=0, percent_change=True,
                      correct_baseline=True):
+    """Calcuate an evoked response for a list of datapoints.
 
+    Parameters
+    ----------
+    data : sequence of n_run x n_tp arrays
+        timeseries data
+    n_bins : int
+        number of bins for the peristumulus trace
+    onsets : sequence of n_class x n_run x n_event arrays
+        onset times separated by run and event class, one for
+        each entry in data
+    problem : string
+        problem name for event file in data hierarchy
+        overrides onsets if both are passed
+    tr : int
+        time resolution of the data
+    calc_method : string
+        name of method on nitime EventRelatedAnalyzer object to
+        calculate the evoked response.
+    offset : float
+        value to adjust onset times by
+    percent_change : boolean
+        if True, convert signal to percent change by run
+    correct_baseline : boolean
+        if True, adjust evoked trace to be 0 in first bin
+
+    Returns
+    -------
+
+    evoked : squeezed n_obs x n_class x n_bins array
+        evoked response, by observation and event type
+
+    """
     project = gather_project_info()
     event_template = op.join(project["data_dir"], "%s",
                              "events/%s.npz" % problem)
+
     evoked = []
     for i, data_i in enumerate(data):
 
+        # Can get event information in one of two ways
         if problem is not None:
             subj = data_i["subj"]
             event_obj = np.load(event_template % subj)
@@ -175,7 +216,8 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
             onsets_i = [[r[:, 0] for r in d] for d in ev_data]
         else:
             onsets_i = onsets[i]
-            
+
+        # Create the timeseries of event occurances
         event_list = []
         data_list = []
         for run, run_data in enumerate(data_i["data"]):
@@ -191,6 +233,7 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
                 run_data = nit.utils.percent_change(run_data, ax=0)
             data_list.append(run_data)
 
+        # Set up the Nitime objects
         events = np.concatenate(event_list)
         events_ts = nit.TimeSeries(events, sampling_interval=tr)
         data = np.concatenate(data_list)
@@ -199,22 +242,38 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
         analyzer = nit.analysis.EventRelatedAnalyzer(
             data_ts, events_ts, n_bins)
 
-        evoked_data = getattr(analyzer, calc_method).data
+        # Processing actaully happens here
+        evoked_data = getattr(analyzer, calc_method)
+        evoked_data = np.asarray(evoked_data)
+
+        # Format the output properly
         if evoked_data.ndim == 1:
             evoked_data = np.array([evoked_data])
         if correct_baseline:
             evoked_data = evoked_data - evoked_data[:, 0, None]
         evoked.append(evoked_data)
 
-    return np.array(evoked)
+    return np.array(evoked).squeeze()
 
 
 def integrate_evoked(evoked):
+    """Integrate a peristumulus timecourse.
 
+    Parameters
+    ----------
+    evoked : list of 2D arrays or 2D array
+        values of evoked datapoints
+
+    Returns
+    -------
+    int_evoked : squeezed array
+        evoked values integrated over the time dimension
+
+    """
     int_evoked = []
     if np.array(evoked).ndim < 3:
         evoked = [evoked]
     for data in evoked:
         int_data = sp.integrate.trapz(data, axis=-1)
         int_evoked.append(int_data)
-    return np.array(int_evoked)
+    return np.array(int_evoked).squeeze()
