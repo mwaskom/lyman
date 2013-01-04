@@ -619,7 +619,7 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
     except TypeError:
         cv_method = [cv_method for d in datasets]
 
-    if not np.iterable(split_pred[0]):
+    if split_pred is None or not np.iterable(split_pred[0]):
         split_pred = [split_pred for d in datasets]
     split_name = [split_name for d in datasets]
 
