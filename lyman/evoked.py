@@ -235,25 +235,47 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
 
         # Set up the Nitime objects
         events = np.concatenate(event_list)
-        events_ts = nit.TimeSeries(events, sampling_interval=tr)
-        data = np.concatenate(data_list)
-        data_ts = nit.TimeSeries(data, sampling_interval=tr)
+        data = np.concatenate(data_list, axis=0)
 
-        analyzer = nit.analysis.EventRelatedAnalyzer(
-            data_ts, events_ts, n_bins)
+        if data.ndim == 1:
+            evoked_data = _evoked_1d(events, data, n_bins, tr,
+                                     calc_method, correct_baseline)
+        elif data.ndim == 2:
+            evoked_data = _evoked_1d(events, data, n_bins, tr,
+                                     calc_method, correct_baseline)
 
-        # Processing actaully happens here
-        evoked_data = getattr(analyzer, calc_method)
-        evoked_data = np.asarray(evoked_data)
-
-        # Format the output properly
-        if evoked_data.ndim == 1:
-            evoked_data = np.array([evoked_data])
-        if correct_baseline:
-            evoked_data = evoked_data - evoked_data[:, 0, None]
         evoked.append(evoked_data)
 
     return np.array(evoked).squeeze()
+
+
+def _evoked_1d(events, data, n_bins, tr, calc_method, correct_baseline):
+
+    events_ts = nit.TimeSeries(events, sampling_interval=tr)
+    data_ts = nit.TimeSeries(data, sampling_interval=tr)
+
+    analyzer = nit.analysis.EventRelatedAnalyzer(data_ts, events_ts, n_bins)
+
+    evoked_data = getattr(analyzer, calc_method)
+    evoked_data = np.asarray(evoked_data)
+
+    if evoked_data.ndim == 1:
+        evoked_data = np.array([evoked_data])
+    if correct_baseline:
+        evoked_data = evoked_data - evoked_data[:, 0, None]
+    return evoked_data
+
+
+def _evoked_2d(events, data, n_bins, tr, calc_method, correct_baseline):
+    
+    evoked_data = []
+    for data_i in data.T:
+        evoked_data_i = _evoked_1d(events, data_i, n_bins, tr,
+                                   calc_method, correct_baseline)
+        evoked_data.append(evoked_data_i)
+
+    evoked_data = np.transpose(evoked_data)
+    return evoked_data
 
 
 def integrate_evoked(evoked):
