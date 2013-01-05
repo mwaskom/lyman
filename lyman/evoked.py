@@ -222,7 +222,7 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
         data_list = []
         for run, run_data in enumerate(data_i["data"]):
 
-            events_i = np.zeros_like(run_data)
+            events_i = np.zeros(len(run_data))
             for ev_id, ev_onsets in enumerate(onsets_i, 1):
                 run_onsets = ev_onsets[run] + offset
                 onset_frames = (run_onsets / tr).astype(int)
@@ -238,10 +238,10 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
         data = np.concatenate(data_list, axis=0)
 
         if data.ndim == 1:
-            evoked_data = _evoked_1d(events, data, n_bins, tr,
+            evoked_data = _evoked_1d(data, events, n_bins, tr,
                                      calc_method, correct_baseline)
         elif data.ndim == 2:
-            evoked_data = _evoked_1d(events, data, n_bins, tr,
+            evoked_data = _evoked_2d(data, events, n_bins, tr,
                                      calc_method, correct_baseline)
 
         evoked.append(evoked_data)
@@ -249,7 +249,7 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
     return np.array(evoked).squeeze()
 
 
-def _evoked_1d(events, data, n_bins, tr, calc_method, correct_baseline):
+def _evoked_1d(data, events, n_bins, tr, calc_method, correct_baseline):
 
     events_ts = nit.TimeSeries(events, sampling_interval=tr)
     data_ts = nit.TimeSeries(data, sampling_interval=tr)
@@ -257,7 +257,7 @@ def _evoked_1d(events, data, n_bins, tr, calc_method, correct_baseline):
     analyzer = nit.analysis.EventRelatedAnalyzer(data_ts, events_ts, n_bins)
 
     evoked_data = getattr(analyzer, calc_method)
-    evoked_data = np.asarray(evoked_data)
+    evoked_data = np.asarray(evoked_data).T.astype(float)
 
     if evoked_data.ndim == 1:
         evoked_data = np.array([evoked_data])
@@ -266,19 +266,19 @@ def _evoked_1d(events, data, n_bins, tr, calc_method, correct_baseline):
     return evoked_data
 
 
-def _evoked_2d(events, data, n_bins, tr, calc_method, correct_baseline):
+def _evoked_2d(data, events, n_bins, tr, calc_method, correct_baseline):
     
     evoked_data = []
     for data_i in data.T:
-        evoked_data_i = _evoked_1d(events, data_i, n_bins, tr,
+        evoked_data_i = _evoked_1d(data_i, events, n_bins, tr,
                                    calc_method, correct_baseline)
         evoked_data.append(evoked_data_i)
 
-    evoked_data = np.transpose(evoked_data)
+    evoked_data = np.transpose(evoked_data, (1, 2, 0))
     return evoked_data
 
 
-def integrate_evoked(evoked):
+def integrate_evoked(evoked, axis=-1):
     """Integrate a peristumulus timecourse.
 
     Parameters
@@ -292,10 +292,4 @@ def integrate_evoked(evoked):
         evoked values integrated over the time dimension
 
     """
-    int_evoked = []
-    if np.array(evoked).ndim < 3:
-        evoked = [evoked]
-    for data in evoked:
-        int_data = sp.integrate.trapz(data, axis=-1)
-        int_evoked.append(int_data)
-    return np.array(int_evoked).squeeze()
+    return sp.trapz(evoked, axis=axis)
