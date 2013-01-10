@@ -790,7 +790,7 @@ def write_coreg_plot(subject_id, in_file):
     wm_data = nib.load(wm_file).get_data()
 
     f = plt.figure(figsize=(12, 6))
-    cut_coords = np.linspace(-10, 70, 8).reshape(2, 4)
+    cut_coords = np.linspace(0, 60, 8).reshape(2, 4)
     ax_positions = [(0, 0, 1, .5), (0, .5, 1, .5)]
     for cc, ap in zip(cut_coords, ax_positions):
         slicer = viz.plot_anat(bold_data, aff, cut_coords=cc,
