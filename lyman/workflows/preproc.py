@@ -796,7 +796,10 @@ def write_coreg_plot(subject_id, in_file):
         slicer = viz.plot_anat(bold_data, aff, cut_coords=cc,
                                draw_cross=False, annotate=False,
                                slicer="z", axes=ap, figure=f)
-        slicer.contour_map(wm_data, aff, colors="gold")
+        try:
+            slicer.contour_map(wm_data, aff, colors="gold")
+        except ValueError:
+            pass
 
     out_file = op.abspath("func2anat.png")
     plt.savefig(out_file)
