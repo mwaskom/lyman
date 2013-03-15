@@ -61,7 +61,7 @@ class MaskFactory(object):
                 self.dv.execute("os.environ['SUBJECTS_DIR'] = data_dir")
                 self.parallel = True
 
-            except TimeoutError:
+            except TimeoutError, IOError:
                 self.map = map
         if debug:
             print "Set to run in %s" % (
@@ -247,10 +247,11 @@ class MaskFactory(object):
     def execute(self, cmd_list, out_temp):
         """Exceute a list of commands and verify output file existence."""
         res = self.map(check_output, cmd_list)
-        if self.parallel and self.debug:
-            res.wait_interactive()
-        else:
-            res.wait()
+        if self.parallel:
+            if self.debug:
+                res.wait_interactive()
+            else:
+                res.wait()
         if self.parallel:
             if not res.successful():
                 raise RuntimeError(res.pyerr)
