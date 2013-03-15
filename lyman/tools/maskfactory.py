@@ -61,7 +61,7 @@ class MaskFactory(object):
                 self.dv.execute("os.environ['SUBJECTS_DIR'] = data_dir")
                 self.parallel = True
 
-            except TimeoutError, IOError:
+            except (TimeoutError, IOError):
                 self.map = map
         if debug:
             print "Set to run in %s" % (
