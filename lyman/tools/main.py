@@ -311,7 +311,7 @@ def cluster_to_rst(localmax_file):
     """
     from os.path import abspath
     import numpy as np
-    from ..tools import vox_to_mni, locate_peaks
+    from lyman.tools import vox_to_mni, locate_peaks
 
     out_file = abspath("localmax_table.txt")
     # Localmax files seem to be badly formed
@@ -368,7 +368,7 @@ def locate_peaks(vox_coords):
     import os.path as op
     import numpy as np
     from nibabel import load
-    from ..tools.main import (harvard_oxford_sub_names,
+    from lyman.tools.main import (harvard_oxford_sub_names,
                               harvard_oxford_ctx_names)
     sub_names = harvard_oxford_sub_names
     ctx_names = harvard_oxford_ctx_names
