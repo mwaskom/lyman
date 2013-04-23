@@ -279,7 +279,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
     ds_hash.update(str(op.getmtime(problem_file)))
     for ts_file in ts_files:
         ds_hash.update(str(op.getmtime(ts_file)))
-    ds_hash.update(str(frames))
+    ds_hash.update(np.array(frames).data)
     ds_hash = ds_hash.hexdigest()
 
     # If the file exists and the hash matches, convert to a dict and return
