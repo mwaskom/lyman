@@ -7,6 +7,7 @@ import re
 
 import numpy as np
 import scipy as sp
+from scipy import stats
 import nibabel as nib
 import nipy.modalities.fmri.hemodynamic_models as hrf
 
@@ -207,7 +208,8 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
 
 
 def fmri_dataset(subj, problem, roi_name, mask_name=None,
-                 exp_name=None, frames=None):
+                 exp_name=None, frames=None, collapse=None,
+                 confounds=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -235,6 +237,13 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
         in analysis hierarchy
     frames : int or sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
+    collapse : int or slice
+        if int, returns that element in first dimension
+        if slice, take mean over the slice (both relative to
+        frames, not to the actual onsets) otherwise return each frame
+    confounds : obs X n array
+        array of observations confounding variables to regress out
+        to regress out of the data matrix during extraction
 
     Returns
     -------
@@ -279,7 +288,8 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
     ds_hash.update(str(op.getmtime(problem_file)))
     for ts_file in ts_files:
         ds_hash.update(str(op.getmtime(ts_file)))
-    ds_hash.update(np.array(frames).data)
+    ds_hash.update(np.asarray(frames).data)
+    ds_hash.update(np.asarray(confounds).data)
     ds_hash = ds_hash.hexdigest()
 
     # If the file exists and the hash matches, convert to a dict and return
@@ -325,16 +335,34 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
     y = np.concatenate(y)
     runs = np.concatenate(runs)
 
+    # Potentially collapse across some stimulus frames
+    if collapse is not None:
+        if isinstance(collapse, int):
+            X = X[collapse]
+        else:
+            X = X[collapse].mean(axis=0)
+
+    # Regress the confound vector out from the data matrix
+    if confounds is not None:
+        X = np.atleast_3d(X)
+        confounds = np.asarray(confounds)
+        confounds = stats.zscore(confounds.reshape(X.shape[1], -1))
+        denom = confounds / np.dot(confounds.T, confounds)
+        for X_i in X:
+            X_i -= np.dot(X_i.T, confounds).T * denom
+        X = X.squeeze()
+
     # Save to disk and return
     dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
                    event_names=event_names, problem=problem, frames=frames,
-                   hash=ds_hash)
+                   collapse=collapse, confounds=confounds, hash=ds_hash)
     np.savez(ds_file, **dataset)
     return dataset
 
 
 def load_datasets(problem, roi_name, mask_name=None, frames=None,
-                  collapse=None, exp_name=None, subjects=None, dv=None):
+                  collapse=None, exp_name=None, confounds=None,
+                  subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
     Parameters
@@ -355,6 +383,9 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy
+    confounds : sequence of arrays, optional
+        list ofsubject-specific obs x n arrays of confounding variables
+        to regress out of the data matrix during extraction
     subjects : sequence of strings, optional
         sequence of subjects to return; if none reads subjects.txt file
         from lyman directory and uses all defined there
@@ -383,20 +414,12 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     roi_name = [roi_name for s in subjects]
     mask_name = [mask_name for s in subjects]
     frames = [frames for s in subjects]
+    collapse = [collapse for s in subjects]
     exp_name = [exp_name for s in subjects]
 
     # Actually do the loading
     data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
-               exp_name, frames)
-
-    # Potentially collapse across some stimulus frames
-    for dset in data:
-        if collapse is not None:
-            if isinstance(collapse, int):
-                dset["X"] = dset["X"][collapse]
-            else:
-                dset["X"] = dset["X"][collapse].mean(axis=0)
-        dset["collapse"] = collapse
+               exp_name, frames, collapse, confounds)
 
     return data
 
@@ -446,7 +469,10 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
 def _hash_decoder(ds, model, split_pred=None, n_iter=None, random_seed=None):
     """Hash the inputs to a decoding analysis."""
     ds_hash = hashlib.sha1()
-    ds_hash.update(ds["X"].data)
+    try:
+        ds_hash.update(ds["X"].data)
+    except AttributeError:
+        ds_hash.update(ds["X"].copy().data)
     ds_hash.update(ds["y"].data)
     ds_hash.update(ds["runs"])
     ds_hash.update(str(model))
