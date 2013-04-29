@@ -450,7 +450,7 @@ def _results_fname(dataset, model, split_pred, exp_name, logits, shuffle):
             collapse_str = str(collapse)
     if split_pred is not None:
         split_str = "split"
-        if hasattr(split_pred.name):
+        if hasattr(split_pred, "name"):
             if split_pred.name is None:
                 split_str = split_pred.name
     if logits:
