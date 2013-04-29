@@ -343,7 +343,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
     # Save to disk and return
     dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
                    event_names=event_names, problem=problem, frames=frames,
-                   collapse=collapse, confounds=confounds, hash=ds_hash)
+                   confounds=confounds, hash=ds_hash)
     np.savez(ds_file, **dataset)
     return dataset
 
@@ -403,19 +403,21 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     mask_name = [mask_name for _ in subjects]
     frames = [frames for _ in subjects]
     exp_name = [exp_name for _ in subjects]
+    if confounds is None:
+        confounds = [confounds for _ in subjects]
 
     # Actually do the loading
     data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
                exp_name, frames, confounds)
 
--    # Potentially collapse across some stimulus frames
--    for dset in data:
--        if collapse is not None:
--            if isinstance(collapse, int):
--                dset["X"] = dset["X"][collapse]
--            else:
--                dset["X"] = dset["X"][collapse].mean(axis=0)
--        dset["collapse"] = collapse
+    # Potentially collapse across some stimulus frames
+    for dset in data:
+        if collapse is not None:
+            if isinstance(collapse, int):
+                dset["X"] = dset["X"][collapse]
+            else:
+                dset["X"] = dset["X"][collapse].mean(axis=0)
+        dset["collapse"] = collapse
 
     return data
 
