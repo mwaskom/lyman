@@ -208,8 +208,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
 
 
 def fmri_dataset(subj, problem, roi_name, mask_name=None,
-                 exp_name=None, frames=None, collapse=None,
-                 confounds=None):
+                 exp_name=None, frames=None, confounds=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -237,10 +236,6 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
         in analysis hierarchy
     frames : int or sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
-    collapse : int or slice
-        if int, returns that element in first dimension
-        if slice, take mean over the slice (both relative to
-        frames, not to the actual onsets) otherwise return each frame
     confounds : obs X n array
         array of observations confounding variables to regress out
         to regress out of the data matrix during extraction
@@ -335,13 +330,6 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
     y = np.concatenate(y)
     runs = np.concatenate(runs)
 
-    # Potentially collapse across some stimulus frames
-    if collapse is not None:
-        if isinstance(collapse, int):
-            X = X[collapse]
-        else:
-            X = X[collapse].mean(axis=0)
-
     # Regress the confound vector out from the data matrix
     if confounds is not None:
         X = np.atleast_3d(X)
@@ -410,16 +398,24 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
         map = dv.map_sync
 
     # Set up lists for the map to work
-    problem = [problem for s in subjects]
-    roi_name = [roi_name for s in subjects]
-    mask_name = [mask_name for s in subjects]
-    frames = [frames for s in subjects]
-    collapse = [collapse for s in subjects]
-    exp_name = [exp_name for s in subjects]
+    problem = [problem for _ in subjects]
+    roi_name = [roi_name for _ in subjects]
+    mask_name = [mask_name for _ in subjects]
+    frames = [frames for _ in subjects]
+    exp_name = [exp_name for _ in subjects]
 
     # Actually do the loading
     data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
-               exp_name, frames, collapse, confounds)
+               exp_name, frames, confounds)
+
+-    # Potentially collapse across some stimulus frames
+-    for dset in data:
+-        if collapse is not None:
+-            if isinstance(collapse, int):
+-                dset["X"] = dset["X"][collapse]
+-            else:
+-                dset["X"] = dset["X"][collapse].mean(axis=0)
+-        dset["collapse"] = collapse
 
     return data
 
@@ -432,6 +428,7 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name,
         exp_name = project["default_exp"]
 
     roi_name = dataset["roi_name"]
+    collapse = dataset["collapse"]
     problem = dataset["problem"]
     subj = dataset["subj"]
 
@@ -443,7 +440,6 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name,
         model_str = "_".join([i[0] for i in model.steps])
     except AttributeError:
         model_str = model.__class__.__name__
-    collapse = dataset["collapse"]
 
     collapse_str, split_str, logit_str, shuffle_str = "", "", "", ""
     if collapse is not None:
@@ -457,7 +453,7 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name,
         else:
             split_str = split_name
     if logits:
-        logit_str = "logit"
+        logit_str = "logits"
     if shuffle:
         shuffle_str = "shuffle"
 
