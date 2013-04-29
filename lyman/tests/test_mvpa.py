@@ -185,3 +185,18 @@ def test_decode_cross_val():
     cv = StratifiedKFold(dataset["y"], 4)
     acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
     assert_array_equal(acc1, acc2)
+
+
+def test_logit_shapes():
+    """Test that we get expected shapes from decode_logit function."""
+    model = GaussianNB()
+    accs = mvpa._decode_subject_logits(dataset, model)
+    assert_equal(accs.shape, (24, ))
+    accs = mvpa._decode_subject_logits(dataset_3d, model)
+    assert_equal(accs.shape, (4, 24))
+
+    splits = stats.bernoulli(.5).rvs(24)
+    accs = mvpa._decode_subject_logits(dataset, model, splits)
+    assert_equal(accs.shape, (24, 2))
+    accs = mvpa._decode_subject_logits(dataset_3d, model, splits)
+    assert_equal(accs.shape, (4, 24, 2))

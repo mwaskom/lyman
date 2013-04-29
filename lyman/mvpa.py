@@ -424,7 +424,8 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     return data
 
 
-def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
+def _results_fname(dataset, model, split_pred, split_name, exp_name,
+                   logits, shuffle):
     """Get a path to where files storing decoding results will live."""
     project = gather_project_info()
     if exp_name is None:
@@ -444,7 +445,7 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
         model_str = model.__class__.__name__
     collapse = dataset["collapse"]
 
-    collapse_str, split_str, shuffle_str = "", "", ""
+    collapse_str, split_str, logit_str, shuffle_str = "", "", "", ""
     if collapse is not None:
         if isinstance(collapse, slice):
             collapse_str = "%s-%s" % (collapse.start, collapse.stop)
@@ -455,10 +456,13 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name, shuffle):
             split_str = "split"
         else:
             split_str = split_name
+    if logits:
+        logit_str = "logit"
     if shuffle:
         shuffle_str = "shuffle"
 
-    res_fname = "_".join([model_str, collapse_str, split_str, shuffle_str])
+    res_fname = "_".join([model_str, collapse_str, split_str,
+                          logit_str, shuffle_str])
     res_fname = re.sub("_{2,}", "_", res_fname)
     res_fname = res_fname.strip("_") + ".npz"
     res_fname = op.join(res_path, res_fname)
@@ -485,7 +489,7 @@ def _hash_decoder(ds, model, split_pred=None, n_iter=None, random_seed=None):
     return ds_hash.hexdigest()
 
 
-def _decode_subject(dataset, model, split_pred=None, split_name=None,
+def _decode_subject(dataset, model, split_pred=None,
                     cv_method="run", n_jobs=1):
     """Internal decoding function to allow for simpler testing."""
     # TODO maybe move this to moss?
@@ -528,8 +532,45 @@ def _decode_subject(dataset, model, split_pred=None, split_name=None,
     return scores
 
 
+def _decode_subject_logits(dataset, model, split_pred=None, cv_method="run"):
+    """Internal function to return logit-transformed target probabilities."""
+    # Get direct references to the data
+    X = dataset["X"]
+    y = dataset["y"]
+    runs = dataset["runs"]
+
+    # Set up the cross-validation
+    if cv_method == "run":
+        cv = LeaveOneLabelOut(runs, indices=False)
+    elif cv_method == "sample":
+        cv = LeaveOneOut(len(y), indices=False)
+    else:
+        cv = cv_method
+
+    if split_pred is None:
+        split_pred = np.zeros_like(y)
+
+    if X.ndim < 3:
+        X = [X]
+
+    n_bins = len(np.unique(split_pred))
+    logits = np.empty((len(X), len(y), n_bins))
+    for i, X_i in enumerate(X):
+        for train, test in cv:
+            ps = model.fit(X_i[train], y[train]).predict_proba(X_i[test])
+            for bin_j in range(n_bins):
+                bin = split_pred == bin_j
+                idx = np.logical_and(test, bin)
+                bin_ps = ps[bin[test]]
+                bin_logits = np.log(bin_ps) - np.log(1 - bin_ps)
+                target_logits = bin_logits[np.arange(idx.sum()), y[idx]]
+                logits[i, idx, bin_j] = target_logits
+
+    return logits.squeeze()
+
+
 def decode_subject(dataset, model, split_pred=None, split_name=None,
-                   cv_method="run", exp_name=None, n_jobs=1):
+                   cv_method="run", exp_name=None, logits=False, n_jobs=1):
     """Perform decoding on a single dataset.
 
     This function hashes the relevant inputs and uses that to store
@@ -552,10 +593,10 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         argument for sklearn.cross_val_score
     exp_name : string
         name of experiment, if not default
+    logits : bool, optional
+        return continuous target logit value for each observation
     n_jobs : int, optional
         number of jobs for sklean internal parallelization
-    dv : IPython cluster direct view, optional
-        IPython cluster to decode in parallel
 
     Return
     ------
@@ -569,7 +610,7 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
 
     # Get a path to the results will live
     res_file = _results_fname(dataset, model, split_pred, split_name,
-                              exp_name, False)
+                              exp_name, logits, False)
 
     # Hash the inputs to the decoder
     decoder_hash = _hash_decoder(dataset, model, split_pred)
@@ -582,8 +623,10 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
 
     # Do the decoding with a private function so we can test it
     # without dealing with all the persistance stuff
-    scores = _decode_subject(dataset, model, split_pred, split_name,
-                             cv_method, n_jobs)
+    if logits:
+        scores = _decode_subject_logits(dataset, model, split_pred, cv_method)
+    else:
+        scores = _decode_subject(dataset, model, split_pred, cv_method, n_jobs)
 
     # Save the scores to disk
     res_dict = dict(scores=scores, hash=decoder_hash)
@@ -597,7 +640,8 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
 
 
 def decode_group(datasets, model, split_pred=None, split_name=None,
-                 cv_method="run", exp_name=None, n_jobs=1, dv=None):
+                 cv_method="run", exp_name=None, logits=False, n_jobs=1,
+                 dv=None):
     """Perform decoding on a sequence of datasets.
 
     Parameters
@@ -621,6 +665,8 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
         argument for sklearn.cross_val_score
     exp_name : string
         name of experiment, if not default
+    logits : bool, optional
+        return continuous target logit value for each observation
     n_jobs : int, optional
         number of jobs for sklean internal parallelization
     dv : IPython cluster direct view, optional
@@ -644,20 +690,22 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
 
     try:
         if len(np.array(cv_method)) != len(datasets):
-            cv_method = [cv_method for d in datasets]
+            cv_method = [cv_method for _ in datasets]
     except TypeError:
-        cv_method = [cv_method for d in datasets]
+        cv_method = [cv_method for _ in datasets]
 
     if split_pred is None or not np.iterable(split_pred[0]):
-        split_pred = [split_pred for d in datasets]
-    split_name = [split_name for d in datasets]
+        split_pred = [split_pred for _ in datasets]
+    split_name = [split_name for _ in datasets]
 
-    exp_name = [exp_name for d in datasets]
-    n_jobs = [n_jobs for d in datasets]
+    exp_name = [exp_name for _ in datasets]
+    logits = [logits for _ in datasets]
+    n_jobs = [n_jobs for _ in datasets]
 
     # Do the decoding
     all_scores = map(decode_subject, datasets, model,
-                     split_pred, split_name, cv_method, exp_name, n_jobs)
+                     split_pred, split_name, cv_method,
+                     exp_name, logits, n_jobs)
     return np.array(all_scores)
 
 
