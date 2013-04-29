@@ -410,12 +410,14 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
         map = dv.map_sync
 
     # Set up lists for the map to work
-    problem = [problem for s in subjects]
-    roi_name = [roi_name for s in subjects]
-    mask_name = [mask_name for s in subjects]
-    frames = [frames for s in subjects]
-    collapse = [collapse for s in subjects]
-    exp_name = [exp_name for s in subjects]
+    problem = [problem for _ in subjects]
+    roi_name = [roi_name for _ in subjects]
+    mask_name = [mask_name for _ in subjects]
+    frames = [frames for _ in subjects]
+    collapse = [collapse for _ in subjects]
+    exp_name = [exp_name for _ in subjects]
+    if confounds is None:
+        confounds = [confounds for _ in subjects]
 
     # Actually do the loading
     data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
