@@ -422,8 +422,7 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     return data
 
 
-def _results_fname(dataset, model, split_pred, split_name, exp_name,
-                   logits, shuffle):
+def _results_fname(dataset, model, split_pred, exp_name, logits, shuffle):
     """Get a path to where files storing decoding results will live."""
     project = gather_project_info()
     if exp_name is None:
@@ -450,10 +449,10 @@ def _results_fname(dataset, model, split_pred, split_name, exp_name,
         else:
             collapse_str = str(collapse)
     if split_pred is not None:
-        if split_name is None:
-            split_str = "split"
-        else:
-            split_str = split_name
+        split_str = "split"
+        if hasattr(split_pred.name):
+            if split_pred.name is None:
+                split_str = split_pred.name
     if logits:
         logit_str = "logits"
     if shuffle:
@@ -567,8 +566,8 @@ def _decode_subject_logits(dataset, model, split_pred=None, cv_method="run"):
     return logits.squeeze()
 
 
-def decode_subject(dataset, model, split_pred=None, split_name=None,
-                   cv_method="run", exp_name=None, logits=False, n_jobs=1):
+def decode_subject(dataset, model, split_pred=None, cv_method="run",
+                   exp_name=None, logits=False, n_jobs=1):
     """Perform decoding on a single dataset.
 
     This function hashes the relevant inputs and uses that to store
@@ -580,11 +579,9 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         decoding dataset
     model : scikit-learn estimator
         model to decode with
-    spit_pred : array
+    spit_pred : pandas series or array
         bin prediction accuracies by the index values in the array.
         n_jobs will have no effect when this is used
-    split_name : string
-        name to associate with split results file
     cv_method : run | sample | cv arg for cross_val_score
         cross validate over runs, over samples (leave-one-out)
         or otherwise something that can be provided to the cv
@@ -607,7 +604,7 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
         split_pred = np.asarray(split_pred)
 
     # Get a path to the results will live
-    res_file = _results_fname(dataset, model, split_pred, split_name,
+    res_file = _results_fname(dataset, model, split_pred,
                               exp_name, logits, False)
 
     # Hash the inputs to the decoder
@@ -637,9 +634,8 @@ def decode_subject(dataset, model, split_pred=None, split_name=None,
     return scores
 
 
-def decode_group(datasets, model, split_pred=None, split_name=None,
-                 cv_method="run", exp_name=None, logits=False, n_jobs=1,
-                 dv=None):
+def decode_group(datasets, model, split_pred=None, cv_method="run",
+                 exp_name=None, logits=False, n_jobs=1, dv=None):
     """Perform decoding on a sequence of datasets.
 
     Parameters
@@ -648,15 +644,13 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
         one dataset per subject
     model : scikit-learn estimator
         model to decode with
-    spit_pred : array or sequence of arrays, optional
+    spit_pred : series/array or sequence of seires/arrays, optional
         bin prediction accuracies by the index values in the array.
         can pass one array to use for all datasets, or a list
         of arrays with the same length as the dataset list.
         splits will form last axis of returned accuracy array.
         n_jobs will have no effect when this is used, but can
         still run in parallel over subjects using IPython.
-    split_name : string
-        name to associate with split results file
     cv_method : run | sample | cv arg for cross_val_score
         cross validate over runs, over samples (leave-one-out)
         or otherwise something that can be provided to the cv
@@ -694,7 +688,6 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
 
     if split_pred is None or not np.iterable(split_pred[0]):
         split_pred = [split_pred for _ in datasets]
-    split_name = [split_name for _ in datasets]
 
     exp_name = [exp_name for _ in datasets]
     logits = [logits for _ in datasets]
@@ -702,8 +695,7 @@ def decode_group(datasets, model, split_pred=None, split_name=None,
 
     # Do the decoding
     all_scores = map(decode_subject, datasets, model,
-                     split_pred, split_name, cv_method,
-                     exp_name, logits, n_jobs)
+                     split_pred, cv_method, exp_name, logits, n_jobs)
     return np.array(all_scores)
 
 
