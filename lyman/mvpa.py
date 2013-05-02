@@ -478,7 +478,7 @@ def _hash_decoder(ds, model, split_pred=None, n_iter=None, random_seed=None):
     ds_hash.update(ds["runs"])
     ds_hash.update(str(model))
     if split_pred is not None:
-        ds_hash.update(split_pred.data)
+        ds_hash.update(np.array(split_pred).data)
     if n_iter is not None:
         ds_hash.update(str(n_iter))
     if random_seed is not None:
@@ -551,7 +551,7 @@ def _decode_subject_logits(dataset, model, split_pred=None, cv_method="run"):
         X = [X]
 
     n_bins = len(np.unique(split_pred))
-    logits = np.empty((len(X), len(y), n_bins))
+    logits = np.empty((len(X), len(y), n_bins)) * np.nan
     for i, X_i in enumerate(X):
         for train, test in cv:
             ps = model.fit(X_i[train], y[train]).predict_proba(X_i[test])
@@ -560,7 +560,8 @@ def _decode_subject_logits(dataset, model, split_pred=None, cv_method="run"):
                 idx = np.logical_and(test, bin)
                 bin_ps = ps[bin[test]]
                 bin_logits = np.log(bin_ps) - np.log(1 - bin_ps)
-                target_logits = bin_logits[np.arange(idx.sum()), y[idx]]
+                rows = np.arange(len(bin_logits))
+                target_logits = bin_logits[rows, y[idx]]
                 logits[i, idx, bin_j] = target_logits
 
     return logits.squeeze()
