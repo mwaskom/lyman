@@ -125,6 +125,18 @@ def test_extract_sizes():
     assert_equal(X_1.shape, (2, 3, mask.sum()))
 
 
+def test_extract_upsample():
+    """Test upsampling during extraction."""
+    evs = [np.array([[1, 0, 1],
+                     [2, 0, 1]]),
+           np.array([[3, 0, 1]])]
+    ts = np.random.randn(5, 5, 5, 4)
+    mask = ts[..., 0] > .5
+
+    X, y = mvpa.extract_dataset(evs, ts, mask, 1, [0, 1], 10)
+    assert_equal(X.shape, (20, 3, mask.sum()))
+
+
 @raises(ValueError)
 def test_extract_mask_error():
     """Make sure mask is enforced as boolean."""

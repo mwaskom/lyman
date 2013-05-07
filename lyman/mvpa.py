@@ -154,7 +154,8 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
         yield design_mat
 
 
-def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
+def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
+                    upsample_factor=None):
     """Extract model and targets for single run of fMRI data.
 
     Parameters
@@ -170,6 +171,9 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
         acquistion TR (in seconds)
     frames : sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
+    upsample_factor : int
+        upsample the raw timeseries by this factor using cubic spline
+        interpolation
 
     Returns
     -------
@@ -182,10 +186,16 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     """
     sched = moss.make_master_schedule(evs)
 
+    # Set up the extraction frames
     if frames is None:
         frames = [0]
     elif not hasattr(frames, "__len__"):
         frames = [frames]
+    frames = np.asarray(frames)
+
+    if upsample_factor is not None:
+        n_frames = len(frames) * upsample_factor
+        frames = np.linspace(frames.min(), frames.max(), n_frames)
 
     # Double check mask datatype
     if not mask.dtype == np.bool:
@@ -198,6 +208,14 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     # Extract the ROI into a 2D n_tr x n_feat
     roi_data = timeseries[mask].T
 
+    # Upsample the raw data
+    if upsample_factor is not None:
+        time_points = len(roi_data)
+        x = np.linspace(0, time_points - 1, time_points)
+        xx = np.linspace(0, time_points - 1, time_points * upsample_factor)
+        interpolator = sp.interpolate.interp1d(x, roi_data, "cubic", axis=0)
+        roi_data = interpolator(xx)
+
     # Build the data array
     for i, frame in enumerate(frames):
         onsets = (sched[:, 0] / tr).astype(int)
@@ -207,8 +225,8 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None):
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, problem, roi_name, mask_name=None,
-                 exp_name=None, frames=None, confounds=None):
+def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
+                 frames=None, confounds=None, upsample_factor=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -239,6 +257,9 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
     confounds : obs X n array
         array of observations confounding variables to regress out
         to regress out of the data matrix during extraction
+    upsample_factor : int
+        upsample the raw timeseries by this factor using cubic spline
+        interpolation
 
     Returns
     -------
@@ -315,7 +336,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
 
         # Use the basic extractor function
         X_i, y_i = extract_dataset(evs, ts_data, mask_data,
-                                   exp["TR"], frames)
+                                   exp["TR"], frames, upsample_factor)
 
         # Just add to list
         X.append(X_i)
@@ -350,7 +371,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None,
 
 def load_datasets(problem, roi_name, mask_name=None, frames=None,
                   collapse=None, exp_name=None, confounds=None,
-                  subjects=None, dv=None):
+                  upsample_factor=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
     Parameters
@@ -374,6 +395,9 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     confounds : sequence of arrays, optional
         list ofsubject-specific obs x n arrays of confounding variables
         to regress out of the data matrix during extraction
+    upsample_factor : int
+        upsample the raw timeseries by this factor using cubic spline
+        interpolation
     subjects : sequence of strings, optional
         sequence of subjects to return; if none reads subjects.txt file
         from lyman directory and uses all defined there
