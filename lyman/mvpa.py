@@ -230,8 +230,8 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
-                 frames=None, confounds=None, upsample=None):
+def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
+                 collapse=None, confounds=None, upsample=None, exp_name=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -254,22 +254,26 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
     mask_name : string, optional
         name of ROI mask that can be found in data hierachy,
         uses roi_name if absent
-    exp_name : string, optional
-        lyman experiment name where timecourse data can be found
-        in analysis hierarchy
     frames : int or sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
+    collapse : int or slice
+        if int, returns that element in first dimension
+        if slice, take mean over the slice (both relative to
+        frames, not to the actual onsets) otherwise return each frame
     confounds : obs X n array
         array of observations confounding variables to regress out
         to regress out of the data matrix during extraction
     upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
+    exp_name : string, optional
+        lyman experiment name where timecourse data can be found
+        in analysis hierarchy (uses default if None)
 
     Returns
     -------
     data : dictionary
-        dictionary with X, y, and runs entries
+        dictionary with X, y, and runs entries, along with metadata
 
     """
     project = gather_project_info()
@@ -322,6 +326,8 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
             for k, v in dataset.items():
                 if v.dtype.kind == "S":
                     dataset[k] = str(v)
+            # Possibly perform temporal compression
+            _temporal_compression(collapse, dataset)
             return dataset
 
     # Othersies, initialize outputs
@@ -372,12 +378,26 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
                    event_names=event_names, problem=problem, frames=frames,
                    confounds=confounds, upsample=upsample, hash=ds_hash)
     np.savez(ds_file, **dataset)
+
+    # Possibly perform temporal compression
+    _temporal_compression(collapse, dataset)
+
     return dataset
 
 
+def _temporal_compression(collapse, dset):
+    """Either select a single frame or take the mean over several frames."""
+    if collapse is not None:
+        if isinstance(collapse, int):
+            dset["X"] = dset["X"][collapse]
+        else:
+            dset["X"] = dset["X"][collapse].mean(axis=0)
+    dset["collapse"] = collapse
+
+
 def load_datasets(problem, roi_name, mask_name=None, frames=None,
-                  collapse=None, exp_name=None, confounds=None,
-                  upsample=None, subjects=None, dv=None):
+                  collapse=None, confounds=None, upsample=None,
+                  exp_name=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
     Parameters
@@ -395,15 +415,14 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
         if int, returns that element in first dimension
         if slice, take mean over the slice (both relative to
         frames, not to the actual onsets) otherwise return each frame
-    exp_name : string, optional
-        lyman experiment name where timecourse data can be found
-        in analysis hierarchy
     confounds : sequence of arrays, optional
         list ofsubject-specific obs x n arrays of confounding variables
         to regress out of the data matrix during extraction
     upsample : int
-        upsample the raw timeseries by this factor using cubic spline
-        interpolation
+        upsample the raw timeseries by this factor using cubic splines
+    exp_name : string, optional
+        lyman experiment name where timecourse data can be found
+        in analysis hierarchy (uses default if None)
     subjects : sequence of strings, optional
         sequence of subjects to return; if none reads subjects.txt file
         from lyman directory and uses all defined there
@@ -432,23 +451,15 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     roi_name = [roi_name for _ in subjects]
     mask_name = [mask_name for _ in subjects]
     frames = [frames for _ in subjects]
-    exp_name = [exp_name for _ in subjects]
+    collapse = [collapse for _ in subjects]
     if confounds is None:
         confounds = [confounds for _ in subjects]
     upsample = [upsample for _ in subjects]
+    exp_name = [exp_name for _ in subjects]
 
     # Actually do the loading
     data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
-               exp_name, frames, confounds, upsample)
-
-    # Potentially collapse across some stimulus frames
-    for dset in data:
-        if collapse is not None:
-            if isinstance(collapse, int):
-                dset["X"] = dset["X"][collapse]
-            else:
-                dset["X"] = dset["X"][collapse].mean(axis=0)
-        dset["collapse"] = collapse
+               frames, collapse, confounds, upsample, exp_name)
 
     return data
 
