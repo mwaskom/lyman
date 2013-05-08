@@ -217,7 +217,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
         time_points = len(roi_data)
         x = np.linspace(0, time_points - 1, time_points)
         xx = np.linspace(0, time_points - 1,
-                         (time_points - 1) * upsample)
+                         (time_points - 1) * upsample + 1)
         interpolator = sp.interpolate.interp1d(x, roi_data, "cubic", axis=0)
         roi_data = interpolator(xx)
 

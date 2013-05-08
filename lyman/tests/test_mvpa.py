@@ -130,11 +130,12 @@ def test_extract_upsample():
     evs = [np.array([[1, 0, 1],
                      [2, 0, 1]]),
            np.array([[3, 0, 1]])]
-    ts = np.random.randn(5, 5, 5, 4)
+    ts = np.random.randn(5, 5, 5, 5)
     mask = ts[..., 0] > .5
 
-    X, y = mvpa.extract_dataset(evs, ts, mask, 1, [0, 1], 10)
-    assert_equal(X.shape, (20, 3, mask.sum()))
+    X, y = mvpa.extract_dataset(evs, ts, mask, tr=1,
+                                frames=[-1, 0], upsample=2)
+    assert_equal(X.shape, (4, 3, mask.sum()))
 
 
 @raises(ValueError)
