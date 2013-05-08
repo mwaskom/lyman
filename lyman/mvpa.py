@@ -154,8 +154,8 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
         yield design_mat
 
 
-def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
-                    upsample=None):
+def extract_run(evs, timeseries, mask, tr=2, frames=None,
+                upsample=None):
     """Extract model and targets for single run of fMRI data.
 
     Parameters
@@ -230,8 +230,9 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
-                 collapse=None, confounds=None, upsample=None, exp_name=None):
+def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
+                    collapse=None, confounds=None, upsample=None,
+                    exp_name=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -347,8 +348,8 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
         evs = [problem_data[ev][r_i] for ev in event_names]
 
         # Use the basic extractor function
-        X_i, y_i = extract_dataset(evs, ts_data, mask_data,
-                                   exp["TR"], frames, upsample)
+        X_i, y_i = extract_run(evs, ts_data, mask_data,
+                               exp["TR"], frames, upsample)
 
         # Just add to list
         X.append(X_i)
@@ -395,7 +396,7 @@ def _temporal_compression(collapse, dset):
     dset["collapse"] = collapse
 
 
-def load_datasets(problem, roi_name, mask_name=None, frames=None,
+def extract_group(problem, roi_name, mask_name=None, frames=None,
                   collapse=None, confounds=None, upsample=None,
                   exp_name=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
@@ -458,7 +459,7 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     exp_name = [exp_name for _ in subjects]
 
     # Actually do the loading
-    data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
+    data = map(extract_subject, subjects, problem, roi_name, mask_name,
                frames, collapse, confounds, upsample, exp_name)
 
     return data
