@@ -155,7 +155,7 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
 
 
 def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
-                    upsample_factor=None):
+                    upsample=None):
     """Extract model and targets for single run of fMRI data.
 
     Parameters
@@ -171,7 +171,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
         acquistion TR (in seconds)
     frames : sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
-    upsample_factor : int
+    upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
 
@@ -193,9 +193,11 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
         frames = [frames]
     frames = np.asarray(frames)
 
-    if upsample_factor is not None:
-        n_frames = len(frames) * upsample_factor
-        frames = np.linspace(frames.min(), frames.max(), n_frames)
+    if upsample is not None:
+        n_frames = len(frames) * upsample
+        frames = np.linspace(frames.min() * upsample,
+                             (frames.max() + 1) * upsample,
+                             n_frames + 1)[:-1]
 
     # Double check mask datatype
     if not mask.dtype == np.bool:
@@ -208,17 +210,20 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
     # Extract the ROI into a 2D n_tr x n_feat
     roi_data = timeseries[mask].T
 
-    # Upsample the raw data
-    if upsample_factor is not None:
+    # Possibly upsample the raw data
+    if upsample is None:
+        upsample = 1
+    else:
         time_points = len(roi_data)
         x = np.linspace(0, time_points - 1, time_points)
-        xx = np.linspace(0, time_points - 1, time_points * upsample_factor)
+        xx = np.linspace(0, time_points - 1,
+                         (time_points - 1) * upsample)
         interpolator = sp.interpolate.interp1d(x, roi_data, "cubic", axis=0)
         roi_data = interpolator(xx)
 
     # Build the data array
     for i, frame in enumerate(frames):
-        onsets = (sched[:, 0] / tr).astype(int)
+        onsets = (sched[:, 0] / tr).astype(int) * upsample
         onsets += frame
         X[i, ...] = sp.stats.zscore(roi_data[onsets])
 
@@ -226,7 +231,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
 
 
 def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
-                 frames=None, confounds=None, upsample_factor=None):
+                 frames=None, confounds=None, upsample=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -257,7 +262,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
     confounds : obs X n array
         array of observations confounding variables to regress out
         to regress out of the data matrix during extraction
-    upsample_factor : int
+    upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
 
@@ -306,6 +311,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
         ds_hash.update(str(op.getmtime(ts_file)))
     ds_hash.update(np.asarray(frames).data)
     ds_hash.update(np.asarray(confounds).data)
+    ds_hash.update(str(upsample))
     ds_hash = ds_hash.hexdigest()
 
     # If the file exists and the hash matches, convert to a dict and return
@@ -336,7 +342,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
 
         # Use the basic extractor function
         X_i, y_i = extract_dataset(evs, ts_data, mask_data,
-                                   exp["TR"], frames, upsample_factor)
+                                   exp["TR"], frames, upsample)
 
         # Just add to list
         X.append(X_i)
@@ -364,14 +370,14 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, exp_name=None,
     # Save to disk and return
     dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
                    event_names=event_names, problem=problem, frames=frames,
-                   confounds=confounds, hash=ds_hash)
+                   confounds=confounds, upsample=upsample, hash=ds_hash)
     np.savez(ds_file, **dataset)
     return dataset
 
 
 def load_datasets(problem, roi_name, mask_name=None, frames=None,
                   collapse=None, exp_name=None, confounds=None,
-                  upsample_factor=None, subjects=None, dv=None):
+                  upsample=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
     Parameters
@@ -395,7 +401,7 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     confounds : sequence of arrays, optional
         list ofsubject-specific obs x n arrays of confounding variables
         to regress out of the data matrix during extraction
-    upsample_factor : int
+    upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
     subjects : sequence of strings, optional
@@ -429,10 +435,11 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     exp_name = [exp_name for _ in subjects]
     if confounds is None:
         confounds = [confounds for _ in subjects]
+    upsample = [upsample for _ in subjects]
 
     # Actually do the loading
     data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
-               exp_name, frames, confounds)
+               exp_name, frames, confounds, upsample)
 
     # Potentially collapse across some stimulus frames
     for dset in data:
