@@ -8,6 +8,7 @@ import re
 import numpy as np
 import scipy as sp
 from scipy import stats
+import pandas as pd
 import nibabel as nib
 import nipy.modalities.fmri.hemodynamic_models as hrf
 
@@ -154,15 +155,14 @@ def event_designs(evs, ntp, tr=2, split_confounds=True,
         yield design_mat
 
 
-def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
-                    upsample=None):
+def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
+                    upsample=None, event_names=None):
     """Extract model and targets for single run of fMRI data.
 
     Parameters
     ----------
-    evs : event sequence
-        each element in the sequence is n_ev x 3 array of
-        onset, duration, amplitude
+    sched : event sequence DataFrame
+        must contain `condition` and `onsets` columns
     timeseries : 4D numpy array
         BOLD data
     mask : 3D boolean array
@@ -174,6 +174,9 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
     upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
+    event_names : list of strings
+        list of condition names to use, otherwise uses sorted unique
+        values in sched.condition
 
     Returns
     -------
@@ -184,8 +187,6 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
         target vector
 
     """
-    sched = moss.make_master_schedule(evs)
-
     # Set up the extraction frames
     if frames is None:
         frames = [0]
@@ -205,7 +206,11 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
 
     # Initialize the outputs
     X = np.zeros((len(frames), sched.shape[0], mask.sum()))
-    y = sched[:, 3].astype(int)
+    if event_names is None:
+        event_names = sorted(sched.condition.unique())
+    else:
+        event_names = list(event_names)
+    y = sched.condition.map(lambda x: event_names.index(x))
 
     # Extract the ROI into a 2D n_tr x n_feat
     roi_data = timeseries[mask].T
@@ -223,7 +228,7 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
 
     # Build the data array
     for i, frame in enumerate(frames):
-        onsets = (sched[:, 0] / tr).astype(int) * upsample
+        onsets = np.array(sched.onset / tr).astype(int) * upsample
         onsets += frame
         X[i, ...] = sp.stats.zscore(roi_data[onsets])
 
@@ -231,7 +236,8 @@ def extract_dataset(evs, timeseries, mask, tr=2, frames=None,
 
 
 def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
-                 collapse=None, confounds=None, upsample=None, exp_name=None):
+                 collapse=None, confounds=None, upsample=None, exp_name=None,
+                 event_names=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -260,15 +266,18 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
         if int, returns that element in first dimension
         if slice, take mean over the slice (both relative to
         frames, not to the actual onsets) otherwise return each frame
-    confounds : obs X n array
-        array of observations confounding variables to regress out
-        to regress out of the data matrix during extraction
+    confounds : string or list of strings
+        column name(s) in schedule datafame to be regressed out of the
+        data matrix during extraction
     upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy (uses default if None)
+    event_names : list of strings
+        list of condition names to use, otherwise uses sorted unique
+        values in the condition field of the event schedule
 
     Returns
     -------
@@ -299,7 +308,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
     mask_file = op.join(project["data_dir"], subj, "masks",
                         "%s.nii.gz" % mask_name)
     problem_file = op.join(project["data_dir"], subj, "events",
-                           "%s.npz" % problem)
+                           "%s.csv" % problem)
     ts_dir = op.join(project["analysis_dir"], exp_name, subj,
                      "reg", "epi", "unsmoothed")
     n_runs = len(glob(op.join(ts_dir, "run_*")))
@@ -314,7 +323,7 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
     for ts_file in ts_files:
         ds_hash.update(str(op.getmtime(ts_file)))
     ds_hash.update(np.asarray(frames).data)
-    ds_hash.update(np.asarray(confounds).data)
+    ds_hash.update(str(confounds))
     ds_hash.update(str(upsample))
     ds_hash = ds_hash.hexdigest()
 
@@ -337,23 +346,24 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
     mask_data = nib.load(mask_file).get_data().astype(bool)
 
     # Load the event information
-    problem_data = np.load(problem_file)
-    event_names = problem_data["event_names"]
+    sched = pd.read_csv(problem_file)
+
+    # Get a list of event names
+    if event_names is None:
+        event_names = sorted(sched.condition.unique())
 
     # Make each runs' dataset
-    for r_i in range(n_runs):
+    for r_i sched_r in sched.groupby("run"):
         ts_data = nib.load(ts_files[r_i]).get_data()
 
-        evs = [problem_data[ev][r_i] for ev in event_names]
-
         # Use the basic extractor function
-        X_i, y_i = extract_dataset(evs, ts_data, mask_data,
-                                   exp["TR"], frames, upsample)
+        X_i, y_i = extract_dataset(sched_r, ts_data,
+                                   mask_data, exp["TR"],
+                                   frames, upsample, event_names)
 
         # Just add to list
         X.append(X_i)
         y.append(y_i)
-        runs.append(np.ones_like(y_i) * r_i)
 
     # Stick the list items together for final dataset
     if frames is not None and len(frames) > 1:
@@ -361,12 +371,12 @@ def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
     else:
         X = np.concatenate(X, axis=0)
     y = np.concatenate(y)
-    runs = np.concatenate(runs)
+    runs = sched.run
 
     # Regress the confound vector out from the data matrix
     if confounds is not None:
         X = np.atleast_3d(X)
-        confounds = np.asarray(confounds)
+        confounds = np.asarray(sched[confounds])
         confounds = stats.zscore(confounds.reshape(X.shape[1], -1))
         denom = confounds / np.dot(confounds.T, confounds)
         for X_i in X:
@@ -397,7 +407,7 @@ def _temporal_compression(collapse, dset):
 
 def load_datasets(problem, roi_name, mask_name=None, frames=None,
                   collapse=None, confounds=None, upsample=None,
-                  exp_name=None, subjects=None, dv=None):
+                  exp_name=None, event_names=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
     Parameters
@@ -423,6 +433,9 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy (uses default if None)
+    event_names : list of strings
+        list of condition names to use, otherwise uses sorted unique
+        values in the condition field of the event schedule
     subjects : sequence of strings, optional
         sequence of subjects to return; if none reads subjects.txt file
         from lyman directory and uses all defined there
@@ -452,14 +465,14 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     mask_name = [mask_name for _ in subjects]
     frames = [frames for _ in subjects]
     collapse = [collapse for _ in subjects]
-    if confounds is None:
-        confounds = [confounds for _ in subjects]
+    confounds = [confounds for _ in subjects]
     upsample = [upsample for _ in subjects]
     exp_name = [exp_name for _ in subjects]
+    event_names = [event_names for _ in subjects]
 
     # Actually do the loading
     data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
-               frames, collapse, confounds, upsample, exp_name)
+               frames, collapse, confounds, upsample, exp_name, event_names)
 
     return data
 

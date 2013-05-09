@@ -1,6 +1,7 @@
 import inspect
 import numpy as np
 import scipy as sp
+import pandas as pd
 from scipy import stats
 from sklearn.naive_bayes import GaussianNB
 from sklearn.cross_validation import (LeaveOneOut, LeaveOneLabelOut,
@@ -97,24 +98,27 @@ def test_deconvolve_estimate():
 
 def test_extract_dataset():
     """Test simple case."""
-    evs = [np.array([[1, 0, 1],
-                     [2, 0, 1]]),
-           np.array([[3, 0, 1]])]
+    evs = pd.DataFrame(dict(onset=[1, 2, 3],
+                            condition=["foo", "foo", "bar"]))
     ts = np.random.randn(5, 5, 5, 4)
     mask = ts[..., 0] > .5
     X, y = mvpa.extract_dataset(evs, ts, mask, 1)
 
-    assert_array_equal(y, np.array([0, 0, 1]))
+    assert_array_equal(y, np.array([1, 1, 0]))
 
     should_be = sp.stats.zscore(ts[mask].T[np.array([1, 2, 3])])
     assert_array_equal(X, should_be)
 
+    X_, y_ = mvpa.extract_dataset(evs, ts, mask, 1,
+                                  event_names=["bar", "foo"])
+    assert_array_equal(X_, X)
+    assert_array_equal(y_, y)
+
 
 def test_extract_sizes():
     """Test different frame sizes."""
-    evs = [np.array([[1, 0, 1],
-                     [2, 0, 1]]),
-           np.array([[3, 0, 1]])]
+    evs = pd.DataFrame(dict(onset=[1, 2, 3],
+                            condition=["foo", "foo", "bar"]))
     ts = np.random.randn(5, 5, 5, 4)
     mask = ts[..., 0] > .5
 
@@ -127,9 +131,8 @@ def test_extract_sizes():
 
 def test_extract_upsample():
     """Test upsampling during extraction."""
-    evs = [np.array([[1, 0, 1],
-                     [2, 0, 1]]),
-           np.array([[3, 0, 1]])]
+    evs = pd.DataFrame(dict(onset=[1, 2, 3],
+                            condition=["foo", "foo", "bar"]))
     ts = np.random.randn(5, 5, 5, 5)
     mask = ts[..., 0] > .5
 
@@ -141,7 +144,7 @@ def test_extract_upsample():
 @raises(ValueError)
 def test_extract_mask_error():
     """Make sure mask is enforced as boolean."""
-    evs = [[[1], [0], [1]]]
+    evs = pd.DataFrame(dict(onset=[1], condition="foo"))
     ts = np.random.randn(10, 10, 10, 5)
     mask = np.random.rand(10, 10, 10)
     mvpa.extract_dataset(evs, ts, mask)
