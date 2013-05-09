@@ -235,9 +235,9 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
     return X.squeeze(), y
 
 
-def fmri_dataset(subj, problem, roi_name, mask_name=None, frames=None,
-                 collapse=None, confounds=None, upsample=None, exp_name=None,
-                 event_names=None):
+def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
+                    collapse=None, confounds=None, upsample=None,
+                    exp_name=None, event_names=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -405,7 +405,7 @@ def _temporal_compression(collapse, dset):
     dset["collapse"] = collapse
 
 
-def load_datasets(problem, roi_name, mask_name=None, frames=None,
+def extract_group(problem, roi_name, mask_name=None, frames=None,
                   collapse=None, confounds=None, upsample=None,
                   exp_name=None, event_names=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
@@ -471,7 +471,7 @@ def load_datasets(problem, roi_name, mask_name=None, frames=None,
     event_names = [event_names for _ in subjects]
 
     # Actually do the loading
-    data = map(fmri_dataset, subjects, problem, roi_name, mask_name,
+    data = map(extract_subject, subjects, problem, roi_name, mask_name,
                frames, collapse, confounds, upsample, exp_name, event_names)
 
     return data
