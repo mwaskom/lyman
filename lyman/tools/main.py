@@ -131,7 +131,10 @@ def find_nested_workflows(workflow):
 def gather_project_info():
     """Import project information based on environment settings."""
     proj_file = op.join(os.environ["LYMAN_DIR"], "project.py")
-    project = imp.load_source("project", proj_file)
+    try:
+        project = sys.modules["project"]
+    except KeyError:
+        project = imp.load_source("project", proj_file)
     return dict(
         [(k, v) for k, v in project.__dict__.items()
             if not re.match("__.*__", k)])
@@ -144,7 +147,10 @@ def gather_experiment_info(experiment_name, altmodel=None):
     else:
         module_name = "-".join([experiment_name, altmodel])
     exp_file = op.join(os.environ["LYMAN_DIR"], module_name + ".py")
-    exp = imp.load_source(module_name, exp_file)
+    try:
+        exp = sys.modules[module_name]
+    except KeyError:
+        exp = imp.load_source(module_name, exp_file)
 
     # Create an experiment dict stripping the OOP hooks
     exp_dict = dict(

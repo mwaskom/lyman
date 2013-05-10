@@ -329,15 +329,15 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
 
     # If the file exists and the hash matches, convert to a dict and return
     if op.exists(ds_file):
-        ds_obj = np.load(ds_file)
-        if ds_hash == str(ds_obj["hash"]):
-            dataset = dict(ds_obj.items())
-            for k, v in dataset.items():
-                if v.dtype.kind == "S":
-                    dataset[k] = str(v)
-            # Possibly perform temporal compression
-            _temporal_compression(collapse, dataset)
-            return dataset
+        with np.load(ds_file) as ds_obj:
+            if ds_hash == str(ds_obj["hash"]):
+                dataset = dict(ds_obj.items())
+                for k, v in dataset.items():
+                    if v.dtype.kind == "S":
+                        dataset[k] = str(v)
+                # Possibly perform temporal compression
+                _temporal_compression(collapse, dataset)
+                return dataset
 
     # Othersies, initialize outputs
     X, y, runs = [], [], []
@@ -668,9 +668,9 @@ def decode_subject(dataset, model, split_pred=None, cv_method="run",
 
     # If the file exists and the hash matches, load and return
     if op.exists(res_file):
-        res_obj = np.load(res_file)
-        if decoder_hash == str(res_obj["hash"]):
-            return res_obj["scores"]
+        with np.load(res_file) as res_obj:
+            if decoder_hash == str(res_obj["hash"]):
+                return res_obj["scores"]
 
     # Do the decoding with a private function so we can test it
     # without dealing with all the persistance stuff
@@ -798,10 +798,10 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
 
         # If the file exists and the hash matches, load and return
         if op.exists(res_file):
-            res_obj = np.load(res_file)
-            if decoder_hash == str(res_obj["hash"]):
-                group_scores.append(res_obj["scores"])
-                continue
+            with np.load(res_file) as res_obj:
+                if decoder_hash == str(res_obj["hash"]):
+                    group_scores.append(res_obj["scores"])
+                    continue
 
         # Otherwise, do the test for this dataset
         p_vals, scores = moss.randomize_classifier(data, model, n_iter,
