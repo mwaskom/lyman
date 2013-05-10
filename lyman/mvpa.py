@@ -451,6 +451,7 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
     if subjects is None:
         subj_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
         subjects = np.loadtxt(subj_file, str)
+    subjects = list(subjects)
 
     # Allow to run in serial or parallel
     if dv is None:
