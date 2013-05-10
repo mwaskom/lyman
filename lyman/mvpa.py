@@ -354,7 +354,7 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
 
     # Make each runs' dataset
     for r_i, sched_r in sched.groupby("run"):
-        ts_data = nib.load(ts_files[r_i]).get_data()
+        ts_data = nib.load(ts_files[int(r_i)]).get_data()
 
         # Use the basic extractor function
         X_i, y_i = extract_dataset(sched_r, ts_data,
