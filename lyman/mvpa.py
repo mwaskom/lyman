@@ -460,6 +460,10 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
     else:
         map = dv.map_sync
 
+    # Try to make frames a list, if possible
+    if hasattr(frames, "tolist"):
+        frames = frames.tolist()
+
     # Set up lists for the map to work
     problem = [problem for _ in subjects]
     roi_name = [roi_name for _ in subjects]
