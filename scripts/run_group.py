@@ -68,7 +68,7 @@ def main(arglist):
         subject_list=subject_list, regressors=regressors, contrasts=contrasts)
 
     # Mixed effects inputs
-    mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/%s1.nii.gz"
+    mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/stats/%s1.nii.gz"
     mfx_source = MapNode(DataGrabber(infields=["subject_id",
                                                "l1_contrast"],
                                      outfields=["copes", "varcopes", "dofs"],
