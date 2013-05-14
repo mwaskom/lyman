@@ -331,7 +331,7 @@ def main(arglist):
         masks=[["subject_id", "space", "smooth"]],
         dof_files=[["subject_id", "smooth"]])
 
-    ffx_field_template = {"dof_files": "%s/model/%s/run_*/dof",
+    ffx_field_template = {"dof_files": "%s/model/%s/run_*/results/dof",
         "masks": "%s/reg/%s/%s/run_*/functional_mask_*.nii.gz"}
     if space == "epi":
         ffx_field_template["background_file"] = op.join(
