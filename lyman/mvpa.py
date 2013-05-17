@@ -262,10 +262,12 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
         uses roi_name if absent
     frames : int or sequence of ints, optional
         extract frames relative to event onsets or at onsets if None
-    collapse : int or slice
+    collapse : int, slice, or (subj x frames | frames) array
         if int, returns that element in first dimension
         if slice, take mean over the slice (both relative to
-        frames, not to the actual onsets) otherwise return each frame
+        frames, not to the actual onsets)
+        if array, take weighted average of each frame (possibly
+        with different weights by subject) otherwise return each frame
     confounds : string or list of strings
         column name(s) in schedule datafame to be regressed out of the
         data matrix during extraction
@@ -400,8 +402,11 @@ def _temporal_compression(collapse, dset):
     if collapse is not None:
         if isinstance(collapse, int):
             dset["X"] = dset["X"][collapse]
-        else:
+        elif isinstance(collapse, slice):
             dset["X"] = dset["X"][collapse].mean(axis=0)
+        else:
+            dset["X"] = np.average(dset["X"], axis=0, weights=collapse)
+
     dset["collapse"] = collapse
 
 
@@ -421,10 +426,12 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
         uses roi_name if absent
     frames : int or sequence
         frames relative to stimulus onsets in event file to extract
-    collapse : int or slice
+    collapse : int, slice, or (subj x frames | frames) array
         if int, returns that element in first dimension
         if slice, take mean over the slice (both relative to
-        frames, not to the actual onsets) otherwise return each frame
+        frames, not to the actual onsets)
+        if array, take weighted average of each frame (possibly
+        with different weights by subject) otherwise return each frame
     confounds : sequence of arrays, optional
         list ofsubject-specific obs x n arrays of confounding variables
         to regress out of the data matrix during extraction
@@ -463,13 +470,16 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
     # Try to make frames a list, if possible
     if hasattr(frames, "tolist"):
         frames = frames.tolist()
+    if hasattr(collapse, "tolist"):
+        collapse = collapse.tolist()
 
     # Set up lists for the map to work
     problem = [problem for _ in subjects]
     roi_name = [roi_name for _ in subjects]
     mask_name = [mask_name for _ in subjects]
     frames = [frames for _ in subjects]
-    collapse = [collapse for _ in subjects]
+    if np.ndim(collapse) < 2:
+        collapse = [collapse for _ in subjects]
     confounds = [confounds for _ in subjects]
     upsample = [upsample for _ in subjects]
     exp_name = [exp_name for _ in subjects]
@@ -506,8 +516,10 @@ def _results_fname(dataset, model, split_pred, exp_name, logits, shuffle):
     if collapse is not None:
         if isinstance(collapse, slice):
             collapse_str = "%s-%s" % (collapse.start, collapse.stop)
-        else:
+        elif isinstance(collapse, int):
             collapse_str = str(collapse)
+        else:
+            collapse_str = "weighted"
     if split_pred is not None:
         split_str = "split"
         if hasattr(split_pred, "name"):
