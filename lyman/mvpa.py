@@ -12,8 +12,9 @@ import pandas as pd
 import nibabel as nib
 import nipy.modalities.fmri.hemodynamic_models as hrf
 
-from sklearn.cross_validation import (cross_val_score,
-                                      LeaveOneOut, LeaveOneLabelOut)
+from sklearn.cross_validation import (KFold,
+                                      LeaveOneOut,
+                                      LeaveOneLabelOut)
 
 import moss
 from lyman import gather_project_info, gather_experiment_info
@@ -229,7 +230,7 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
     # Build the data array
     for i, frame in enumerate(frames):
         onsets = np.array(sched.onset / tr).astype(int) * upsample
-        onsets += frame
+        onsets += int(frame)
         X[i, ...] = sp.stats.zscore(roi_data[onsets])
 
     return X.squeeze(), y
@@ -492,7 +493,8 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
     return data
 
 
-def _results_fname(dataset, model, split_pred, exp_name, logits, shuffle):
+def _results_fname(dataset, model, split_pred, trialwise, logits,
+                   exp_name, shuffle):
     """Get a path to where files storing decoding results will live."""
     project = gather_project_info()
     if exp_name is None:
@@ -512,7 +514,8 @@ def _results_fname(dataset, model, split_pred, exp_name, logits, shuffle):
     except AttributeError:
         model_str = model.__class__.__name__
 
-    collapse_str, split_str, logit_str, shuffle_str = "", "", "", ""
+    collapse_str, split_str, trial_str, logit_str, shuffle_str = ("", "", "",
+                                                                  "", "")
     if collapse is not None:
         if isinstance(collapse, slice):
             collapse_str = "%s-%s" % (collapse.start, collapse.stop)
@@ -525,6 +528,8 @@ def _results_fname(dataset, model, split_pred, exp_name, logits, shuffle):
         if hasattr(split_pred, "name"):
             if split_pred.name is None:
                 split_str = split_pred.name
+    if trialwise:
+        trial_str = "trialwise"
     if logits:
         logit_str = "logits"
     if shuffle:
@@ -558,89 +563,58 @@ def _hash_decoder(ds, model, split_pred=None, n_iter=None, random_seed=None):
     return ds_hash.hexdigest()
 
 
-def _decode_subject(dataset, model, split_pred=None,
-                    cv_method="run", n_jobs=1):
-    """Internal decoding function to allow for simpler testing."""
-    # TODO maybe move this to moss?
+def _decode_subject(dataset, model, cv="run", split_pred=None,
+                    trialwise=False, logits=False):
+    """Internal function for classification."""
+    if split_pred is not None and trialwise:
+        raise ValueError("Cannot use both `split_pred` and `trialwise`.")
 
-    # Get direct references to the data
+    # Unpack the dataset
     X = dataset["X"]
     y = dataset["y"]
     runs = dataset["runs"]
-
-    # Set up the cross-validation
-    indices = True if split_pred is None else False
-    if cv_method == "run":
-        cv = LeaveOneLabelOut(runs, indices=indices)
-    elif cv_method == "sample":
-        cv = LeaveOneOut(len(y), indices=indices)
-    else:
-        cv = cv_method
-
     if X.ndim < 3:
         X = [X]
 
-    # Do the decoding
-    scores = []
-    for X_i in X:
-        if split_pred is None:
-            score = cross_val_score(model, X_i, y, cv=cv,
-                                    n_jobs=n_jobs).mean()
-            scores.append(score)
-        else:
-            n_bins = len(np.unique(split_pred))
-            bin_scores = [[] for i in range(n_bins)]
-            for train, test in cv:
-                model.fit(X_i[train], y[train])
-                for bin in range(n_bins):
-                    idx = np.logical_and(test, split_pred == bin)
-                    bin_score = model.score(X_i[idx], y[idx])
-                    bin_scores[bin].append(bin_score)
-            scores.append(np.mean(bin_scores, axis=1))
-    scores = np.atleast_1d(np.squeeze(scores))
-    return scores
-
-
-def _decode_subject_logits(dataset, model, split_pred=None, cv_method="run"):
-    """Internal function to return logit-transformed target probabilities."""
-    # Get direct references to the data
-    X = dataset["X"]
-    y = dataset["y"]
-    runs = dataset["runs"]
-
     # Set up the cross-validation
-    if cv_method == "run":
-        cv = LeaveOneLabelOut(runs, indices=False)
-    elif cv_method == "sample":
-        cv = LeaveOneOut(len(y), indices=False)
+    if cv == "run":
+        cv_ = LeaveOneLabelOut(runs, indices=False)
+    elif cv == "sample":
+        cv_ = LeaveOneOut(len(y), indices=False)
+    elif isinstance(cv, int):
+        cv_ = KFold(len(y), cv, indices=False)
     else:
-        cv = cv_method
+        raise ValueError("CV argument was not understood")
 
-    if split_pred is None:
-        split_pred = np.zeros_like(y)
-
-    if X.ndim < 3:
-        X = [X]
-
-    n_bins = len(np.unique(split_pred))
-    logits = np.empty((len(X), len(y), n_bins)) * np.nan
+    # Cross-validate the model over frames
+    scores = np.empty((len(X), len(y)))
     for i, X_i in enumerate(X):
-        for train, test in cv:
-            ps = model.fit(X_i[train], y[train]).predict_proba(X_i[test])
-            for bin_j in range(n_bins):
-                bin = split_pred == bin_j
-                idx = np.logical_and(test, bin)
-                bin_ps = ps[bin[test]]
-                bin_logits = np.log(bin_ps) - np.log(1 - bin_ps)
-                rows = np.arange(len(bin_logits))
-                target_logits = bin_logits[rows, y[idx]]
-                logits[i, idx, bin_j] = target_logits
+        for train, test in cv_:
+            if logits:
+                ps = model.fit(X_i[train], y[train]).predict_proba(X_i[test])
+                rows = np.arange(len(ps))
+                ps = ps[rows, y[test]]
+                ps = np.log(ps) - np.log(1 - ps)
+            else:
+                ps = model.fit(X_i[train], y[train]).predict(X_i[test])
+                ps = ps == y[test]
+            scores[i, test] = ps
 
-    return logits.squeeze()
+    # Possibly bin by trial splits
+    if split_pred is not None:
+        n_bins = len(np.unique(split_pred))
+        split_scores = np.empty((len(X), n_bins))
+        for i, bin in enumerate(np.unique(split_pred)):
+            split_scores[:, i] = scores[:, split_pred == bin].mean()
+        scores = split_scores
+    elif not trialwise:
+        scores = scores.mean(axis=1)
+
+    return np.atleast_1d(scores.squeeze())
 
 
-def decode_subject(dataset, model, split_pred=None, cv_method="run",
-                   exp_name=None, logits=False, n_jobs=1):
+def decode_subject(dataset, model, cv="run", split_pred=None,
+                   trialwise=False, logits=False, exp_name=None):
     """Perform decoding on a single dataset.
 
     This function hashes the relevant inputs and uses that to store
@@ -652,24 +626,24 @@ def decode_subject(dataset, model, split_pred=None, cv_method="run",
         decoding dataset
     model : scikit-learn estimator
         model to decode with
+    cv : "run" | "sample" | k
+        cross validate over runs, over samples (leave-one-out), or
+        over `k` folds.
     spit_pred : pandas series or array
         bin prediction accuracies by the index values in the array.
-        n_jobs will have no effect when this is used
-    cv_method : run | sample | cv arg for cross_val_score
-        cross validate over runs, over samples (leave-one-out)
-        or otherwise something that can be provided to the cv
-        argument for sklearn.cross_val_score
-    exp_name : string
-        name of experiment, if not default
+        note: cannot be used with `trialwise`.
+    trialwise : bool, optional
+        if False, return accuracy/logit on each trial; otherwise take
+        mean, possibly over frame. note: cannot be used with `split_pred`.
     logits : bool, optional
         return continuous target logit value for each observation
-    n_jobs : int, optional
-        number of jobs for sklean internal parallelization
+    exp_name : string
+        name of experiment, if not default
 
     Return
     ------
     scores : array
-        squeezed array of scores with (n_split, n_tp) dimensions
+        squeezed array of scores with shape (n_frames, (n_splits | n_trials))
 
     """
     # Ensure some inputs
@@ -677,8 +651,8 @@ def decode_subject(dataset, model, split_pred=None, cv_method="run",
         split_pred = np.asarray(split_pred)
 
     # Get a path to the results will live
-    res_file = _results_fname(dataset, model, split_pred,
-                              exp_name, logits, False)
+    res_file = _results_fname(dataset, model, split_pred, trialwise,
+                              logits, exp_name, False)
 
     # Hash the inputs to the decoder
     decoder_hash = _hash_decoder(dataset, model, split_pred)
@@ -691,10 +665,7 @@ def decode_subject(dataset, model, split_pred=None, cv_method="run",
 
     # Do the decoding with a private function so we can test it
     # without dealing with all the persistance stuff
-    if logits:
-        scores = _decode_subject_logits(dataset, model, split_pred, cv_method)
-    else:
-        scores = _decode_subject(dataset, model, split_pred, cv_method, n_jobs)
+    scores = _decode_subject(dataset, model, cv, split_pred, trialwise, logits)
 
     # Save the scores to disk
     res_dict = dict(scores=scores, hash=decoder_hash)
@@ -707,8 +678,8 @@ def decode_subject(dataset, model, split_pred=None, cv_method="run",
     return scores
 
 
-def decode_group(datasets, model, split_pred=None, cv_method="run",
-                 exp_name=None, logits=False, n_jobs=1, dv=None):
+def decode_group(datasets, model, cv="run", split_pred=None,
+                 trialwise=False, logits=False, exp_name=None, dv=None):
     """Perform decoding on a sequence of datasets.
 
     Parameters
@@ -717,31 +688,29 @@ def decode_group(datasets, model, split_pred=None, cv_method="run",
         one dataset per subject
     model : scikit-learn estimator
         model to decode with
+    cv : "run" | "sample" | k
+        cross validate over runs, over samples (leave-one-out), or
+        over `k` folds.
     spit_pred : series/array or sequence of seires/arrays, optional
         bin prediction accuracies by the index values in the array.
         can pass one array to use for all datasets, or a list
         of arrays with the same length as the dataset list.
         splits will form last axis of returned accuracy array.
-        n_jobs will have no effect when this is used, but can
-        still run in parallel over subjects using IPython.
-    cv_method : run | sample | cv arg for cross_val_score
-        cross validate over runs, over samples (leave-one-out)
-        or otherwise something that can be provided to the cv
-        argument for sklearn.cross_val_score
-    exp_name : string
-        name of experiment, if not default
+        note: cannot be used with `trialwise`.
+    trialwise : bool, optional
+        if False, return accuracy/logit on each trial; otherwise take
+        mean, possibly over frame. note: cannot be used with `split_pred`.
     logits : bool, optional
         return continuous target logit value for each observation
-    n_jobs : int, optional
-        number of jobs for sklean internal parallelization
+    exp_name : string
+        name of experiment, if not default
     dv : IPython cluster direct view, optional
         IPython cluster to decode in parallel
 
     Return
     ------
     all_scores : array
-        array where first dimension is subjects and second
-        dimension may be timepoints
+        array with possible dimensions in (subj, frame, split, trial)
 
     """
     if dv is None:
@@ -752,23 +721,17 @@ def decode_group(datasets, model, split_pred=None, cv_method="run",
 
     # Set up the lists for the map
     model = [model for d in datasets]
-
-    try:
-        if len(np.array(cv_method)) != len(datasets):
-            cv_method = [cv_method for _ in datasets]
-    except TypeError:
-        cv_method = [cv_method for _ in datasets]
-
+    cv = [cv for _ in datasets]
     if split_pred is None or not np.iterable(split_pred[0]):
         split_pred = [split_pred for _ in datasets]
-
-    exp_name = [exp_name for _ in datasets]
+    trialwise = [trialwise for _ in datasets]
     logits = [logits for _ in datasets]
-    n_jobs = [n_jobs for _ in datasets]
+    exp_name = [exp_name for _ in datasets]
 
     # Do the decoding
-    all_scores = map(decode_subject, datasets, model,
-                     split_pred, cv_method, exp_name, logits, n_jobs)
+    all_scores = map(decode_subject, datasets, model, cv, split_pred,
+                     trialwise, logits, exp_name)
+
     return np.array(all_scores)
 
 

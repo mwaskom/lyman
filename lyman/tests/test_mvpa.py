@@ -4,8 +4,10 @@ import scipy as sp
 import pandas as pd
 from scipy import stats
 from sklearn.naive_bayes import GaussianNB
-from sklearn.cross_validation import (LeaveOneOut, LeaveOneLabelOut,
-                                      StratifiedKFold)
+from sklearn.cross_validation import (cross_val_score,
+                                      LeaveOneOut,
+                                      LeaveOneLabelOut,
+                                      KFold)
 
 from numpy.testing import assert_array_equal, assert_array_almost_equal
 import numpy.testing as npt
@@ -99,7 +101,8 @@ def test_deconvolve_estimate():
 def test_extract_dataset():
     """Test simple case."""
     evs = pd.DataFrame(dict(onset=[1, 2, 3],
-                            condition=["foo", "foo", "bar"]))
+                            condition=["foo", "foo", "bar"]),
+                            dtype=float)
     ts = np.random.randn(5, 5, 5, 4)
     mask = ts[..., 0] > .5
     X, y = mvpa.extract_dataset(evs, ts, mask, 1)
@@ -118,7 +121,8 @@ def test_extract_dataset():
 def test_extract_sizes():
     """Test different frame sizes."""
     evs = pd.DataFrame(dict(onset=[1, 2, 3],
-                            condition=["foo", "foo", "bar"]))
+                            condition=["foo", "foo", "bar"]),
+                            dtype=float)
     ts = np.random.randn(5, 5, 5, 4)
     mask = ts[..., 0] > .5
 
@@ -132,8 +136,9 @@ def test_extract_sizes():
 def test_extract_upsample():
     """Test upsampling during extraction."""
     evs = pd.DataFrame(dict(onset=[1, 2, 3],
-                            condition=["foo", "foo", "bar"]))
-    ts = np.random.randn(5, 5, 5, 5)
+                            condition=["foo", "foo", "bar"]),
+                            dtype=float)
+    ts = np.random.randn(5, 5, 5, 10)
     mask = ts[..., 0] > .5
 
     X, y = mvpa.extract_dataset(evs, ts, mask, tr=1,
@@ -144,7 +149,7 @@ def test_extract_upsample():
 @raises(ValueError)
 def test_extract_mask_error():
     """Make sure mask is enforced as boolean."""
-    evs = pd.DataFrame(dict(onset=[1], condition="foo"))
+    evs = pd.DataFrame(dict(onset=[1], condition="foo"), dtype=float)
     ts = np.random.randn(10, 10, 10, 5)
     mask = np.random.rand(10, 10, 10)
     mvpa.extract_dataset(evs, ts, mask)
@@ -159,10 +164,15 @@ def test_decode_shapes():
     assert_equal(accs.shape, (4,))
 
     splits = stats.bernoulli(.5).rvs(24)
-    accs = mvpa._decode_subject(dataset, model, splits)
+    accs = mvpa._decode_subject(dataset, model, split_pred=splits)
     assert_equal(accs.shape, (2,))
-    accs = mvpa._decode_subject(dataset_3d, model, splits)
+    accs = mvpa._decode_subject(dataset_3d, model, split_pred=splits)
     assert_equal(accs.shape, (4, 2))
+
+    accs = mvpa._decode_subject(dataset, model, trialwise=True)
+    assert_equal(accs.shape, (len(dataset["y"]),))
+    accs = mvpa._decode_subject(dataset_3d, model, trialwise=True)
+    assert_equal(accs.shape, (4, len(dataset["y"])))
 
 
 def test_decode_options():
@@ -171,48 +181,38 @@ def test_decode_options():
     mvpa._decode_subject(dataset, model)
     mvpa._decode_subject(dataset_3d, model)
     splits = stats.bernoulli(.5).rvs(24)
-    mvpa._decode_subject(dataset, model, splits)
-    mvpa._decode_subject(dataset, model, cv_method="sample")
-    mvpa._decode_subject(dataset, model, cv_method=5)
-    mvpa._decode_subject(dataset, model, cv_method=LeaveOneOut(24))
-    mvpa._decode_subject(dataset, model, n_jobs=2)
+    mvpa._decode_subject(dataset, model, cv="sample")
+    mvpa._decode_subject(dataset, model, cv=5)
+    mvpa._decode_subject(dataset, model, split_pred=splits)
+    mvpa._decode_subject(dataset, model, trialwise=True)
+    mvpa._decode_subject(dataset, model, logits=True)
+
+
+@raises(ValueError)
+def test_trialwise_split_exclusivity():
+    """Test that we can't split predictions and get trialwise scores."""
+    model = GaussianNB()
+    splits = stats.bernoulli(.5).rvs(24)
+    mvpa._decode_subject(dataset, model, split_pred=splits, trialwise=True)
 
 
 def test_decode_cross_val():
-    """Test that cv_method strings are correct."""
+    """Test that cv strings are correct."""
     model = GaussianNB()
+    X = dataset["X"]
+    y = dataset["y"]
 
-    acc1 = mvpa._decode_subject(dataset, model, cv_method="run")
+    acc1 = mvpa._decode_subject(dataset, model, cv="run")
     cv = LeaveOneLabelOut(dataset["runs"])
-    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
-    assert_array_equal(acc1, acc2)
+    acc2 = cross_val_score(model, X, y, cv=cv).mean()
+    assert_array_almost_equal(acc1, acc2)
 
-    acc1 = mvpa._decode_subject(dataset, model, cv_method="sample")
+    acc1 = mvpa._decode_subject(dataset, model, cv="sample")
     cv = LeaveOneOut(24)
-    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
-    assert_array_equal(acc1, acc2)
+    acc2 = cross_val_score(model, X, y, cv=cv).mean()
+    assert_array_almost_equal(acc1, acc2)
 
-    acc1 = mvpa._decode_subject(dataset, model, cv_method=LeaveOneOut(24))
-    cv = LeaveOneOut(24)
-    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
-    assert_array_equal(acc1, acc2)
-
-    acc1 = mvpa._decode_subject(dataset, model, cv_method=4)
-    cv = StratifiedKFold(dataset["y"], 4)
-    acc2 = mvpa._decode_subject(dataset, model, cv_method=cv)
-    assert_array_equal(acc1, acc2)
-
-
-def test_logit_shapes():
-    """Test that we get expected shapes from decode_logit function."""
-    model = GaussianNB()
-    accs = mvpa._decode_subject_logits(dataset, model)
-    assert_equal(accs.shape, (24, ))
-    accs = mvpa._decode_subject_logits(dataset_3d, model)
-    assert_equal(accs.shape, (4, 24))
-
-    splits = stats.bernoulli(.5).rvs(24)
-    accs = mvpa._decode_subject_logits(dataset, model, splits)
-    assert_equal(accs.shape, (24, 2))
-    accs = mvpa._decode_subject_logits(dataset_3d, model, splits)
-    assert_equal(accs.shape, (4, 24, 2))
+    acc1 = mvpa._decode_subject(dataset, model, cv=4)
+    cv = KFold(len(y), 4)
+    acc2 = cross_val_score(model, X, y, cv=cv).mean()
+    assert_array_almost_equal(acc1, acc2)
