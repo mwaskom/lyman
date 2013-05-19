@@ -216,3 +216,12 @@ def test_decode_cross_val():
     cv = KFold(len(y), 4)
     acc2 = cross_val_score(model, X, y, cv=cv).mean()
     assert_array_almost_equal(acc1, acc2)
+
+
+def test_accs_vs_logits():
+    """Test that accs and logits give consisitent information."""
+    model = GaussianNB()
+    accs = mvpa._decode_subject(dataset, model, trialwise=True)
+    logits = mvpa._decode_subject(dataset, model,
+                                  logits=True, trialwise=True)
+    assert_array_equal(accs, logits >= .5)
