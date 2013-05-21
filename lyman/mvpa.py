@@ -493,8 +493,8 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
     return data
 
 
-def _results_fname(dataset, model, split_pred, trialwise, logits,
-                   exp_name, shuffle):
+def _results_fname(dataset, model, split_pred, trialwise, logits, shuffle,
+                   exp_name):
     """Get a path to where files storing decoding results will live."""
     project = gather_project_info()
     if exp_name is None:
@@ -536,7 +536,7 @@ def _results_fname(dataset, model, split_pred, trialwise, logits,
         shuffle_str = "shuffle"
 
     res_fname = "_".join([model_str, collapse_str, split_str,
-                          logit_str, shuffle_str])
+                          trial_str, logit_str, shuffle_str])
     res_fname = re.sub("_{2,}", "_", res_fname)
     res_fname = res_fname.strip("_") + ".npz"
     res_fname = op.join(res_path, res_fname)
@@ -652,7 +652,7 @@ def decode_subject(dataset, model, cv="run", split_pred=None,
 
     # Get a path to the results will live
     res_file = _results_fname(dataset, model, split_pred, trialwise,
-                              logits, exp_name, False)
+                              logits, False, exp_name)
 
     # Hash the inputs to the decoder
     decoder_hash = _hash_decoder(dataset, model, split_pred)
@@ -770,7 +770,8 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
     for i_s, data in enumerate(datasets):
 
         # Get a path to the results will live
-        res_file = _results_fname(data, model, None, None, exp_name, True)
+        res_file = _results_fname(data, model, None, False,
+                                  False, True, exp_name)
 
         # Hash the inputs to the decoder
         decoder_hash = _hash_decoder(data, model, n_iter=n_iter,
