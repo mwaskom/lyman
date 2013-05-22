@@ -8,6 +8,7 @@ import re
 import numpy as np
 import scipy as sp
 from scipy import stats
+from scipy.interpolate import interp1d
 import pandas as pd
 import nibabel as nib
 import nipy.modalities.fmri.hemodynamic_models as hrf
@@ -223,8 +224,8 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
         time_points = len(roi_data)
         x = np.linspace(0, time_points - 1, time_points)
         xx = np.linspace(0, time_points - 1,
-                         time_points + (upsample - 1) * (upsample - 1))
-        interpolator = sp.interpolate.interp1d(x, roi_data, "cubic", axis=0)
+                         time_points * upsample + 1)
+        interpolator = interp1d(x, roi_data, "cubic", axis=0)
         roi_data = interpolator(xx)
 
     # Build the data array

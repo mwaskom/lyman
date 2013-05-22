@@ -10,6 +10,7 @@ from glob import glob
 import hashlib
 import numpy as np
 import scipy as sp
+from scipy.interpolate import interp1d
 import pandas as pd
 import nibabel as nib
 import nitime as nit
@@ -239,9 +240,8 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
                 time_points = len(run_data)
                 x = np.linspace(0, time_points - 1, time_points)
                 xx = np.linspace(0, time_points - 1,
-                                 time_points + (upsample - 1) * (upsample - 1))
-                interpolator = sp.interpolate.interp1d(x, run_data,
-                                                       "cubic", axis=0)
+                                 time_points * upsample + 1)
+                interpolator = interp1d(x, run_data, "cubic", axis=0)
                 run_data = interpolator(xx)
 
             run_events = events_i[events_i.run == run]
@@ -263,8 +263,9 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
 
         # Do the calculations
         calc_tr = float(tr) / upsample
+        calc_bins = n_bins * upsample
         if data.ndim == 1:
-            evoked_data = _evoked_1d(data, event_info, n_bins, calc_tr,
+            evoked_data = _evoked_1d(data, event_info, calc_bins, calc_tr,
                                      calc_method, correct_baseline)
         elif data.ndim == 2:
             evoked_data = _evoked_2d(data, event_info, n_bins, calc_tr,
