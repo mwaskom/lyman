@@ -10,6 +10,7 @@ from glob import glob
 import hashlib
 import numpy as np
 import scipy as sp
+import pandas as pd
 import nibabel as nib
 import nitime as nit
 
@@ -81,9 +82,9 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
 
     # If the file exists and the hash matches, return the data
     if op.exists(cache_file):
-        cache_obj = np.load(cache_file)
-        if cache_hash == str(cache_obj["hash"]):
-            return dict(cache_obj.items())
+        with np.load(cache_file) as cache_obj:
+            if cache_hash == str(cache_obj["hash"]):
+                return dict(cache_obj.items())
 
     # Otherwise, do the extraction
     data = []
@@ -165,9 +166,10 @@ def extract_group(mask_name, summary_func=np.mean,
     return data
 
 
-def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
-                     calc_method="FIR", offset=0, percent_change=True,
-                     correct_baseline=True):
+def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
+                     calc_method="FIR", offset=0, upsample=1,
+                     percent_change=True, correct_baseline=True,
+                     event_names=None):
     """Calcuate an evoked response for a list of datapoints.
 
     Parameters
@@ -176,14 +178,17 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
         timeseries data
     n_bins : int
         number of bins for the peristumulus trace
-    onsets : sequence of n_class x n_run x n_event arrays
-        onset times separated by run and event class, one for
-        each entry in data
     problem : string
         problem name for event file in data hierarchy
-        overrides onsets if both are passed
+        overrides `events` if both are passed
+    events : dataframe or list of dataframes
+        one dataframe describing event information for each subj.
+        must contain `onset`, `run`, and `condition` columns
+        caution: `run` should be 0-based
     tr : int
-        time resolution of the data
+        original time resolution of the data
+    upsample : int
+        factor to upsample the data with using cubic splines
     calc_method : string
         name of method on nitime EventRelatedAnalyzer object to
         calculate the evoked response.
@@ -193,6 +198,9 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
         if True, convert signal to percent change by run
     correct_baseline : boolean
         if True, adjust evoked trace to be 0 in first bin
+    event_names : list of strings
+        names of conditions, otherwise uses sorted unique
+        values for the condition field in the event dataframe
 
     Returns
     -------
@@ -203,7 +211,7 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
     """
     project = gather_project_info()
     event_template = op.join(project["data_dir"], "%s",
-                             "events/%s.npz" % problem)
+                             "events/%s.csv" % problem)
 
     evoked = []
     for i, data_i in enumerate(data):
@@ -211,39 +219,56 @@ def calculate_evoked(data, n_bins, onsets=None, problem=None, tr=2,
         # Can get event information in one of two ways
         if problem is not None:
             subj = data_i["subj"]
-            event_obj = np.load(event_template % subj)
-            ev_data = [event_obj[name] for name in event_obj["event_names"]]
-            onsets_i = [[r[:, 0] for r in d] for d in ev_data]
+            events_i = pd.read_csv(event_template % subj)
         else:
-            onsets_i = onsets[i]
+            events_i = events[i]
+
+        # Map from event names to integer index values
+        if event_names is None:
+            event_names = sorted(events_i.condition.unique())
+        event_map = pd.Series(range(1, len(event_names) + 1),
+                              index=event_names)
 
         # Create the timeseries of event occurances
         event_list = []
         data_list = []
         for run, run_data in enumerate(data_i["data"]):
 
-            events_i = np.zeros(len(run_data))
-            for ev_id, ev_onsets in enumerate(onsets_i, 1):
-                run_onsets = ev_onsets[run] + offset
-                onset_frames = (run_onsets / tr).astype(int)
-                events_i[onset_frames] = ev_id
-            event_list.append(events_i)
+            # Possibly upsample the data
+            if upsample != 1:
+                time_points = len(run_data)
+                x = np.linspace(0, time_points - 1, time_points)
+                xx = np.linspace(0, time_points - 1,
+                                 time_points + (upsample - 1) * (upsample - 1))
+                interpolator = sp.interpolate.interp1d(x, run_data,
+                                                       "cubic", axis=0)
+                run_data = interpolator(xx)
+
+            run_events = events_i[events_i.run == run]
+            run_events.onset += offset
+
+            event_id = np.zeros(len(run_data), int)
+            event_index = np.array(run_events.onset / tr).astype(int)
+            event_index *= upsample
+            event_id[event_index] = run_events.condition.map(event_map)
+            event_list.append(event_id)
 
             if percent_change:
                 run_data = nit.utils.percent_change(run_data, ax=0)
             data_list.append(run_data)
 
         # Set up the Nitime objects
-        events = np.concatenate(event_list)
+        event_info = np.concatenate(event_list)
         data = np.concatenate(data_list, axis=0)
 
+        # Do the calculations
+        calc_tr = float(tr) / upsample
         if data.ndim == 1:
-            evoked_data = _evoked_1d(data, events, n_bins, tr,
+            evoked_data = _evoked_1d(data, event_info, n_bins, calc_tr,
                                      calc_method, correct_baseline)
         elif data.ndim == 2:
-            evoked_data = _evoked_2d(data, events, n_bins, tr,
+            evoked_data = _evoked_2d(data, event_info, n_bins, calc_tr,
                                      calc_method, correct_baseline)
-
         evoked.append(evoked_data)
 
     return np.array(evoked).squeeze()
@@ -267,7 +292,7 @@ def _evoked_1d(data, events, n_bins, tr, calc_method, correct_baseline):
 
 
 def _evoked_2d(data, events, n_bins, tr, calc_method, correct_baseline):
-    
+
     evoked_data = []
     for data_i in data.T:
         evoked_data_i = _evoked_1d(data_i, events, n_bins, tr,
