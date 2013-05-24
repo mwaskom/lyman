@@ -153,7 +153,7 @@ def extract_group(mask_name, summary_func=np.mean,
 
     if subjects is None:
         subj_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
-        subjects = np.loadtxt(subj_file, str)
+        subjects = np.loadtxt(subj_file, str).tolist()
 
     mask_name = [mask_name for s in subjects]
     summary_func = [summary_func for s in subjects]
