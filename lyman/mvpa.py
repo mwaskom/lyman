@@ -843,8 +843,8 @@ def save_coef_images(datasets, model, mask_name=None, exp_name=None):
 
         # Save the data both as a npz and nifti
         coef_file = _results_fname(dset, model, None, False,
-                                   False, False, exp_name)
-        np.save(coef_data)
+                                   False, False, exp_name).strip(".npz")
+        np.save(coef_file + "_coefs.npz", coef_data)
         coef_nifti = coef_file.strip(".npz") + "_coefs.nii.gz"
-        coef_img = nib.Nifti1Image(coef_data, mask.get_affine())
+        coef_img = nib.Nifti1Image(coef_data, mask_img.get_affine())
         nib.save(coef_img, coef_nifti)
