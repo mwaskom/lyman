@@ -799,7 +799,7 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
     return np.array(group_scores)
 
 
-def save_coef_images(datasets, model, mask_name=None, exp_name=None):
+def save_model_coef(datasets, model, mask_name=None, exp_name=None):
     """Fit a model on all data and save the learned model weights.
 
     This does not work for datasets with > 1 frames.
