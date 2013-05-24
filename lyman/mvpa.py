@@ -797,3 +797,54 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
         group_scores.append(scores)
 
     return np.array(group_scores)
+
+
+def save_coef_images(datasets, model, mask_name=None, exp_name=None):
+    """Fit a model on all data and save the learned model weights.
+
+    This does not work for datasets with > 1 frames.
+
+    Parameters
+    ----------
+    datasets : list of dicts
+        group mvpa datasets
+    model : scikit-learn estimator
+        decoding model
+    mask_name : string or None
+        string, unless datasets have `mask_name` field
+    exp_name : string or None
+        experiment name, otherwise uses project default
+
+    """
+    project = gather_project_info()
+    if exp_name is None:
+        exp_name = project["default_exp"]
+
+    mask_template = op.join(project["data_dir"], "%s/masks/%s.nii.gz")
+
+    # Iterate through the datasets
+    for dset in datasets:
+        subj = dset["subj"]
+
+        # Determine the mask
+        if "mask_name" in dset:
+            mask_name = dset["mask_name"]
+        mask_file = mask_template % (subj, mask_name)
+
+        # Load the mask file
+        mask_img = nib.load(mask_file)
+        mask = mask_img.get_data().astype(bool)
+        x, y, z = mask.shape
+
+        # Fit the model and extract the learned model weights
+        coef = model.fit(dset["X"], dset["y"]).coef_
+        coef_data = np.zeros((x, y, z, len(coef))) * np.nan
+        coef_data[mask] = coef.T
+
+        # Save the data both as a npz and nifti
+        coef_file = _results_fname(dset, model, None, False,
+                                   False, False, exp_name)
+        np.save(coef_data)
+        coef_nifti = coef_file.strip(".npz") + "_coefs.nii.gz"
+        coef_img = nib.Nifti1Image(coef_data, mask.get_affine())
+        nib.save(coef_img, coef_nifti)
