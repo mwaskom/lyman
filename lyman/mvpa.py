@@ -826,6 +826,16 @@ def save_model_coef(datasets, model, mask_name=None, exp_name=None):
     for dset in datasets:
         subj = dset["subj"]
 
+        # Check if we need to do anything
+        decoder_hash = _hash_decoder(dset, model, None)
+        coef_file = _results_fname(dset, model, None, False,
+                                   False, False, exp_name)
+        coef_file = coef_file.strip(".npz") + "_coef.npz"
+        if op.exists(coef_file):
+            with np.load(coef_file) as res_obj:
+                if decoder_hash == str(res_obj["hash"]):
+                    continue
+
         # Determine the mask
         if "mask_name" in dset:
             mask_name = dset["mask_name"]
@@ -842,9 +852,8 @@ def save_model_coef(datasets, model, mask_name=None, exp_name=None):
         coef_data[mask] = coef.T
 
         # Save the data both as a npz and nifti
-        coef_file = _results_fname(dset, model, None, False,
-                                   False, False, exp_name).strip(".npz")
-        np.save(coef_file + "_coefs.npz", coef_data)
+        coef_dict = dict(data=coef_data, hash=decoder_hash)
+        np.savez(coef_file, **coef_dict)
         coef_nifti = coef_file.strip(".npz") + "_coefs.nii.gz"
         coef_img = nib.Nifti1Image(coef_data, mask_img.get_affine())
         nib.save(coef_img, coef_nifti)
