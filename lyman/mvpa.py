@@ -852,7 +852,7 @@ def save_model_coef(datasets, model, mask_name=None, exp_name=None):
         coef_data[mask] = coef.T
 
         # Save the data both as a npz and nifti
-        coef_dict = dict(data=coef_data, hash=decoder_hash)
+        coef_dict = dict(data=coef, hash=decoder_hash)
         np.savez(coef_file, **coef_dict)
         coef_nifti = coef_file.strip(".npz") + ".nii.gz"
         coef_img = nib.Nifti1Image(coef_data, mask_img.get_affine())
