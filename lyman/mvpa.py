@@ -820,7 +820,7 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
 
     Returns
     -------
-    coef | coef_data
+    out_coefs : list of arrays
         model coefficients; form is determined by `flat` parameter
 
     """
@@ -829,6 +829,8 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
         exp_name = project["default_exp"]
 
     mask_template = op.join(project["data_dir"], "%s/masks/%s.nii.gz")
+
+    out_coefs = []
 
     # Iterate through the datasets
     for dset in datasets:
@@ -839,10 +841,15 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
         coef_file = _results_fname(dset, model, None, False,
                                    False, False, exp_name)
         coef_file = coef_file.strip(".npz") + "_coef.npz"
+        coef_nifti = coef_file.strip(".npz") + ".nii.gz"
         if op.exists(coef_file):
             with np.load(coef_file) as res_obj:
                 if decoder_hash == str(res_obj["hash"]):
-                    continue
+                    if flat:
+                        data = res_obj["data"]
+                    else:
+                        data = nib.load(coef_nifti).get_data()
+                    out_coefs.append(data)
 
         # Determine the mask
         if "mask_name" in dset:
@@ -866,7 +873,4 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
         coef_img = nib.Nifti1Image(coef_data, mask_img.get_affine())
         nib.save(coef_img, coef_nifti)
 
-    # Return the values
-    if flat:
-        return coef
-    return coef_data
+    return out_coefs
