@@ -799,7 +799,7 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
     return np.array(group_scores)
 
 
-def save_model_coef(datasets, model, mask_name=None, exp_name=None):
+def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
     """Fit a model on all data and save the learned model weights.
 
     This does not work for datasets with > 1 frames.
@@ -812,8 +812,16 @@ def save_model_coef(datasets, model, mask_name=None, exp_name=None):
         decoding model
     mask_name : string or None
         string, unless datasets have `mask_name` field
+    flat : bool
+        if False return in original data space (with voxels outside
+        mask represented as NaN. otherwise return straight from model
     exp_name : string or None
         experiment name, otherwise uses project default
+
+    Returns
+    -------
+    coef | coef_data
+        model coefficients; form is determined by `flat` parameter
 
     """
     project = gather_project_info()
@@ -857,3 +865,8 @@ def save_model_coef(datasets, model, mask_name=None, exp_name=None):
         coef_nifti = coef_file.strip(".npz") + ".nii.gz"
         coef_img = nib.Nifti1Image(coef_data, mask_img.get_affine())
         nib.save(coef_img, coef_nifti)
+
+    # Return the values
+    if flat:
+        return coef
+    return coef_data
