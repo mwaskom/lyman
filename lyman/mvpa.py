@@ -862,7 +862,11 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
         x, y, z = mask.shape
 
         # Fit the model and extract the learned model weights
-        coef = model.fit(dset["X"], dset["y"]).coef_
+        model = model.fit(dset["X"], dset["y"])
+        if hasattr(model, "estimators_"):
+            coef = np.array([e.coef_.ravel() for e in model.estimators_])
+        else:
+            coef = model.coef_
         coef_data = np.zeros((x, y, z, len(coef))) * np.nan
         coef_data[mask] = coef.T
 
