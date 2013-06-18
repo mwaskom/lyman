@@ -88,7 +88,7 @@ class OutputWrapper(object):
 
         subj_subs = []
         for s in self.subj_node.iterables[1]:
-            subj_subs.append(("/_subject_id_%s" % s, "/"))
+            subj_subs.append(("/_subject_id_%s/" % s, "/"))
 
         # Strip the subject_id iterable from the path
         if isdefined(self.sink_node.inputs.substitutions):
