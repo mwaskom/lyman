@@ -39,6 +39,7 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
     datasource = Node(DataGrabber(infields=["subject_id"],
                                   outfields=["aseg", "head"],
                                   base_directory=data_dir,
+                                  sort_filelist=True,
                                   template="%s/mri/%s.mgz"),
                       name="datagrabber")
     datasource.inputs.template_args = dict(aseg=[["subject_id", "aparc+aseg"]],
