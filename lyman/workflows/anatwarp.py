@@ -204,7 +204,7 @@ def warp_report(in_file):
     colors = sns.color_palette("bright")
     im_data = dict()
     for axis in ["x", "y", "z"]:
-        f = plt.figure(figsize=(10, 4))
+        f = plt.figure(figsize=(10, 2.5))
         coords = cut_coords[axis]
         slicer = viz.plot_anat(sub_data, sub_aff, slicer=axis,
                                cut_coords=coords, figure=f, **kwargs)
@@ -213,9 +213,7 @@ def warp_report(in_file):
         f.savefig(fname, facecolor="k", edgecolor="k")
         im_data[axis] = sp.ndimage.imread(fname)
 
-    crops = [slice(85, 215), slice(65, 230), slice(40, 245)]
     concat_data = [im_data[axis] for axis in ["x", "y", "z"]]
-    concat_data = [data[crops[i]] for i, data in enumerate(concat_data)]
     concat_data = np.concatenate(concat_data, axis=0)
     sp.misc.imsave("warp_report.png", concat_data)
     return op.abspath("warp_report.png")
