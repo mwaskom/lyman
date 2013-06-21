@@ -7,6 +7,13 @@ information about the processing.
 
 """
 import os
+import os.path as op
+import numpy as np
+import scipy as sp
+import matplotlib.pyplot as plt
+import nibabel as nib
+from nipy.labs import viz
+import seaborn as sns
 
 from nipype.interfaces import fsl
 from nipype.interfaces import freesurfer as fs
@@ -95,17 +102,26 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
     # Generate a png summarizing the registration
     checkreg = Node(Function(input_names=["in_file"],
                              output_names=["out_file"],
-                             function=mni_reg_qc),
+                             function=warp_report,
+                             imports=[
+                                "import os",
+                                "import os.path as op",
+                                "import numpy as np",
+                                "import scipy as sp",
+                                "import matplotlib.pyplot as plt",
+                                "import nibabel as nib",
+                                "from nipy.labs import viz",
+                                "import seaborn as sns"]),
                     name="checkreg")
 
     # Save relevant files to the data directory
     datasink = Node(DataSink(base_directory=data_dir,
                              parameterization=False,
                              substitutions=[
-                                ("orig_out_masked_flirt.mat", "affine.mat"),
-                                ("orig_out_fieldwarp", "warpfield"),
-                                ("orig_out_masked", "brain"),
-                                ("orig_out", "T1")]),
+                             ("orig_out_masked_flirt.mat", "affine.mat"),
+                             ("orig_out_fieldwarp", "warpfield"),
+                             ("orig_out_masked", "brain"),
+                             ("orig_out", "T1")]),
                     name="datasink")
 
     # Define and connect the workflow
@@ -165,9 +181,44 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
             [("fieldcoeff_file", "normalization.@warpfield")]),
         (checkreg, datasink,
             [("out_file", "normalization.@reg_png")]),
-        ])
+    ])
 
     return normalize
+
+
+def warp_report(in_file):
+    """Plot the registration summary"""
+    mni_file = op.join(os.environ["FSL_DIR"],
+                       "data/standard/MNI152_T1_1mm_brain.nii.gz")
+    mni_img = nib.load(mni_file)
+    mni_data, mni_aff = mni_img.get_data(), mni_img.get_affine()
+    sub_img = nib.load(in_file)
+    sub_data, sub_aff = sub_img.get_data(), sub_img.get_affine()
+    sub_data[sub_data < 1] = 0
+
+    kwargs = dict(draw_cross=False, annotate=False)
+    cut_coords = dict(x=(-45, -12, 12, 45),
+                      y=(-55, -25, 5, 45),
+                      z=(-30, -5, 20, 40))
+
+    colors = sns.color_palette("bright")
+    im_data = dict()
+    for axis in ["x", "y", "z"]:
+        f = plt.figure(figsize=(10, 4))
+        coords = cut_coords[axis]
+        slicer = viz.plot_anat(sub_data, sub_aff, slicer=axis,
+                               cut_coords=coords, figure=f, **kwargs)
+        slicer.contour_map(mni_data, mni_aff, colors=colors)
+        fname = "slices_%s.png" % axis
+        f.savefig(fname, facecolor="k", edgecolor="k")
+        im_data[axis] = sp.ndimage.imread(fname)
+
+    crops = [slice(85, 215), slice(65, 230), slice(40, 245)]
+    concat_data = [im_data[axis] for axis in ["x", "y", "z"]]
+    concat_data = [data[crops[i]] for i, data in enumerate(concat_data)]
+    concat_data = np.concatenate(concat_data, axis=0)
+    sp.misc.imsave("warp_report.png", concat_data)
+    return op.abspath("warp_report.png")
 
 
 def mni_reg_qc(in_file):
