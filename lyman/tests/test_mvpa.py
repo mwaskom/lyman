@@ -224,4 +224,5 @@ def test_accs_vs_logits():
     accs = mvpa._decode_subject(dataset, model, trialwise=True)
     logits = mvpa._decode_subject(dataset, model,
                                   logits=True, trialwise=True)
-    assert_array_equal(accs, logits >= .5)
+    logit_accs = np.where(logits >= 0, 1., 0.)
+    assert_array_equal(accs, logit_accs)
