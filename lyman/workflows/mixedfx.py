@@ -209,6 +209,8 @@ def mfx_boxplot(cope_file, localmax_file):
     from nibabel import load
     import matplotlib.pyplot as plt
     import numpy as np
+    import seaborn as sns
+    sns.set()
 
     out_file = abspath("peak_boxplot.png")
     peak_array = np.loadtxt(localmax_file, int, skiprows=1, usecols=(2, 3, 4))
@@ -227,8 +229,8 @@ def mfx_boxplot(cope_file, localmax_file):
     n_peaks = len(peak_dists)
     fig = plt.figure(figsize=(7, float(n_peaks) / 2 + 0.5))
     ax = fig.add_subplot(111)
-    ax.boxplot(peak_dists, vert=0, widths=0.5)
-    ax.plot([0, 0], ax.get_ylim(), "c--")
+    sns.boxplot(peak_dists, vert=0, widths=0.5, ax=ax)
+    ax.axvline(0, c="#222222", ls="--")
     labels = range(1, n_peaks + 1)
     labels.reverse()
     ax.set_yticklabels(labels)
