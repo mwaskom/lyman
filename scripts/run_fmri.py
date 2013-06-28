@@ -30,15 +30,8 @@ def main(arglist):
         args.experiment = project["default_exp"]
     exp = tools.gather_experiment_info(args.experiment, args.altmodel)
 
-    # Make sure some paths are set properly
+    # Set up the SUBJECTS_DIR for Freesurfer
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
-    script_dir = os.path.abspath(".")
-    sys.path.insert(0, script_dir)
-    if "PYTHONPATH" in os.environ:
-        os.environ["PYTHONPATH"] = "%s:%s" % (script_dir,
-                                              os.environ["PYTHONPATH"])
-    else:
-        os.environ["PYTHONPATH"] = "%s:" % script_dir
 
     # Subject is always highest level of parameterization
     subject_list = tools.determine_subjects(args.subjects)
