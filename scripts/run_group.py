@@ -26,6 +26,8 @@ def main(arglist):
 
     # Get and process specific information
     project = tools.gather_project_info()
+    if project["default_exp"] is not None and args.experiment is None:
+        args.experiment = project["default_exp"]
     exp = tools.gather_experiment_info(args.experiment, args.altmodel)
 
     if args.altmodel:
