@@ -127,8 +127,7 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
     # Define and connect the workflow
     # -------------------------------
 
-    normalize = Workflow(name=name,
-                         base_dir=os.path.join(data_dir, "workingdir"))
+    normalize = Workflow(name=name)
 
     normalize.connect([
         (subjectsource, datasource,
