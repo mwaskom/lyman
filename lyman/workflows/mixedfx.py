@@ -229,7 +229,7 @@ def mfx_boxplot(cope_file, localmax_file):
     n_peaks = len(peak_dists)
     fig = plt.figure(figsize=(7, float(n_peaks) / 2 + 0.5))
     ax = fig.add_subplot(111)
-    sns.boxplot(peak_dists, vert=0, widths=0.5, ax=ax)
+    sns.boxplot(peak_dists, color="PaleGreen", vert=0, widths=0.5, ax=ax)
     ax.axvline(0, c="#222222", ls="--")
     labels = range(1, n_peaks + 1)
     labels.reverse()
