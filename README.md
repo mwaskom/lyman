@@ -7,27 +7,32 @@ functional MRI data using FSL and Freesurfer tools and Nipype.
 Dependencies
 ------------
 
-External
-^^^^^^^^
+### External
 
 - Freesurfer
 
 - FSL
 
-Python
-^^^^^^
+### Python
+
 
 - Nipype and related dependencies
 
-- Core scientific Python environment (best to use the Enthought Python Distribution)
+- Core scientific Python environment (EPD)
 
-- Nipy
+- [nipy](https://github.com/nipy/nipy)
 
-- Nibabel
+- [nibabel](https://github.com/nipy/nibabel)
 
-- rst2pdf
+- [statsmodels](https://github.com/statsmodels/statsmodels)
 
-- Docutils 0.7 or 0.9 (rst2pdf does not work with 0.8)
+- [rst2pdf](https://code.google.com/p/rst2pdf/)
+
+- Docutils >= 0.9 (rst2pdf does not work with 0.8)
+
+- My utility packages: [moss](https://github.com/mwaskom/moss) and [seaborn](https://github.com/mwaskom/seaborn)
+
+Some of the core dependencies require developmet code in Github master
 
 Basic Workflow
 --------------
