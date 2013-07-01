@@ -16,9 +16,9 @@ Dependencies
 ### Python
 
 
-- Nipype and related dependencies
-
 - Core scientific Python environment (EPD)
+
+- [nipype](https://github.com/nipy/nipype)
 
 - [nipy](https://github.com/nipy/nipy)
 
