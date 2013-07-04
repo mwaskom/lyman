@@ -9,4 +9,4 @@ parser.add_argument("-plugin", default="multiproc",
                     help="worklow execution plugin to use")
 parser.add_argument("-nprocs", default=4, type=int,
                     help="number of MultiProc processes to use")
-parser.add_argument("-queue", help="which cue for PBS/SGE execution")
+parser.add_argument("-queue", help="which queue for PBS/SGE execution")
