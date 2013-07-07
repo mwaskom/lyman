@@ -15,17 +15,30 @@ import nibabel as nib
 from nipy.labs import viz
 import seaborn as sns
 
-from nipype.interfaces import fsl
-from nipype.interfaces import freesurfer as fs
-from nipype.interfaces.io import DataGrabber, DataSink
-from nipype.interfaces.utility import IdentityInterface, Rename, Function
-from nipype.pipeline.engine import Node, Workflow
+from nipype import (IdentityInterface, Rename, Function,
+                    DataGrabber, DataSink)
+from nipype import fsl
+from nipype import freesurfer as fs
+from nipype import Node, Workflow
 
 
 def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
     """Set up the anatomical normalzation workflow.
 
     Your anatomical data must have been processed in Freesurfer.
+    Unlike most lyman workflows, the DataGrabber and DataSink
+    nodes are hardwired within the returned workflow, as this
+    tightly integrates with the Freesurfer subjects directory
+    structure.
+
+    Parameters
+    ----------
+    data_dir : path
+        top level of data hierarchy/FS subjects directory
+    subjects : list of strings
+        list of subject IDs
+    name : alphanumeric string, optional
+        workflow name
 
     """
     # Get target images
@@ -84,20 +97,14 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
 
     # Warp and rename the images
     warpbrain = Node(fsl.ApplyWarp(ref_file=target_head,
-                                   interp="spline"),
+                                   interp="spline",
+                                   out_file="brain_warp.nii.gz"),
                      name="warpbrain")
 
     warpbrainhr = Node(fsl.ApplyWarp(ref_file=hires_head,
-                                     interp="spline"),
+                                     interp="spline",
+                                     out_file="brain_warp_hires.nii.gz"),
                        name="warpbrainhr")
-
-    namebrain = Node(Rename(format_string="brain_warp",
-                            keep_ext=True),
-                     name="namebrain")
-
-    namehrbrain = Node(Rename(format_string="brain_warp_hires",
-                       keep_ext=True),
-                       name="namehrbrain")
 
     # Generate a png summarizing the registration
     checkreg = Node(Function(input_names=["in_file"],
@@ -158,10 +165,6 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
             [("fieldcoeff_file", "field_file")]),
         (warpbrainhr, checkreg,
             [("out_file", "in_file")]),
-        (warpbrain, namebrain,
-            [("out_file", "in_file")]),
-        (warpbrainhr, namehrbrain,
-            [("out_file", "in_file")]),
         (subjectsource, datasink,
             [("subject_id", "container")]),
         (skullstrip, datasink,
@@ -172,9 +175,9 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
             [("out_file", "normalization.@brain_flirted")]),
         (flirt, datasink,
             [("out_matrix_file", "normalization.@affine")]),
-        (namebrain, datasink,
+        (warpbrain, datasink,
             [("out_file", "normalization.@brain_warped")]),
-        (namehrbrain, datasink,
+        (warpbrainhr, datasink,
             [("out_file", "normalization.@brain_hires")]),
         (fnirt, datasink,
             [("fieldcoeff_file", "normalization.@warpfield")]),
@@ -186,7 +189,7 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
 
 
 def warp_report(in_file):
-    """Plot the registration summary"""
+    """Plot the registration summary using nipy contours"""
     mni_file = op.join(os.environ["FSL_DIR"],
                        "data/standard/MNI152_T1_1mm_brain.nii.gz")
     mni_img = nib.load(mni_file)
@@ -219,7 +222,7 @@ def warp_report(in_file):
 
 
 def mni_reg_qc(in_file):
-    """Write a png summarizing registration to the highres MNI152 brain."""
+    """Plot the registration using external FSL routines."""
     import os.path as op
     from subprocess import call
     from nipype.interfaces import fsl
