@@ -5,12 +5,13 @@ import imp
 import os.path as op
 
 import numpy as np
+import pandas as pd
 import networkx as nx
+import nibabel as nib
 
 import nipype
-from nipype.pipeline.engine import Workflow, MapNode, Node
+from nipype import Workflow, MapNode, Node, IdentityInterface
 from nipype.interfaces.base import isdefined
-from nipype.interfaces.utility import IdentityInterface
 
 
 class InputWrapper(object):
@@ -315,83 +316,37 @@ def write_workflow_report(workflow_name, report_template, report_dict):
     return [report_pdf_file, report_html_file]
 
 
-def cluster_to_rst(localmax_file):
-    """Convert the localmax text file from Cluster to RST formatting.
-
-    Also convert the voxel coordinates to MNI coordinates and add in
-    the most likely location and probability from Harvard Oxford atlas.
-
-    """
-    from os.path import abspath
-    import numpy as np
-    from lyman.tools import vox_to_mni, locate_peaks
-
-    out_file = abspath("localmax_table.txt")
-    # Localmax files seem to be badly formed
-    # So geting them into array form is pretty annoying
-    with open(localmax_file) as f:
-        clust_head = f.readline().split()
-        _ = clust_head.pop(1)
-    clust_a = np.loadtxt(localmax_file, str,
-                         delimiter="\t", skiprows=1)
-    if not clust_a.size:
-        with open(out_file, "w") as f:
-            f.write("")
-        return out_file
-    clust_a = np.vstack((clust_head, clust_a))
-    index_v = np.atleast_2d(np.array(
-        ["Peak"] + range(1, clust_a.shape[0]))).T
-    clust_a = np.hstack((index_v, clust_a))
+def cluster_table(localmax_file):
+    """Add some info to an FSL cluster file and format it properly."""
+    df = pd.read_table(localmax_file, delimiter="\t")
+    df = df[["Cluster Index", "Value", "x", "y", "z"]]
+    df.columns = ["Cluster", "Value", "x", "y", "z"]
+    df.index.name = "Peak"
 
     # Find out where the peaks most likely are
-    loc_a = np.array(locate_peaks(clust_a[1:, 3:6].astype(int)))
-    peak_a = np.hstack((clust_a, loc_a))
+    coords = ["x", "y", "z"]
+    loc_df = locate_peaks(np.array(df[coords]))
+    df = pd.concat([df, loc_df], axis=1)
+    mni_coords = vox_to_mni(np.array(df[coords])).T
+    for i, ax in enumerate(coords):
+        df[ax] = mni_coords[i]
 
-    # Convert the voxel coordinates to MNI
-    vox_coords = peak_a[1:, 3:6]
-    peak_a[1:, 3:6] = vox_to_mni(vox_coords)
-
-    # Insert the column-defining dash rows
-    len_a = np.array([[len(c) for c in r] for r in peak_a])
-    max_lens = len_a.max(axis=0)
-    hyphen_v = ["".join(["=" for i in range(l)]) for l in max_lens]
-    peak_l = peak_a.tolist()
-    for pos in [0, 2]:
-        peak_l.insert(pos, hyphen_v)
-    peak_l.append(hyphen_v)
-    peak_a = np.array(peak_l)
-
-    # Write the rows out to a text file with padding
-    len_a = np.array([[len(c) for c in r] for r in peak_a])
-    len_diff = max_lens - len_a
-    pad_a = np.array(
-        [["".join([" " for i in range(l)]) for l in row] for row in len_diff])
-    with open(out_file, "w") as f:
-        for i, row in enumerate(peak_a):
-            for j, word in enumerate(row):
-                f.write("%s%s " % (word, pad_a[i, j]))
-            f.write("\n")
-
+    out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
+    df.to_csv(out_file)
     return out_file
 
 
 def locate_peaks(vox_coords):
     """Find most probable region in HarvardOxford Atlas of a vox coord."""
-    from os import environ
-    import os.path as op
-    import numpy as np
-    from nibabel import load
-    from lyman.tools.main import (harvard_oxford_sub_names,
-                              harvard_oxford_ctx_names)
     sub_names = harvard_oxford_sub_names
     ctx_names = harvard_oxford_ctx_names
-    at_dir = op.join(environ["FSLDIR"], "data", "atlases")
-    ctx_data = load(op.join(at_dir, "HarvardOxford",
+    at_dir = op.join(os.environ["FSLDIR"], "data", "atlases")
+    ctx_data = nib.load(op.join(at_dir, "HarvardOxford",
                             "HarvardOxford-cort-prob-2mm.nii.gz")).get_data()
-    sub_data = load(op.join(at_dir, "HarvardOxford",
+    sub_data = nib.load(op.join(at_dir, "HarvardOxford",
                             "HarvardOxford-sub-prob-2mm.nii.gz")).get_data()
 
-    loc_list = [("MaxProb Region", "Prob")]
+    loc_list = []
     for coord in vox_coords:
         coord = tuple(coord)
         ctx_index = np.argmax(ctx_data[coord])
@@ -410,7 +365,7 @@ def locate_peaks(vox_coords):
             continue
         loc_list.append((ctx_names[ctx_index], ctx_prob))
 
-    return loc_list
+    return pd.DataFrame(loc_list, columns=["MaxProb Region", "Prob"])
 
 
 def shorten_name(region_name, atlas):

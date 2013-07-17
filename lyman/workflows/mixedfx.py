@@ -37,7 +37,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                              mask_file=brain_mask),
                   name="flameo")
 
-    maskpng = Node(Function(input_names=["varcope_file", 
+    maskpng = Node(Function(input_names=["varcope_file",
                                          "background_file",
                                          "brain_mask"],
                             output_names=["out_file"],
@@ -78,7 +78,12 @@ def create_volume_mixedfx_workflow(name="volume_group",
 
     peaktable = MapNode(Function(input_names=["localmax_file"],
                                  output_names=["out_file"],
-                                 function=tools.cluster_to_rst),
+                                 imports=[
+                    "import os.path as op",
+                    "import pandas as pd",
+                    "import numpy as np",
+                    "from lyman.tools import locate_peaks, vox_to_mni"],
+                                 function=tools.cluster_table),
                         iterfield=["localmax_file"],
                         name="peaktable")
 
@@ -160,8 +165,9 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("reports", "reports")]),
         (cluster, outputnode,
             [("threshold_file", "thresh_zstat"),
-             ("index_file", "cluster_image"),
-             ("localmax_txt_file", "cluster_peaks")]),
+             ("index_file", "cluster_image")]),
+        (peaktable, outputnode,
+             [("out_file", "cluster_peaks")]),
         (boxplot, outputnode,
             [("out_file", "boxplots")]),
         (maskpng, outputnode,
@@ -229,7 +235,8 @@ def mfx_boxplot(cope_file, localmax_file):
     n_peaks = len(peak_dists)
     fig = plt.figure(figsize=(7, float(n_peaks) / 2 + 0.5))
     ax = fig.add_subplot(111)
-    sns.boxplot(peak_dists, color="PaleGreen", vert=0, widths=0.5, ax=ax)
+    sns.boxplot(np.transpose(peak_dists), color="PaleGreen",
+                vert=0, widths=0.5, ax=ax)
     ax.axvline(0, c="#222222", ls="--")
     labels = range(1, n_peaks + 1)
     labels.reverse()
@@ -237,6 +244,7 @@ def mfx_boxplot(cope_file, localmax_file):
     ax.set_ylabel("Local Maximum")
     ax.set_xlabel("COPE Value")
     ax.set_title("COPE Distributions")
+    plt.tight_layout()
     plt.savefig(out_file)
 
     return out_file
@@ -245,6 +253,7 @@ def mfx_boxplot(cope_file, localmax_file):
 def write_mfx_report(subject_list, l1_contrast, mask_png,
                      zstat_pngs, peak_tables, boxplots, contrasts):
     import time
+    import pandas as pd
     from lyman.tools import write_workflow_report
     from lyman.workflows.reporting import mfx_report_template
 
@@ -272,10 +281,15 @@ def write_mfx_report(subject_list, l1_contrast, mask_png,
              "Local Maxima",
              "^^^^^^^^^^^^",
              "",
+             "",
              ])
-        mfx_report_template = "\n".join([
-             mfx_report_template,
-             open(peak_tables[i - 1]).read()])
+        peak_csv = peak_tables[i - 1]
+        peak_df = pd.read_csv(peak_csv, index_col="Peak").reset_index()
+        peak_str = peak_df.to_string(index=False)
+        peak_lines = ["    " + l for l in peak_str.split("\n")]
+        peak_str = "::\n\n" + "\n".join(peak_lines) + "\n"
+
+        mfx_report_template += peak_str
 
         mfx_report_template = "\n".join([
             mfx_report_template,
