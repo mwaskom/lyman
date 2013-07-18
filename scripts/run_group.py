@@ -91,8 +91,9 @@ def main(arglist):
              ])
 
     # Mixed effects outputs
-    mfx_sink = Node(DataSink(base_directory="%s/group/%s/" % (anal_dir_base,
-                                                              args.regspace),
+    mfx_sink = Node(DataSink(base_directory="%s/%s/%s/" % (anal_dir_base,
+                                                           args.output,
+                                                           args.regspace),
                              substitutions=[("/stats", "/")],
                              parameterization=False),
                     name="mfx_sink")
@@ -122,6 +123,7 @@ def parse_args(arglist):
     parser.add_argument("-regspace", default="mni",
                         choices=wf.spaces,
                         help="common space for registration and fixed effects")
+    parser.add_argument("-output", default="group", help="output directory name")
     return parser.parse_args(arglist)
 
 if __name__ == "__main__":
