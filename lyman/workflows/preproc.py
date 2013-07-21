@@ -5,68 +5,70 @@ about the workflow itself. This module contains the main setup
 function and assorted supporting functions for preprocessing.
 
 """
-import nipype.interfaces.io as io
-import nipype.interfaces.fsl as fsl
-import nipype.interfaces.freesurfer as fs
-import nipype.interfaces.utility as util
-import nipype.algorithms.rapidart as ra
-from nipype.interfaces.utility import IdentityInterface, Rename, Function
-from nipype.pipeline.engine import Node, MapNode, Workflow
+import os
+import numpy as np
+import nibabel as nib
+import pandas as pd
+import matplotlib.pyplot as plt
 
-try:
-    from nipype.workflows.fmri.fsl import create_susan_smooth
-except ImportError:
-    from nipype.workflows.fsl import create_susan_smooth
+import moss
+import seaborn
+
+from nipype import fsl
+from nipype import freesurfer as fs
+from nipype import (Node, MapNode, Workflow,
+                    IdentityInterface, Function, Rename)
+from nipype.workflows.fmri.fsl import create_susan_smooth
 
 
 def create_preprocessing_workflow(name="preproc",
-                                  do_slice_time_cor=True,
+                                  temporal_interp=True,
                                   frames_to_toss=6,
                                   interleaved=True,
                                   slice_order="up",
                                   TR=2,
                                   smooth_fwhm=6,
                                   highpass_sigma=32,
-                                  partial_fov=False):
+                                  partial_brain=False):
     """Return a Nipype workflow for fMRI preprocessing.
 
-
     """
-    preproc = Workflow(name=name)
+    preproc = Workflow(name)
 
     # Define the inputs for the preprocessing workflow
     in_fields = ["timeseries", "subject_id"]
-    if partial_fov:
-        in_fields.append("full_fov_epi")
-    inputnode = Node(IdentityInterface(fields=in_fields),
-                     name="inputnode")
 
-    # Remove early frames to account for T1 stabalization
-    trimmer = MapNode(fsl.ExtractROI(t_min=frames_to_toss),
-                      iterfield=["in_file", "t_size"],
-                      name="trimmer")
+    if partial_brain:
+        in_fields.append("whole_brain_epi")
 
-    # Convert functional images to float representation
-    img2float = MapNode(fsl.ChangeDataType(output_datatype="float"),
-                        iterfield=["in_file"],
-                        name="img2float")
+    inputnode = Node(IdentityInterface(fields=in_fields), "inputnode")
+
+    # Remove equilibrium frames and convert to float
+    prepare = MapNode(Function(["in_file", "frames_to_toss"],
+                               ["out_file"],
+                               prep_timeseries,
+                               ["import os",
+                                "import numpy as np",
+                                "import nibabel as nib"]),
+                      "in_file",
+                      "prep_timeseries")
+    prepare.inputs.frames_to_toss = frames_to_toss
+
+    # Realign each timeseries to the middle volume of that run
+    realign = create_realignment_workflow()
 
     # Correct for slice-time acquisition differences
-    # We handle the logic of slice timing and realignment order
-    # below in the connections
-    if do_slice_time_cor:
+    if temporal_interp:
         slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
-                            iterfield=["in_file"],
-                            name="slicetime")
+                            "in_file", "slicetime")
+
         if slice_order == "down":
             slicetime.inputs.index_dir = True
         elif slice_order != "up":
             raise ValueError("slice_order must be 'up' or 'down'")
+
         if interleaved:
             slicetime.inputs.interleaved = True
-
-    # Realign each timeseries to the middle volume of that run
-    realign = create_realignment_workflow()
 
     # Run a conservative skull strip and get a brain mask
     skullstrip = create_skullstrip_workflow()
@@ -127,17 +129,12 @@ def create_preprocessing_workflow(name="preproc",
                            name="rename_rough")
 
     preproc.connect([
-        (inputnode, trimmer,
-            [("timeseries", "in_file"),
-            (("timeseries", get_trimmed_length, frames_to_toss), "t_size")]),
-        (trimmer, img2float,
-            [("roi_file", "in_file")]),
-        (img2float, realign,
+        (inputnode, prepare,
+            [("timeseries", "in_file")]),
+        (prepare, realign,
             [("out_file", "inputs.timeseries")]),
         (realign, art,
             [("outputs.realign_parameters", "inputs.realignment_parameters")]),
-        (img2float, art,
-            [("out_file", "inputs.raw_timeseries")]),
         (skullstrip, art,
             [("outputs.timeseries", "inputs.realigned_timeseries"),
              ("outputs.mask_file", "inputs.mask_file")]),
@@ -167,7 +164,7 @@ def create_preprocessing_workflow(name="preproc",
         ])
 
     # Possibly hook-up slice time correction
-    if do_slice_time_cor:
+    if temporal_interp:
         preproc.connect([
             (realign,   slicetime,
                 [("outputs.timeseries", "in_file")]),
@@ -259,102 +256,74 @@ def create_preprocessing_workflow(name="preproc",
 
 
 def create_realignment_workflow(name="realignment"):
+    """Realign the timeseries to its middle volume and summarize."""
 
     # Define the workflow inputs
-    inputnode = Node(util.IdentityInterface(fields=["timeseries"]),
-                     name="inputs")
+    inputnode = Node(IdentityInterface(["timeseries"], "inputs"))
 
     # Get the middle volume of each run for motion correction
-    extractref = MapNode(fsl.ExtractROI(t_size=1),
-                         iterfield=["in_file", "t_min"],
-                         name="extractref")
-
-    # Slice the example func for reporting
-    exampleslice = MapNode(fsl.Slicer(image_width=800,
-                                      all_axial=True,
-                                      show_orientation=False,
-                                      label_slices=False),
-                           iterfield=["in_file"],
-                           name="exampleslice")
+    extractref = MapNode(fsl.ExtractROI(out_file="example_func.nii.gz",
+                                        t_size=1),
+                         ["in_file", "t_min"],
+                         "extractref")
 
     # Motion correct to middle volume of each run
-    mcflirt = MapNode(fsl.MCFLIRT(save_plots=True,
-                                  save_rms=True,
+    mcflirt = MapNode(fsl.MCFLIRT(cost="normcorr",
+                                  interpolation="spline",
                                   save_mats=True,
-                                  args="-spline_final"),
-                       name="mcflirt",
-                       iterfield=["in_file", "ref_file"])
+                                  save_rms=True,
+                                  save_plots=True),
+                       ["in_file", "ref_file"],
+                       "mcflirt")
 
     # Generate a report on the motion correction
-    report_inputs = ["realign_params", "rms_files"]
-    report_outputs = ["motion_file", "plot_file"]
-    mcreport = MapNode(util.Function(input_names=report_inputs,
-                                     output_names=report_outputs,
-                                     function=write_realign_report),
-                       iterfield=report_inputs,
-                       name="mcreport")
-
-    # Rename some things
-    exfuncname = MapNode(util.Rename(format_string="example_func",
-                                     keep_ext=True),
-                         iterfield=["in_file"],
-                         name="exfuncname")
-
-    exslicename = MapNode(util.Rename(format_string="example_func",
-                                      keep_ext=True),
-                          iterfield=["in_file"],
-                          name="exslicename")
-
-    parname = MapNode(util.Rename(format_string="realignment_parameters.par"),
-                      iterfield=["in_file"],
-                      name="parname")
-
-    # Send out all the report data as one list
-    mergereport = Node(util.Merge(numinputs=3, axis="hstack"),
-                       name="mergereport")
+    report_inputs = ["target_file", "realign_params", "displace_params"]
+    report_outputs = ["realign_report"]
+    mcreport = MapNode(Function(report_inputs,
+                                report_outputs,
+                                realign_report,
+                                ["import os",
+                                 "import moss",
+                                 "import numpy as np",
+                                 "import pandas as pd",
+                                 "import nibabel as nib",
+                                 "import matplotlib.pyplot as plt",
+                                 "import seaborn"],
+                                ),
+                       report_inputs,
+                       "mcreport")
 
     # Define the outputs
-    outputnode = Node(util.IdentityInterface(fields=["timeseries",
-                                                     "example_func",
-                                                     "realign_parameters",
-                                                     "realign_report"]),
-                      name="outputs")
+    outputnode = Node(IdentityInterface(["timeseries",
+                                         "example_func",
+                                         "realign_parameters",
+                                         "realign_report"]),
+                      "outputs")
 
     # Define and connect the sub workflow
-    realignment = Workflow(name=name)
+    realignment = Workflow(name)
 
     realignment.connect([
         (inputnode, extractref,
             [("timeseries", "in_file"),
              (("timeseries", get_middle_volume), "t_min")]),
-        (extractref, exampleslice,
-            [("roi_file", "in_file")]),
         (inputnode, mcflirt,
             [("timeseries", "in_file")]),
         (extractref, mcflirt,
             [("roi_file", "ref_file")]),
+        (extractref, mcreport,
+            [("roi_file", "target_file")]),
         (mcflirt, mcreport,
             [("par_file", "realign_params"),
-             ("rms_files", "rms_files")]),
-        (exampleslice, exslicename,
-            [("out_file", "in_file")]),
-        (mcreport, mergereport,
-            [("motion_file", "in1"),
-             ("plot_file", "in2")]),
-        (exslicename, mergereport,
-            [("out_file", "in3")]),
-        (mcflirt, parname,
-            [("par_file", "in_file")]),
-        (parname, outputnode,
-            [("out_file", "realign_parameters")]),
-        (extractref, exfuncname,
-            [("roi_file", "in_file")]),
+             ("rms_files", "displace_params")]),
         (mcflirt, outputnode,
             [("out_file", "timeseries")]),
-        (exfuncname, outputnode,
-            [("out_file", "example_func")]),
-        (mergereport, outputnode,
-            [("out", "realign_report")]),
+        (extractref, outputnode,
+            [("roi_file", "example_func")]),
+        (mcflirt, outputnode,
+            [("par_file", "realign_parameters")]),
+        (mcreport, outputnode,
+            [("realign_report", "realign_report")]),
         ])
 
     return realignment
@@ -617,14 +586,21 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2",
 # Main interface functions
 # ------------------------
 
-def get_trimmed_length(in_files, frames_to_toss):
-    from nibabel import load
-    lengths = []
-    if not isinstance(in_files, list):
-        in_files = [in_files]
-    for f in in_files:
-        lengths.append(load(f).shape[-1] - frames_to_toss)
-    return lengths
+
+def prep_timeseries(in_file, frames_to_toss):
+    """Trim equilibrium TRs and change datatype to float."""
+    img = nib.load(in_file)
+    data = img.get_data()
+    aff = img.get_affine()
+    hdr = img.get_header()
+
+    data = data[..., frames_to_toss:]
+    hdr.set_data_dtype(np.float64)
+
+    new_img = nib.Nifti1Image(data, aff, hdr)
+    out_file = os.path.abspath("timeseries.nii.gz")
+    new_img.to_filename(out_file)
+    return out_file
 
 
 def max_motion_func(rms_files):
@@ -665,61 +641,63 @@ def maybe_mean(in_file):
     return out_file
 
 
-def write_realign_report(realign_params, rms_files):
-    from os.path import abspath
-    import numpy as np
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    sns.set()
+def realign_report(target_file, realign_params, displace_params):
+    """Create files summarizing the motion correction."""
 
-    # Set some visual defaults on the fly
-    mpl.rcParams.update({"font.size": 8, "legend.labelspacing": .2})
+    # Create a DataFrame with the 6 motion parameters
+    rot = ["rot_" + dim for dim in ["x", "y", "z"]]
+    trans = ["trans_" + dim for dim in ["x", "y", "z"]]
+    df = pd.DataFrame(np.loadtxt(realign_params),
+                      columns=rot + trans)
 
-    # Open up the RMS files and get the max motion
-    displace = map(np.loadtxt, rms_files)
-    motion = map(max, displace)
-    motion.append(displace[1].sum())
-    displace[1] = np.concatenate(([0], displace[1]))
-    motion_file = abspath("max_motion.txt")
-    with open(motion_file, "w") as f:
-        f.write(
-            "#Absolute:\n%.4f\n#Relative\n%.4f\nTotal\n%.4f" % tuple(motion))
+    abs, rel = displace_params
+    df["displace_abs"] = np.loadtxt(abs)
+    df["displace_rel"] = 0
+    df["displace_rel"][1:] = np.loadtxt(rel)
+    motion_file = os.path.abspath("realignment_params.csv")
+    df.to_csv(motion_file, index=False)
 
-    # Write the motion plot
-    fig = plt.figure(figsize=(8, 9))
-    ax = fig.add_subplot(311)
-    ax.plot(np.transpose(displace))
-    ax.set_xlim((0, len(displace[0]) - 1))
-    ax.legend(['abs', 'rel'], ncol=2)
-    ax.set_title('Displacement (mm)')
+    # Write the motion plots
+    seaborn.set()
+    seaborn.set_color_palette("husl", 3)
+    f, (ax_rot, ax_trans) = plt.subplots(2, 1,
+                                         figsize=(8, 3.75),
+                                         sharex=True)
+    ax_rot.plot(df[rot] * 100)
+    ax_rot.axhline(0, c="#444444", ls="--", zorder=1)
+    ax_trans.plot(df[trans])
+    ax_trans.axhline(0, c="#444444", ls="--", zorder=1)
+    ax_rot.set_xlim(0, len(df) - 1)
 
-    # Open up the realignment parameters
-    params = np.loadtxt(realign_params)
-    xyz = ['x', 'y', 'z']
+    ax_rot.set_ylabel(r"Rotations (rad $\times$ 100)")
+    ax_trans.set_ylabel("Translations (mm)")
+    plt.tight_layout()
 
-    # Write the rotation plot
-    ax = fig.add_subplot(312)
-    ax.plot(params[:, :3])
-    ax.plot(ax.get_xlim(), (0, 0), "k--")
-    ax.set_xlim((0, params.shape[0] - 1))
-    ax.legend(xyz, ncol=3)
-    ax.set_title('Rotations (rad)')
+    plot_file = os.path.abspath("realignment_plots.png")
+    f.savefig(plot_file, dpi=100, bbox_inches="tight")
+    plt.close(f)
 
-    # Write the translation plot
-    ax = fig.add_subplot(313)
-    ax.plot(params[:, 3:])
-    ax.set_xlim((0, params.shape[0] - 1))
-    ax.plot(ax.get_xlim(), (0, 0), "k--")
-    ax.legend(xyz, ncol=3)
-    ax.set_title('Translations (mm)')
+    # Write the example func plot
+    data = nib.load(target_file).get_data()
+    n_slices = data.shape[-1]
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2
+    figsize = (10, 1.375 * n_row)
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize)
+    f.set_facecolor("k")
 
-    plot_file = abspath("realignment_plots.png")
-    plt.savefig(plot_file)
+    vmin, vmax = 0, moss.percentiles(data, 99)
+    for i, ax in enumerate(axes.ravel(), start):
+        ax.imshow(data[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    f.subplots_adjust(hspace=1e-5, wspace=1e-5)
+    target_file = os.path.abspath("example_func.png")
+    f.savefig(target_file, dpi=100, bbox_inches="tight",
+              facecolor="k", edgecolor="k")
+    plt.close(f)
 
-    plt.close()
-
-    return motion_file, plot_file
+    return motion_file, plot_file, target_file
 
 
 def write_art_plot(intensity_file, outlier_file):
