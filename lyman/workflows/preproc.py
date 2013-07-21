@@ -7,6 +7,7 @@ function and assorted supporting functions for preprocessing.
 """
 import os
 import numpy as np
+import scipy as sp
 import nibabel as nib
 import pandas as pd
 import matplotlib as mpl
@@ -28,6 +29,8 @@ def create_preprocessing_workflow(name="preproc",
                                   interleaved=True,
                                   slice_order="up",
                                   TR=2,
+                                  intensity_threshold=3,
+                                  motion_threshold=1,
                                   smooth_fwhm=6,
                                   highpass_sigma=32,
                                   partial_brain=False):
@@ -42,7 +45,7 @@ def create_preprocessing_workflow(name="preproc",
     if partial_brain:
         in_fields.append("whole_brain_epi")
 
-    inputnode = Node(IdentityInterface(fields=in_fields), "inputnode")
+    inputnode = Node(IdentityInterface(in_fields), "inputnode")
 
     # Remove equilibrium frames and convert to float
     prepare = MapNode(Function(["in_file", "frames_to_toss"],
@@ -55,30 +58,29 @@ def create_preprocessing_workflow(name="preproc",
                       "prep_timeseries")
     prepare.inputs.frames_to_toss = frames_to_toss
 
-    # Realign each timeseries to the middle volume of that run
+    # Motion and slice time correct
     realign = create_realignment_workflow()
-
-    # Realign each timeseries to the middle volume of that run
-    realign = create_realignment_workflow()
-
-    # Correct for slice-time acquisition differences
-    if temporal_interp:
-        slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
-                            "in_file", "slicetime")
-
-        if slice_order == "down":
-            slicetime.inputs.index_dir = True
-        elif slice_order != "up":
-            raise ValueError("slice_order must be 'up' or 'down'")
-
-        if interleaved:
-            slicetime.inputs.interleaved = True
 
     # Run a conservative skull strip and get a brain mask
     skullstrip = create_skullstrip_workflow()
 
     # Automatically detect motion and intensity outliers
-    art = create_art_workflow()
+    artifacts = MapNode(Function(["timeseries",
+                                  "mask_file",
+                                  "motion_file"
+                                  "intensity_thresh",
+                                  "motion_thresh"],
+                                 ["artifact_report"],
+                                 detect_artifacts,
+                                 ["import os",
+                                  "import pandas as pd",
+                                  "import nibabel as nib",
+                                  "import matplotlib.pyplot as plt",
+                                  "import seaborn"]),
+                        ["timeseries", "mask_file", "motion_file"],
+                        "artifacts")
+    artifacts.inputs.intensity_thresh = intensity_threshold
+    artifacts.inputs.motion_thresh = motion_threshold
 
     # Estimate a registration from funtional to anatomical space
     func2anat = create_bbregister_workflow()
@@ -137,6 +139,8 @@ def create_preprocessing_workflow(name="preproc",
             [("timeseries", "in_file")]),
         (prepare, realign,
             [("out_file", "inputs.timeseries")]),
+        (realign, skullstrip,
+            [("outputs.timeseries", "inputs.timeseries")]),
         (realign, art,
             [("outputs.realign_parameters", "inputs.realignment_parameters")]),
         (skullstrip, art,
@@ -166,20 +170,6 @@ def create_preprocessing_workflow(name="preproc",
         (hpfilt_rough, rename_rough,
             [("out_file", "in_file")]),
         ])
-
-    # Possibly hook-up slice time correction
-    if temporal_interp:
-        preproc.connect([
-            (realign,   slicetime,
-                [("outputs.timeseries", "in_file")]),
-            (slicetime, skullstrip,
-                [("slice_time_corrected_file", "inputs.timeseries")]),
-            ])
-    else:
-        preproc.connect([
-            (realign,     skullstrip,
-                [("outputs.timeseries", "inputs.timeseries")]),
-            ])
 
     report = MapNode(util.Function(input_names=["subject_id",
                                                 "input_timeseries",
@@ -259,8 +249,9 @@ def create_preprocessing_workflow(name="preproc",
     return preproc, inputnode, outputnode
 
 
-def create_realignment_workflow(name="realignment"):
-    """Realign the timeseries to its middle volume and summarize."""
+def create_realignment_workflow(name="realignment", temporal_interp=True,
+                                TR=2, slice_order="up", interleaved=True):
+    """Motion and slice-time correct the timeseries and summarize."""
 
     # Define the workflow inputs
     inputnode = Node(IdentityInterface(["timeseries"], "inputs"))
@@ -280,9 +271,23 @@ def create_realignment_workflow(name="realignment"):
                        ["in_file", "ref_file"],
                        "mcflirt")
 
+    # Optionally emoporally interpolate to correct for slice time differences
+    if temporal_interp:
+        slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
+                            "in_file",
+                            "slicetime")
+
+        if slice_order == "down":
+            slicetime.inputs.index_dir = True
+        elif slice_order != "up":
+            raise ValueError("slice_order must be 'up' or 'down'")
+
+        if interleaved:
+            slicetime.inputs.interleaved = True
+
     # Generate a report on the motion correction
     report_inputs = ["target_file", "realign_params", "displace_params"]
-    report_outputs = ["realign_report"]
+    report_outputs = ["realign_report", "motion_file"]
     mcreport = MapNode(Function(report_inputs,
                                 report_outputs,
                                 realign_report,
@@ -300,8 +305,9 @@ def create_realignment_workflow(name="realignment"):
     # Define the outputs
     outputnode = Node(IdentityInterface(["timeseries",
                                          "example_func",
-                                         "realign_parameters",
-                                         "realign_report"]),
+                                         "realign_report"
+                                         "motion_file"]),
+
                       "outputs")
 
     # Define and connect the sub workflow
@@ -320,15 +326,25 @@ def create_realignment_workflow(name="realignment"):
         (mcflirt, mcreport,
             [("par_file", "realign_params"),
              ("rms_files", "displace_params")]),
-        (mcflirt, outputnode,
-            [("out_file", "timeseries")]),
         (extractref, outputnode,
             [("roi_file", "example_func")]),
-        (mcflirt, outputnode,
-            [("par_file", "realign_parameters")]),
         (mcreport, outputnode,
-            [("realign_report", "realign_report")]),
+            [("realign_report", "realign_report"),
+             ("motion_file", "motion_file")]),
         ])
+
+    if temporal_interp:
+        realignment.connect([
+            (mcflirt, slicetime,
+                [("out_file", "in_filr")]),
+            (slicetime, outputnode,
+                [("slice_time_corrected_file", "timeseries")])
+            ])
+    else:
+        realignment.connect([
+            (realign, outputnode,
+                [("out_file", "timeseries")])
+            ])
 
     return realignment
 
@@ -413,66 +429,6 @@ def create_skullstrip_workflow(name="skullstrip"):
         ])
 
     return skullstrip
-
-
-def create_art_workflow(name="art"):
-
-    # Define the workflow inputs
-    inputnode = Node(util.IdentityInterface(fields=["raw_timeseries",
-                                                    "realigned_timeseries",
-                                                    "mask_file",
-                                                    "realignment_parameters"]),
-                     name="inputs")
-
-    # Use RapidART to detect motion/intensity outliers
-    art = MapNode(ra.ArtifactDetect(use_differences=[True, False],
-                                    use_norm=True,
-                                    zintensity_threshold=3,
-                                    norm_threshold=1,
-                                    parameter_source="FSL",
-                                    mask_type="file"),
-                  iterfield=["realignment_parameters",
-                             "realigned_files",
-                             "mask_file"],
-                  name="art")
-
-    # Plot a timeseries of the global mean intensity
-    art_plot_inputs = ["intensity_file", "outlier_file"]
-    plotmean = MapNode(util.Function(input_names=art_plot_inputs,
-                                     output_names="intensity_plot",
-                                     function=write_art_plot),
-                       iterfield=art_plot_inputs,
-                       name="plotmean")
-
-    outliername = MapNode(util.Rename(format_string="outlier_volumes.txt"),
-                          iterfield=["in_file"],
-                          name="outliername")
-
-    # Define the workflow outputs
-    out_fields = ["outlier_volumes", "intensity_plot"]
-
-    outputnode = Node(util.IdentityInterface(fields=out_fields),
-                      name="outputs")
-
-    # Define and connect the workflow
-    artifact = Workflow(name=name)
-    artifact.connect([
-        (inputnode, art,
-            [("realignment_parameters", "realignment_parameters"),
-             ("realigned_timeseries", "realigned_files"),
-             ("mask_file", "mask_file")]),
-        (art, plotmean,
-            [("intensity_files", "intensity_file"),
-             ("outlier_files", "outlier_file")]),
-        (art, outliername,
-            [("outlier_files", "in_file")]),
-        (outliername, outputnode,
-            [("out_file", "outlier_volumes")]),
-        (plotmean, outputnode,
-            [("intensity_plot", "intensity_plot")]),
-        ])
-
-    return artifact
 
 
 def create_bbregister_workflow(name="bbregister", contrast_type="t2",
@@ -661,7 +617,7 @@ def realign_report(target_file, realign_params, displace_params):
               facecolor="k", edgecolor="k")
     plt.close(f)
 
-    return motion_file, plot_file, target_file
+    return (motion_file, plot_file, target_file), motion_file
 
 
 def refine_mask(timeseries, mask_file):
@@ -695,7 +651,7 @@ def refine_mask(timeseries, mask_file):
     new_mask = nib.Nifti1Image(mask,
                                mask_img.get_affine(),
                                mask_img.get_header())
-    new_img.to_filename(mask_file)
+    new_mask.to_filename(mask_file)
 
     # Make a new mean functional image and save it
     mean_file = os.path.abspath("mean_func.nii.gz")
@@ -704,7 +660,7 @@ def refine_mask(timeseries, mask_file):
                                ts_img.get_header())
     new_mean.to_filename(mean_file)
 
-    return timeseries, mask_file, mean_file 
+    return timeseries, mask_file, mean_file
 
 
 def write_mask_report(mask_file, orig_file, mean_file):
@@ -756,55 +712,54 @@ def write_mask_report(mask_file, orig_file, mean_file):
     return mask_png, mean_png
 
 
-def write_art_plot(intensity_file, outlier_file):
-    from os.path import abspath
-    import numpy as np
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    sns.set()
+def detect_artifacts(timeseries, mask_file, motion_file,
+                     intensity_thresh, motion_thresh):
+    """Find frames with exessive signal intensity or motion."""
+    seaborn.set()
 
-    # Set some visual defaults on the fly
-    mpl.rcParams.update({'font.size': 8, 'legend.labelspacing': .2})
+    # Load the timeseries and detect outliers
+    ts = nib.load(timeseries).get_data()
+    mask = nib.load(mask_file).get_data().astype(bool)
+    ts = ts[mask].mean(axis=0)
+    ts = (ts - ts.mean()) / ts.std()
+    art_intensity = np.abs(ts) > intensity_thresh
 
-    # Build the figure
-    fig = plt.figure(figsize=(9, 2.5))
-    ax = fig.add_subplot(111)
+    # Load the motion file and detect outliers
+    df = pd.read_csv(motion_file)
+    rel_motion = np.array(df["displace_rel"])
+    art_motion = rel_motion > motion_thresh
 
-    # Plot the global timecourse
-    global_intensity = np.loadtxt(intensity_file)
-    ax.plot(global_intensity)
-    ax.set_xlim((0, len(global_intensity)))
+    # Plot the timecourses with outliers
+    blue, green, red, _, _ = seaborn.color_palette("deep")
+    f, (ax_int, ax_mot) = plt.subplots(2, 1, sharex=True,
+                                       figsize=(8, 3.75))
+    ax_int.axhline(-intensity_thresh, c="gray", ls="--")
+    ax_int.axhline(intensity_thresh, c="gray", ls="--")
+    ax_int.plot(ts, c=blue)
+    for tr in np.flatnonzero(art_intensity):
+        ax_int.axvline(tr, color=red, lw=2.5, alpha=.8)
+    ax_int.set_xlim(0, len(df))
 
-    # Plot the mean intensity value
-    mean = global_intensity.mean()
-    ax.plot(ax.get_xlim(), (mean, mean), "k--")
+    ax_mot.axhline(motion_thresh, c="gray", ls="--")
+    ax_mot.plot(rel_motion, c=green)
+    ymin, ymax = ax_mot.get_ylim()
+    for tr in np.flatnonzero(art_motion):
+        ax_mot.axvline(tr, color=red, lw=2.5, alpha=.8)
 
-    # Find the high and low intensity outlier thresh and plot
-    # Could add thresh as parameter -- assume 3 for now
-    std = global_intensity.std()
-    high = mean + (3 * std)
-    low = mean - (3 * std)
-    ax.plot(ax.get_xlim(), [high, high], "k--")
-    ax.plot(ax.get_xlim(), [low, low], "k--")
+    ax_int.set_ylabel("Normalized Intensity")
+    ax_mot.set_ylabel("Relative Motion (mm)")
 
-    ax.set_ylim((min(global_intensity.min(), (low - 1)),
-                 max(global_intensity.max(), (high + 1))))
+    plt.tight_layout()
+    plot_file = os.path.abspath("artifact_detection.png")
+    f.savefig(plot_file, dpi=100, bbox_inches="tight")
 
-    # Plot the outliers
-    try:
-        outliers = np.loadtxt(outlier_file, ndmin=1)
-        for out in outliers:
-            ax.axvline(out, color=sns.color_palette()[2])
-    except IOError:
-        pass
+    # Save the artifacts file as csv
+    artifacts = pd.DataFrame(dict(intensity=art_intensity,
+                                  motion=art_motion)).astype(int)
+    art_file = os.path.abspath("artifacts.csv")
+    artifacts.to_csv(art_file, index=False)
 
-    # Title and write the plot
-    ax.set_title("Global mean timecourse and ART outliers")
-    intensity_plot = abspath("intensity_plot.png")
-    plt.savefig(intensity_plot)
-    plt.close()
-    return intensity_plot
+    return plot_file, art_file
 
 
 def write_coreg_plot(subject_id, in_file):
