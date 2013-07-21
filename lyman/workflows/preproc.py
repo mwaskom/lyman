@@ -9,6 +9,7 @@ import os
 import numpy as np
 import nibabel as nib
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 import moss
@@ -53,6 +54,9 @@ def create_preprocessing_workflow(name="preproc",
                       "in_file",
                       "prep_timeseries")
     prepare.inputs.frames_to_toss = frames_to_toss
+
+    # Realign each timeseries to the middle volume of that run
+    realign = create_realignment_workflow()
 
     # Realign each timeseries to the middle volume of that run
     realign = create_realignment_workflow()
@@ -139,7 +143,7 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.timeseries", "inputs.realigned_timeseries"),
              ("outputs.mask_file", "inputs.mask_file")]),
         (skullstrip, func2anat,
-            [("outputs.mean_func", "inputs.source_file")]),
+            [("outputs.mean_file", "inputs.source_file")]),
         (inputnode, func2anat,
             [("subject_id", "inputs.subject_id")]),
         (skullstrip, susan,
@@ -180,7 +184,7 @@ def create_preprocessing_workflow(name="preproc",
     report = MapNode(util.Function(input_names=["subject_id",
                                                 "input_timeseries",
                                                 "realign_report",
-                                                "mean_func_slices",
+                                                "mask_report",
                                                 "intensity_plot",
                                                 "outlier_volumes",
                                                 "coreg_report"],
@@ -188,7 +192,7 @@ def create_preprocessing_workflow(name="preproc",
                                    function=write_preproc_report),
                      iterfield=["input_timeseries",
                                 "realign_report",
-                                "mean_func_slices",
+                                "mask_report",
                                 "intensity_plot",
                                 "outlier_volumes",
                                 "coreg_report"],
@@ -201,7 +205,7 @@ def create_preprocessing_workflow(name="preproc",
         (realign, report,
             [("outputs.realign_report", "realign_report")]),
         (skullstrip, report,
-            [("outputs.report_png", "mean_func_slices")]),
+            [("outputs.mask_report", "mask_report")]),
         (art, report,
             [("outputs.intensity_plot", "intensity_plot"),
              ("outputs.outlier_volumes", "outlier_volumes")]),
@@ -213,7 +217,7 @@ def create_preprocessing_workflow(name="preproc",
     output_fields = ["smoothed_timeseries",
                      "unsmoothed_timeseries",
                      "example_func",
-                     "mean_func",
+                     "mean_file",
                      "functional_mask",
                      "realign_parameters",
                      "mean_func_slices",
@@ -330,80 +334,51 @@ def create_realignment_workflow(name="realignment"):
 
 
 def create_skullstrip_workflow(name="skullstrip"):
+    """Remove non-brain voxels from the timeseries."""
 
     # Define the workflow inputs
-    inputnode = Node(util.IdentityInterface(fields=["timeseries"]),
-                     name="inputs")
+    inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
     # Mean the timeseries across the fourth dimension
-    meanfunc1 = MapNode(fsl.MeanImage(),
-                        iterfield=["in_file"],
-                        name="meanfunc1")
+    origmean = MapNode(fsl.MeanImage(), "in_file", name="origmean")
 
     # Skullstrip the mean functional image
-    stripmean = MapNode(fsl.BET(mask=True,
-                                no_output=True,
-                                frac=0.3),
-                        iterfield=["in_file"],
-                        name="stripmean")
+    findmask = MapNode(fsl.BET(mask=True,
+                               no_output=True,
+                               frac=0.3),
+                        "in_file",
+                        "findmask")
 
     # Use the mask from skullstripping to strip each timeseries
-    maskfunc1 = MapNode(fsl.ApplyMask(),
-                        iterfield=["in_file", "mask_file"],
-                        name="maskfunc1")
+    maskfunc = MapNode(fsl.ApplyMask(),
+                       ["in_file", "mask_file"],
+                       name="maskfunc")
 
-    # Determine the 2nd and 98th centile intensities of each run
-    getthresh = MapNode(fsl.ImageStats(op_string="-p 2 -p 98"),
-                        iterfield=["in_file"],
-                        name="getthreshold")
+    # Refine the brain mask
+    refinemask = MapNode(Function(["in_file", "mask_file"],
+                                  ["timeseries", "mask_file", "mean_file"],
+                                  refine_brain_mask,
+                                  ["import os",
+                                   "import moss",
+                                   "import scipy as sp",
+                                   "import nibabel as nib"]),
+                         ["in_file", "mask_file"],
+                         "refinemask")
 
-    # Threshold functional data at 10% of the 98th percentile
-    threshold = MapNode(fsl.ImageMaths(out_data_type="char",
-                                       suffix="_thresh"),
-                        iterfield=["in_file"],
-                        name="threshold")
-
-    # Dilate the mask
-    dilatemask = MapNode(fsl.DilateImage(operation="max"),
-                         iterfield=["in_file"],
-                         name="dilatemask")
-
-    # Mask the runs again with this new mask
-    maskfunc2 = MapNode(fsl.ApplyMask(),
-                        iterfield=["in_file", "mask_file"],
-                        name="maskfunc2")
-
-    # Get a new mean image from each functional run
-    meanfunc2 = MapNode(fsl.MeanImage(),
-                        iterfield=["in_file"],
-                        name="meanfunc2")
-
-    # Slice the mean func for reporting
-    meanslice = MapNode(fsl.Slicer(image_width=800,
-                                   all_axial=True,
-                                   show_orientation=False,
-                                   label_slices=False),
-                        iterfield=["in_file", "image_edges"],
-                        name="meanslice")
-
-    # Rename the outputs
-    meanname = MapNode(util.Rename(format_string="mean_func",
-                                   keep_ext=True),
-                       iterfield=["in_file"],
-                       name="meanname")
-
-    maskname = MapNode(util.Rename(format_string="functional_mask",
-                                   keep_ext=True),
-                       iterfield=["in_file"],
-                       name="maskname")
-
-    pngname = MapNode(util.Rename(format_string="mean_func.png"),
-                      iterfield=["in_file"],
-                      name="pngname")
+    # Generate images summarizing the skullstrip and resulting data
+    reportmask = MapNode(Function(["mask_file", "orig_file", "mean_file"],
+                                  ["mask_report"],
+                                  write_mask_report,
+                                  ["import os",
+                                   "import numpy as np",
+                                   "import matplotlib as mpl",
+                                   "import matplotlib.pyplot as plt"]),
+                         ["mask_file", "mean_file"],
+                         "reportmask")
 
     # Define the workflow outputs
     outputnode = Node(util.IdentityInterface(fields=["timeseries",
-                                                     "mean_func",
+                                                     "mean_file",
                                                      "mask_file",
                                                      "report_png"]),
                       name="outputs")
@@ -412,27 +387,19 @@ def create_skullstrip_workflow(name="skullstrip"):
     skullstrip = Workflow(name=name)
 
     skullstrip.connect([
-        (inputnode,  meanfunc1,     [("timeseries", "in_file")]),
-        (meanfunc1,  stripmean,     [("out_file", "in_file")]),
-        (inputnode,  maskfunc1,     [("timeseries", "in_file")]),
-        (stripmean,  maskfunc1,     [("mask_file", "mask_file")]),
-        (maskfunc1,  getthresh,     [("out_file", "in_file")]),
-        (getthresh,  threshold,
-            [(("out_stat", get_thresh_op), "op_string")]),
-        (maskfunc1,  threshold,     [("out_file", "in_file")]),
-        (threshold,  dilatemask,    [("out_file", "in_file")]),
-        (inputnode,  maskfunc2,     [("timeseries", "in_file")]),
-        (dilatemask, maskfunc2,     [("out_file", "mask_file")]),
-        (maskfunc2,  meanfunc2,     [("out_file", "in_file")]),
-        (meanfunc2,  meanslice,     [("out_file", "in_file")]),
-        (dilatemask, meanslice,     [("out_file", "image_edges")]),
-        (meanslice,  pngname,       [("out_file", "in_file")]),
-        (meanfunc2,  meanname,      [("out_file", "in_file")]),
-        (dilatemask, maskname,      [("out_file", "in_file")]),
-        (maskfunc2,  outputnode,    [("out_file", "timeseries")]),
-        (pngname,    outputnode,    [("out_file", "report_png")]),
-        (maskname,   outputnode,    [("out_file", "mask_file")]),
-        (meanname,   outputnode,    [("out_file", "mean_func")]),
+        (inputnode,  origmean,      [("timeseries", "in_file")]),
+        (origmean,   findmask,      [("out_file", "in_file")]),
+        (inputnode,  maskfunc,      [("timeseries", "in_file")]),
+        (findmask,   maskfunc,      [("mask_file", "mask_file")]),
+        (maskfunc,   refinemask,    [("out_file", "timeseries")]),
+        (findmask,   refinemask,    [("mask_file", "mask_file")]),
+        (origmean,   reportmask,    [("out_file", "orig_file")]),
+        (refinemask, reportmask,    [("mask_file", "mask_file"),
+                                     ("mean_file", "mean_file")]),
+        (refinemask, outputnode,    [("timeseries", "timeseries"),
+                                     ("mask_file", "mask_file"),
+                                     ("mean_file", "mean_file")]),
+        (reportmask, outputnode,    [("mask_report", "report")]),
         ])
 
     return skullstrip
@@ -603,19 +570,6 @@ def prep_timeseries(in_file, frames_to_toss):
     return out_file
 
 
-def max_motion_func(rms_files):
-    """Determine the maximum absolute and relative motion values."""
-    from os import getcwd
-    from os.path import join
-    from numpy import loadtxt, max
-    motion = map(loadtxt, rms_files)
-    maxima = map(max, motion)
-    out_file = join(getcwd(), "max_motion.txt")
-    with open(out_file, "w") as f:
-        f.write("#Absolute:\n%.4f\n#Relative\n%.4f" % tuple(maxima))
-    return out_file
-
-
 def maybe_mean(in_file):
     """Mean over time if image is 4D otherwise pass it right back out."""
     from os.path import getcwd
@@ -698,6 +652,98 @@ def realign_report(target_file, realign_params, displace_params):
     plt.close(f)
 
     return motion_file, plot_file, target_file
+
+
+def refine_mask(timeseries, mask_file):
+    """Improve brain mask by thresholding and dilating masked timeseries."""
+    ts_img = nib.load(timeseries)
+    ts_data = ts_img.get_data()
+
+    mask_img = nib.load(mask_file)
+
+    # Find a robust 10% threshold and apply it to the timeseries
+    rmin, rmax = moss.percentiles(ts_data, [2, 98])
+    thresh = rmin + 0.1 * (rmax + rmin)
+    ts_data[ts_data < thresh] = 0
+    ts_min = ts_data.min(axis=-1)
+    mask = ts_min > 0
+
+    # Dilate the resulting mask by one voxel
+    dilator = sp.ndimage.generate_binary_structure(3, 3)
+    mask = sp.ndimage.binary_dilation(mask, dilator)
+
+    # Mask the timeseries and save it
+    ts_data[:] = ts_data[mask]
+    timeseries = os.path.abspath("timeseries_masked.nii.gz")
+    new_ts = nib.Nifti1Image(ts_data,
+                             ts_img.get_affine(),
+                             ts_img.get_header())
+    new_ts.to_filename(timeseries)
+
+    # Save the mask image
+    mask_file = os.path.abspath("functional_mask.nii.gz")
+    new_mask = nib.Nifti1Image(mask,
+                               mask_img.get_affine(),
+                               mask_img.get_header())
+    new_img.to_filename(mask_file)
+
+    # Make a new mean functional image and save it
+    mean_file = os.path.abspath("mean_func.nii.gz")
+    new_mean = nib.Nifti1Image(ts_data.mean(axis=-1),
+                               ts_img.get_affine(),
+                               ts_img.get_header())
+    new_mean.to_filename(mean_file)
+
+    return timeseries, mask_file, mean_file 
+
+
+def write_mask_report(mask_file, orig_file, mean_file):
+    """Write pngs with the mask and mean iamges."""
+    mean = nib.load(mean_file).get_data()
+    orig = nib.load(orig_file).get_data()
+    mask = nib.load(mask_file).get_data().astype(float)
+    mask[mask == 0] = np.nan
+
+    n_slices = mean.shape[-1]
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2
+    figsize = (10, 1.375 * n_row)
+
+    # Write the functional mask image
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize)
+    f.set_facecolor("k")
+    vmin, vmax = 0, moss.percentiles(orig, 98)
+
+    for i, ax in enumerate(axes.ravel(), start):
+        ax.imshow(orig[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
+        ax.imshow(mask[..., i].T, alpha=.6,
+                  cmap=mpl.colors.ListedColormap(["MediumSpringGreen"]))
+        ax.set_xticks([])
+        ax.set_yticks([])
+    f.subplots_adjust(hspace=1e-5, wspace=1e-5)
+    mask_png = os.path.abspath("functional_mask.png")
+    f.savefig(mask_png, dpi=100, bbox_inches="tight",
+              facecolor="k", edgecolor="k")
+    plt.close(f)
+
+    # Write the mean func image
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize)
+    f.set_facecolor("k")
+    vmin, vmax = 0, moss.percentiles(mean, 98)
+
+    for i, ax in enumerate(axes.ravel(), start):
+        ax.imshow(mean[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
+        ax.imshow(mean[..., i].T, cmap="hot", alpha=.6,
+                  vmin=vmin, vmax=vmax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    f.subplots_adjust(hspace=1e-5, wspace=1e-5)
+    mean_png = os.path.abspath("mean_func.png")
+    f.savefig(mean_png, dpi=100, bbox_inches="tight",
+              facecolor="k", edgecolor="k")
+    plt.close(f)
+
+    return mask_png, mean_png
 
 
 def write_art_plot(intensity_file, outlier_file):
@@ -784,6 +830,32 @@ def write_coreg_plot(subject_id, in_file):
     return out_file
 
 
+def scale_timeseries(in_file, mask, statistic="median", target=10000):
+
+    import os.path as op
+    import numpy as np
+    import nibabel as nib
+    from nipype.utils.filemanip import split_filename
+
+    ts_img = nib.load(in_file)
+    ts_data = ts_img.get_data()
+    mask = nib.load(mask).get_data().astype(bool)
+
+    stat_value = getattr(np, statistic)(ts_data[mask])
+
+    scale_value = float(target) / stat_value
+    scaled_ts = ts_data * scale_value
+    scaled_img = nib.Nifti1Image(scaled_ts,
+                                 ts_img.get_affine(),
+                                 ts_img.get_header())
+
+    pth, fname, ext = split_filename(in_file)
+    out_file = op.abspath(fname + "_scaled.nii.gz")
+    scaled_img.to_filename(out_file)
+
+    return out_file
+
+
 def write_preproc_report(subject_id, input_timeseries, realign_report,
                          mean_func_slices, intensity_plot, outlier_volumes,
                          coreg_report):
@@ -832,69 +904,3 @@ def write_preproc_report(subject_id, input_timeseries, realign_report,
 
     # Return both report files as a list
     return out_files
-
-
-def scale_timeseries(in_file, mask, statistic="median", target=10000):
-
-    import os.path as op
-    import numpy as np
-    import nibabel as nib
-    from nipype.utils.filemanip import split_filename
-
-    ts_img = nib.load(in_file)
-    ts_data = ts_img.get_data()
-    mask = nib.load(mask).get_data().astype(bool)
-
-    if statistic == "median":
-        stat_value = np.median(ts_data[mask])
-    elif statistic == "mean":
-        stat_value = np.mean(ts_data[mask])
-    else:
-        raise ValueError("Statistic must be either 'mean' or 'median'")
-
-    scale_value = float(target) / stat_value
-    scaled_ts = ts_data * scale_value
-    scaled_img = nib.Nifti1Image(scaled_ts,
-                                 ts_img.get_affine(),
-                                 ts_img.get_header())
-
-    pth, fname, ext = split_filename(in_file)
-    out_file = op.abspath(fname + "_scaled.nii.gz")
-    scaled_img.to_filename(out_file)
-
-    return out_file
-
-
-# ----------------
-# Helper functions
-# ----------------
-
-
-def get_middle_volume(func):
-    """Return the middle volume index."""
-    from nibabel import load
-    return [(load(f).get_shape()[3] / 2) - 1 for f in func]
-
-
-def get_thresh_op(thresh):
-    """Return an fslmaths op string to get 10% of the intensity"""
-    return "-thr %.10f -Tmin -bin" % (0.1 * thresh[0][1])
-
-
-def get_scale_value(medianvals):
-    """Get the scale value to set the grand mean of the timeseries ~10000."""
-    return [10000. / val for val in medianvals]
-
-
-def get_bright_thresh(medianvals):
-    """Get the brightness threshold for SUSAN."""
-    return [0.75 * val for val in medianvals]
-
-
-def get_usans(inlist):
-    """Return the usans at the right threshold."""
-    return [[tuple([val[0], 0.75 * val[1]])] for val in inlist]
-
-
-def divide_by_two(x):
-    return float(x) / 2
