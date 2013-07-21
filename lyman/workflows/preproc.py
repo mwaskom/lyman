@@ -377,29 +377,39 @@ def create_skullstrip_workflow(name="skullstrip"):
                          "reportmask")
 
     # Define the workflow outputs
-    outputnode = Node(util.IdentityInterface(fields=["timeseries",
-                                                     "mean_file",
-                                                     "mask_file",
-                                                     "report_png"]),
-                      name="outputs")
+    outputnode = Node(IdentityInterface(["timeseries",
+                                         "mean_file",
+                                         "mask_file",
+                                         "report_png"]),
+                      "outputs")
 
     # Define and connect the workflow
-    skullstrip = Workflow(name=name)
+    skullstrip = Workflow(name)
 
     skullstrip.connect([
-        (inputnode,  origmean,      [("timeseries", "in_file")]),
-        (origmean,   findmask,      [("out_file", "in_file")]),
-        (inputnode,  maskfunc,      [("timeseries", "in_file")]),
-        (findmask,   maskfunc,      [("mask_file", "mask_file")]),
-        (maskfunc,   refinemask,    [("out_file", "timeseries")]),
-        (findmask,   refinemask,    [("mask_file", "mask_file")]),
-        (origmean,   reportmask,    [("out_file", "orig_file")]),
-        (refinemask, reportmask,    [("mask_file", "mask_file"),
-                                     ("mean_file", "mean_file")]),
-        (refinemask, outputnode,    [("timeseries", "timeseries"),
-                                     ("mask_file", "mask_file"),
-                                     ("mean_file", "mean_file")]),
-        (reportmask, outputnode,    [("mask_report", "report")]),
+        (inputnode, origmean,
+            [("timeseries", "in_file")]),
+        (origmean, findmask,
+            [("out_file", "in_file")]),
+        (inputnode, maskfunc,
+            [("timeseries", "in_file")]),
+        (findmask, maskfunc,
+            [("mask_file", "mask_file")]),
+        (maskfunc, refinemask,
+            [("out_file", "timeseries")]),
+        (findmask, refinemask,
+            [("mask_file", "mask_file")]),
+        (origmean, reportmask,
+            [("out_file", "orig_file")]),
+        (refinemask, reportmask,
+            [("mask_file", "mask_file"),
+             ("mean_file", "mean_file")]),
+        (refinemask, outputnode,
+            [("timeseries", "timeseries"),
+             ("mask_file", "mask_file"),
+             ("mean_file", "mean_file")]),
+        (reportmask, outputnode,
+            [("mask_report", "report")]),
         ])
 
     return skullstrip
