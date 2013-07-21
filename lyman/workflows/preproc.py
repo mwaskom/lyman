@@ -196,9 +196,8 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.realign_report", "realign_report")]),
         (skullstrip, report,
             [("outputs.mask_report", "mask_report")]),
-        (art, report,
-            [("outputs.intensity_plot", "intensity_plot"),
-             ("outputs.outlier_volumes", "outlier_volumes")]),
+        (artifacts, report,
+            [("outputs.artifact_report", "artifact_report")]),
         (func2anat, report,
             [("outputs.report", "coreg_report")]),
         ])
@@ -211,15 +210,14 @@ def create_preprocessing_workflow(name="preproc",
                      "functional_mask",
                      "realign_parameters",
                      "mean_func_slices",
-                     "intensity_plot",
-                     "outlier_volumes",
+                     "artifact_report"
                      "realign_report",
                      "flirt_affine",
                      "tkreg_affine",
                      "coreg_report",
                      "report_files"]
 
-    outputnode = Node(util.IdentityInterface(fields=output_fields),
+    outputnode = Node(IdentityInterface(output_fields),
                       name="outputnode")
 
     preproc.connect([
@@ -231,9 +229,8 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.mean_func", "mean_func"),
              ("outputs.mask_file", "functional_mask"),
              ("outputs.report_png", "mean_func_slices")]),
-        (art, outputnode,
-            [("outputs.intensity_plot", "intensity_plot"),
-             ("outputs.outlier_volumes", "outlier_volumes")]),
+        (artifacts, outputnode,
+            [("outputs.artifact_report", "artifact_report")]),
         (func2anat, outputnode,
             [("outputs.tkreg_mat", "tkreg_affine"),
              ("outputs.flirt_mat", "flirt_affine"),
@@ -257,9 +254,11 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
     inputnode = Node(IdentityInterface(["timeseries"], "inputs"))
 
     # Get the middle volume of each run for motion correction
-    extractref = MapNode(fsl.ExtractROI(out_file="example_func.nii.gz",
-                                        t_size=1),
-                         ["in_file", "t_min"],
+    extractref = MapNode(Function(["in_file"],
+                                  ["out_file"],
+                                  extract_mc_target,
+                                  ["import os", "import nibabel as nib"]),
+                         "timeseries",
                          "extractref")
 
     # Motion correct to middle volume of each run
@@ -315,8 +314,7 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
 
     realignment.connect([
         (inputnode, extractref,
-            [("timeseries", "in_file"),
-             (("timeseries", get_middle_volume), "t_min")]),
+            [("timeseries", "in_file")]),
         (inputnode, mcflirt,
             [("timeseries", "in_file")]),
         (extractref, mcflirt,
@@ -342,7 +340,7 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
             ])
     else:
         realignment.connect([
-            (realign, outputnode,
+            (mcflirt, outputnode,
                 [("out_file", "timeseries")])
             ])
 
@@ -373,7 +371,7 @@ def create_skullstrip_workflow(name="skullstrip"):
     # Refine the brain mask
     refinemask = MapNode(Function(["in_file", "mask_file"],
                                   ["timeseries", "mask_file", "mean_file"],
-                                  refine_brain_mask,
+                                  refine_mask,
                                   ["import os",
                                    "import moss",
                                    "import scipy as sp",
@@ -558,6 +556,21 @@ def maybe_mean(in_file):
     # Write the mean image to disk and return the filename
     out_file = fname_presuffix(in_file, suffix="_mean", newpath=getcwd())
     mean_img.to_filename(out_file)
+    return out_file
+
+
+def extract_mc_target(in_file):
+    """Extract the middle frame of a timeseries."""
+    img = nib.load(timeseries)
+    data = img.get_data()
+
+    middle_vol = data.shape[-1] // 2
+    targ = np.empty(data.shape[:-1])
+    targ[:] = data[..., middle_vol]
+
+    targ_img = nib.Nift1Image(targ, img.get_affine(), img.get_header())
+    out_file = os.path.abspath("example_func.nii.gz")
+    targ_img.to_filename(out_file)
     return out_file
 
 
