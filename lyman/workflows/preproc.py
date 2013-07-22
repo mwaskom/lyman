@@ -8,8 +8,8 @@ function and assorted supporting functions for preprocessing.
 import os
 import numpy as np
 import scipy as sp
-import nibabel as nib
 import pandas as pd
+import nibabel as nib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -21,6 +21,17 @@ from nipype import freesurfer as fs
 from nipype import (Node, MapNode, Workflow,
                     IdentityInterface, Function)
 from nipype.workflows.fmri.fsl import create_susan_smooth
+
+# For nipype Function interfaces
+imports = ["import os",
+           "import numpy as np",
+           "import scipy as sp",
+           "import pandas as pd",
+           "import nibabel as nib",
+           "import matplotlib as mpl",
+           "import matplotlib.pyplot as plt",
+           "import moss",
+           "import seaborn"]
 
 
 def create_preprocessing_workflow(name="preproc",
@@ -35,6 +46,34 @@ def create_preprocessing_workflow(name="preproc",
                                   highpass_sigma=32,
                                   partial_brain=False):
     """Return a Nipype workflow for fMRI preprocessing.
+
+    This mostly follows the preprocessing in FSL, although some
+    of the processing has been moved into pure Python.
+
+    Parameters
+    ----------
+    name : string
+        workflow object name
+    temporal_interp : bool
+        whether to perform slice-time correction
+    frames_to_toss : int
+        number of initial frames to remove
+    interleaved : bool
+        whether slice acquisition is interleaved/alternating
+    slice_order : "up" | "down"
+        direction of slice acquisition
+    TR : float
+        repetition time of the sequence
+    intensity_threshold : float
+        z-score threshold for whole-brain intensity artifacts
+    motion_thresold : float
+        mm threshold for scan-to-scan motion artifacts
+    smooth_fwhm : float
+        mm smoothing kernel for spatial smoothing
+    highpass_sigma : float
+        sigma (in s) of high-pass smoothing kernal
+    partial_brain : bool
+        protocol is partial brain/hi-res
 
     """
     preproc = Workflow(name)
@@ -51,9 +90,7 @@ def create_preprocessing_workflow(name="preproc",
     prepare = MapNode(Function(["in_file", "frames_to_toss"],
                                ["out_file"],
                                prep_timeseries,
-                               ["import os",
-                                "import numpy as np",
-                                "import nibabel as nib"]),
+                               imports),
                       "in_file",
                       "prep_timeseries")
     prepare.inputs.frames_to_toss = frames_to_toss
@@ -67,16 +104,12 @@ def create_preprocessing_workflow(name="preproc",
     # Automatically detect motion and intensity outliers
     artifacts = MapNode(Function(["timeseries",
                                   "mask_file",
-                                  "motion_file"
+                                  "motion_file",
                                   "intensity_thresh",
                                   "motion_thresh"],
                                  ["artifact_report"],
                                  detect_artifacts,
-                                 ["import os",
-                                  "import pandas as pd",
-                                  "import nibabel as nib",
-                                  "import matplotlib.pyplot as plt",
-                                  "import seaborn"]),
+                                 imports),
                         ["timeseries", "mask_file", "motion_file"],
                         "artifacts")
     artifacts.inputs.intensity_thresh = intensity_threshold
@@ -118,7 +151,7 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.mask_file", "inputnode.mask_file"),
              ("outputs.timeseries", "inputnode.in_files")]),
         (susan, filter_smooth,
-            [("outputnode.smoothed_files", "iinputs.timeseries")]),
+            [("outputnode.smoothed_files", "inputs.timeseries")]),
         (skullstrip, filter_smooth,
             [("outputs.mask_file", "inputs.mask_file")]),
         (skullstrip, filter_rough,
@@ -133,10 +166,9 @@ def create_preprocessing_workflow(name="preproc",
                      "example_func",
                      "mean_func",
                      "functional_mask",
-                     "motion_file",
                      "realign_report",
                      "mask_report",
-                     "artifact_report"
+                     "artifact_report",
                      "flirt_affine",
                      "tkreg_affine",
                      "coreg_report"]
@@ -146,7 +178,6 @@ def create_preprocessing_workflow(name="preproc",
     preproc.connect([
         (realign, outputnode,
             [("outputs.example_func", "example_func"),
-             ("outputs.motion_file", "motion_file"),
              ("outputs.report", "realign_report")]),
         (skullstrip, outputnode,
             [("outputs.mean_file", "mean_func"),
@@ -170,14 +201,14 @@ def create_preprocessing_workflow(name="preproc",
 def create_realignment_workflow(name="realignment", temporal_interp=True,
                                 TR=2, slice_order="up", interleaved=True):
     """Motion and slice-time correct the timeseries and summarize."""
-    inputnode = Node(IdentityInterface(["timeseries"], "inputs"))
+    inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
     # Get the middle volume of each run for motion correction
     extractref = MapNode(Function(["in_file"],
                                   ["out_file"],
                                   extract_mc_target,
-                                  ["import os", "import nibabel as nib"]),
-                         "timeseries",
+                                  imports),
+                         "in_file",
                          "extractref")
 
     # Motion correct to middle volume of each run
@@ -209,21 +240,14 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
     mcreport = MapNode(Function(report_inputs,
                                 report_outputs,
                                 realign_report,
-                                ["import os",
-                                 "import moss",
-                                 "import numpy as np",
-                                 "import pandas as pd",
-                                 "import nibabel as nib",
-                                 "import matplotlib.pyplot as plt",
-                                 "import seaborn"],
-                                ),
+                                imports),
                        report_inputs,
                        "mcreport")
 
     # Define the outputs
     outputnode = Node(IdentityInterface(["timeseries",
                                          "example_func",
-                                         "report"
+                                         "report",
                                          "motion_file"]),
 
                       "outputs")
@@ -237,23 +261,23 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
         (inputnode, mcflirt,
             [("timeseries", "in_file")]),
         (extractref, mcflirt,
-            [("roi_file", "ref_file")]),
+            [("out_file", "ref_file")]),
         (extractref, mcreport,
-            [("roi_file", "target_file")]),
+            [("out_file", "target_file")]),
         (mcflirt, mcreport,
             [("par_file", "realign_params"),
              ("rms_files", "displace_params")]),
         (extractref, outputnode,
-            [("roi_file", "example_func")]),
+            [("out_file", "example_func")]),
         (mcreport, outputnode,
-            [("realign_report", "realign_report"),
+            [("realign_report", "report"),
              ("motion_file", "motion_file")]),
         ])
 
     if temporal_interp:
         realignment.connect([
             (mcflirt, slicetime,
-                [("out_file", "in_filr")]),
+                [("out_file", "in_file")]),
             (slicetime, outputnode,
                 [("slice_time_corrected_file", "timeseries")])
             ])
@@ -288,25 +312,19 @@ def create_skullstrip_workflow(name="skullstrip"):
                        name="maskfunc")
 
     # Refine the brain mask
-    refinemask = MapNode(Function(["in_file", "mask_file"],
+    refinemask = MapNode(Function(["timeseries", "mask_file"],
                                   ["timeseries", "mask_file", "mean_file"],
                                   refine_mask,
-                                  ["import os",
-                                   "import moss",
-                                   "import scipy as sp",
-                                   "import nibabel as nib"]),
-                         ["in_file", "mask_file"],
+                                  imports),
+                         ["timeseries", "mask_file"],
                          "refinemask")
 
     # Generate images summarizing the skullstrip and resulting data
     reportmask = MapNode(Function(["mask_file", "orig_file", "mean_file"],
                                   ["mask_report"],
                                   write_mask_report,
-                                  ["import os",
-                                   "import numpy as np",
-                                   "import matplotlib as mpl",
-                                   "import matplotlib.pyplot as plt"]),
-                         ["mask_file", "mean_file"],
+                                  imports),
+                         ["mask_file", "orig_file", "mean_file"],
                          "reportmask")
 
     # Define the workflow outputs
@@ -372,11 +390,7 @@ def create_bbregister_workflow(name="bbregister",
     report = MapNode(Function(["subject_id", "in_file"],
                               ["out_file"],
                               write_coreg_plot,
-                              ["import os",
-                               "import matplotlib.pyplot as plt",
-                               "import matplotlib as mpl",
-                               "import nibabel as nib",
-                               "import moss"]),
+                              imports),
                            "in_file",
                            "coreg_report")
 
@@ -390,7 +404,7 @@ def create_bbregister_workflow(name="bbregister",
     bbregister.connect([
         (inputnode, func2anat,
             [("subject_id", "subject_id"),
-             ("source_file","source_file")]),
+             ("source_file", "source_file")]),
         (inputnode, report,
             [("subject_id", "subject_id")]),
         (func2anat, report,
@@ -425,9 +439,7 @@ def create_filtering_workflow(name="filter",
                               "mask_file"],
                              ["out_file"],
                              scale_timeseries,
-                             ["import os",
-                              "import numpy as np",
-                              "import nibabel as nib"]),
+                             imports),
                     ["in_file", "mask_file"],
                     "scale")
 
@@ -483,7 +495,7 @@ def extract_mc_target(in_file):
     targ = np.empty(data.shape[:-1])
     targ[:] = data[..., middle_vol]
 
-    targ_img = nib.Nift1Image(targ, img.get_affine(), img.get_header())
+    targ_img = nib.Nifti1Image(targ, img.get_affine(), img.get_header())
     out_file = os.path.abspath("example_func.nii.gz")
     targ_img.to_filename(out_file)
     return out_file
@@ -499,8 +511,8 @@ def realign_report(target_file, realign_params, displace_params):
 
     abs, rel = displace_params
     df["displace_abs"] = np.loadtxt(abs)
-    df["displace_rel"] = 0
-    df["displace_rel"][1:] = np.loadtxt(rel)
+    df["displace_rel"] = pd.Series(np.loadtxt(rel), index=df.index[1:])
+    df.loc[0, "displace_rel"] = 0
     motion_file = os.path.abspath("realignment_params.csv")
     df.to_csv(motion_file, index=False)
 
@@ -543,7 +555,7 @@ def realign_report(target_file, realign_params, displace_params):
               facecolor="k", edgecolor="k")
     plt.close(f)
 
-    return (motion_file, plot_file, target_file), motion_file
+    return [motion_file, plot_file, target_file], motion_file
 
 
 def refine_mask(timeseries, mask_file):
@@ -565,7 +577,7 @@ def refine_mask(timeseries, mask_file):
     mask = sp.ndimage.binary_dilation(mask, dilator)
 
     # Mask the timeseries and save it
-    ts_data[:] = ts_data[mask]
+    ts_data[~mask] = 0
     timeseries = os.path.abspath("timeseries_masked.nii.gz")
     new_ts = nib.Nifti1Image(ts_data,
                              ts_img.get_affine(),
@@ -633,7 +645,7 @@ def write_mask_report(mask_file, orig_file, mean_file):
               facecolor="k", edgecolor="k")
     plt.close(f)
 
-    return mask_png, mean_png
+    return [mask_png, mean_png]
 
 
 def detect_artifacts(timeseries, mask_file, motion_file,
@@ -683,7 +695,7 @@ def detect_artifacts(timeseries, mask_file, motion_file,
     art_file = os.path.abspath("artifacts.csv")
     artifacts.to_csv(art_file, index=False)
 
-    return plot_file, art_file
+    return [plot_file, art_file]
 
 
 def write_coreg_plot(subject_id, in_file):
@@ -735,8 +747,8 @@ def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
     ts_data = ts_img.get_data()
     mask = nib.load(mask_file).get_data().astype(bool)
 
-    # Flexibly get the statistic value
-    # this has to be stringly-typed because nipype
+    # Flexibly get the statistic value.
+    # This has to be stringly-typed because nipype
     # can't pass around functions
     stat_value = getattr(np, statistic)(ts_data[mask])
 
