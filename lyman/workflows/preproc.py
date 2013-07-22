@@ -19,7 +19,7 @@ import seaborn
 from nipype import fsl
 from nipype import freesurfer as fs
 from nipype import (Node, MapNode, Workflow,
-                    IdentityInterface, Function, Rename)
+                    IdentityInterface, Function)
 from nipype.workflows.fmri.fsl import create_susan_smooth
 
 
@@ -45,7 +45,7 @@ def create_preprocessing_workflow(name="preproc",
     if partial_brain:
         in_fields.append("whole_brain_epi")
 
-    inputnode = Node(IdentityInterface(in_fields), "inputnode")
+    inputnode = Node(IdentityInterface(in_fields), "inputs")
 
     # Remove equilibrium frames and convert to float
     prepare = MapNode(Function(["in_file", "frames_to_toss"],
@@ -127,75 +127,41 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.mask_file", "inputs.mask_file")]),
         ])
 
-    report = MapNode(Function(input_names=["subject_id",
-                                           "input_timeseries",
-                                           "realign_report",
-                                           "mask_report",
-                                           "artifact_report",
-                                           "coreg_report"],
-                                   output_names=["out_files"],
-                                   function=write_preproc_report),
-                     iterfield=["input_timeseries",
-                                "realign_report",
-                                "mask_report",
-                                "intensity_plot",
-                                "outlier_volumes",
-                                "coreg_report"],
-                     name="report")
-
-    preproc.connect([
-        (inputnode, report,
-            [("subject_id", "subject_id"),
-             ("timeseries", "input_timeseries")]),
-        (realign, report,
-            [("outputs.realign_report", "realign_report")]),
-        (skullstrip, report,
-            [("outputs.mask_report", "mask_report")]),
-        (artifacts, report,
-            [("outputs.artifact_report", "artifact_report")]),
-        (coregister, report,
-            [("outputs.report", "coreg_report")]),
-        ])
-
     # Define the outputs of the top-level workflow
     output_fields = ["smoothed_timeseries",
                      "unsmoothed_timeseries",
                      "example_func",
-                     "mean_file",
+                     "mean_func",
                      "functional_mask",
-                     "realign_parameters",
-                     "mean_func_slices",
-                     "artifact_report"
+                     "motion_file",
                      "realign_report",
+                     "mask_report",
+                     "artifact_report"
                      "flirt_affine",
                      "tkreg_affine",
-                     "coreg_report",
-                     "report_files"]
+                     "coreg_report"]
 
-    outputnode = Node(IdentityInterface(output_fields),
-                      name="outputnode")
+    outputnode = Node(IdentityInterface(output_fields), "outputs")
 
     preproc.connect([
         (realign, outputnode,
-            [("outputs.realign_report", "realign_report"),
-             ("outputs.realign_parameters", "realign_parameters"),
-             ("outputs.example_func", "example_func")]),
+            [("outputs.example_func", "example_func"),
+             ("outputs.motion_file", "motion_file"),
+             ("outputs.report", "realign_report")]),
         (skullstrip, outputnode,
-            [("outputs.mean_func", "mean_func"),
+            [("outputs.mean_file", "mean_func"),
              ("outputs.mask_file", "functional_mask"),
-             ("outputs.report_png", "mean_func_slices")]),
+             ("outputs.report", "mask_report")]),
         (artifacts, outputnode,
-            [("outputs.artifact_report", "artifact_report")]),
-        (func2anat, outputnode,
+            [("artifact_report", "artifact_report")]),
+        (coregister, outputnode,
             [("outputs.tkreg_mat", "tkreg_affine"),
              ("outputs.flirt_mat", "flirt_affine"),
              ("outputs.report", "coreg_report")]),
-        (rename_smooth, outputnode,
-            [("out_file", "smoothed_timeseries")]),
-        (rename_rough, outputnode,
-            [("out_file", "unsmoothed_timeseries")]),
-        (report, outputnode,
-            [("out_files", "report_files")]),
+        (filter_smooth, outputnode,
+            [("outputs.timeseries", "smoothed_timeseries")]),
+        (filter_rough, outputnode,
+            [("outputs.timeseries", "unsmoothed_timeseries")]),
         ])
 
     return preproc, inputnode, outputnode
@@ -257,7 +223,7 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
     # Define the outputs
     outputnode = Node(IdentityInterface(["timeseries",
                                          "example_func",
-                                         "realign_report"
+                                         "report"
                                          "motion_file"]),
 
                       "outputs")
@@ -347,7 +313,7 @@ def create_skullstrip_workflow(name="skullstrip"):
     outputnode = Node(IdentityInterface(["timeseries",
                                          "mean_file",
                                          "mask_file",
-                                         "report_png"]),
+                                         "report"]),
                       "outputs")
 
     # Define and connect the workflow
@@ -422,13 +388,19 @@ def create_bbregister_workflow(name="bbregister",
 
     # Connect the registration
     bbregister.connect([
-        (inputnode,    func2anat,    [("subject_id", "subject_id"),
-                                      ("source_file", "source_file")]),
-        (inputnode,    report,       [("subject_id", "subject_id")]),
-        (func2anat,    report,       [("registered_file", "in_file")]),
-        (func2anat,    outputnode,   [("out_reg_file", "tkreg_mat")]),
-        (func2anat,    outputnode,   [("out_fsl_file", "flirt_mat")]),
-        (report,       outputnode,   [("out_file", "report")]),
+        (inputnode, func2anat,
+            [("subject_id", "subject_id"),
+             ("source_file","source_file")]),
+        (inputnode, report,
+            [("subject_id", "subject_id")]),
+        (func2anat, report,
+            [("registered_file", "in_file")]),
+        (func2anat, outputnode,
+            [("out_reg_file", "tkreg_mat")]),
+        (func2anat, outputnode,
+            [("out_fsl_file", "flirt_mat")]),
+        (report, outputnode,
+            [("out_file", "report")]),
         ])
 
     # Possibly connect the full_fov image
@@ -444,10 +416,11 @@ def create_bbregister_workflow(name="bbregister",
 def create_filtering_workflow(name="filter",
                               highpass_sigma=32,
                               output_name="timeseries"):
-    """Scale the timeseries and high-pass-filter it."""
+    """Scale and high-pass filter the timeseries."""
     inputnode = Node(IdentityInterface(["timeseries", "mask_file"]),
                      "inputs")
 
+    # Grand-median scale within the brain mask
     scale = MapNode(Function(["in_file",
                               "mask_file"],
                              ["out_file"],
@@ -458,6 +431,7 @@ def create_filtering_workflow(name="filter",
                     ["in_file", "mask_file"],
                     "scale")
 
+    # Gaussian running-line filter
     filter = MapNode(fsl.TemporalFilter(highpass_sigma=highpass_sigma,
                                         out_file=output_name + ".nii.gz"),
                      "in_file",
@@ -517,7 +491,6 @@ def extract_mc_target(in_file):
 
 def realign_report(target_file, realign_params, displace_params):
     """Create files summarizing the motion correction."""
-
     # Create a DataFrame with the 6 motion parameters
     rot = ["rot_" + dim for dim in ["x", "y", "z"]]
     trans = ["trans_" + dim for dim in ["x", "y", "z"]]
@@ -760,7 +733,7 @@ def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
     """Scale an entire series with a single number."""
     ts_img = nib.load(in_file)
     ts_data = ts_img.get_data()
-    mask = nib.load(mask).get_data().astype(bool)
+    mask = nib.load(mask_file).get_data().astype(bool)
 
     # Flexibly get the statistic value
     # this has to be stringly-typed because nipype
@@ -777,53 +750,3 @@ def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
     scaled_img.to_filename(out_file)
 
     return out_file
-
-
-def write_preproc_report(subject_id, input_timeseries, realign_report,
-                         mean_func_slices, intensity_plot, outlier_volumes,
-                         coreg_report):
-
-    import os.path as op
-    import time
-    from nibabel import load
-    from lyman.tools import write_workflow_report
-    from lyman.workflows.reporting import preproc_report_template
-
-    # Gather some attributes of the input timeseries
-    input_image = load(input_timeseries)
-    image_dimensions = "%dx%dx%d" % input_image.get_shape()[:3]
-    image_timepoints = input_image.get_shape()[-1]
-
-    # Read in motion statistics
-    motion_file = realign_report[0]
-    motion_info = [l.strip() for l in open(motion_file)]
-    max_abs_motion, max_rel_motion, total_motion = (motion_info[1],
-                                                    motion_info[3],
-                                                    motion_info[5])
-
-    # Fill in the report template dictionary
-    report_dict = dict(now=time.asctime(),
-                       subject_id=subject_id,
-                       timeseries_file=input_timeseries,
-                       orig_timeseries_path=op.realpath(input_timeseries),
-                       image_dimensions=image_dimensions,
-                       image_timepoints=image_timepoints,
-                       mean_func_slices=mean_func_slices,
-                       intensity_plot=intensity_plot,
-                       n_outliers=len(open(outlier_volumes).readlines()),
-                       max_abs_motion=max_abs_motion,
-                       max_rel_motion=max_rel_motion,
-                       total_motion=total_motion,
-                       realignment_plot=realign_report[1],
-                       example_func_slices=realign_report[2],
-                       func_to_anat_cost=open(
-                           coreg_report[0]).read().split()[0],
-                       func_to_anat_slices=coreg_report[1])
-
-    # Write the reports (this is sterotyped for workflows from here
-    out_files = write_workflow_report("preproc",
-                                      preproc_report_template,
-                                      report_dict)
-
-    # Return both report files as a list
-    return out_files
