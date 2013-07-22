@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from argparse import Namespace
 from nipype.testing import assert_equal, assert_true
 
@@ -123,7 +124,10 @@ def test_locate_peaks():
         ([(29, 50, 30)], ("R Hippocampus", 95))]
 
     for coord, res in challenge:
-        yield assert_equal, res, main.locate_peaks(coord)[1]
+        res = dict(zip(["MaxProb Region", "Prob"], list(res)))
+        print res
+        res = pd.DataFrame(res, index=[0])
+        yield assert_equal, np.array(res), np.array(main.locate_peaks(coord))
 
 
 def test_shorten_name():
