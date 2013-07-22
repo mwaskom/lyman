@@ -20,7 +20,7 @@ def main(arglist):
     normalize = anatwarp.create_anatwarp_workflow(
                     project["data_dir"], subject_list)
     normalize.base_dir = project["working_dir"]
-    tools.crashdump_config(normalize, "/tmp")
+    normalize.config["execution"]["crashdump_dir"] = "/tmp"
 
     # Execute the workflow
     normalize.run(plugin=plugin, plugin_args=plugin_args)
@@ -30,4 +30,4 @@ def main(arglist):
         shutil.rmtree(normalize.base_dir)
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+   main(sys.argv[1:])

@@ -16,6 +16,7 @@ from nipype.interfaces.io import DataGrabber, DataSink
 from nipype.interfaces.utility import IdentityInterface
 
 import lyman.workflows as wf
+from lyman import graphutils as gu
 from lyman import tools
 from lyman.tools.commandline import parser
 
@@ -35,7 +36,7 @@ def main(arglist):
 
     # Subject is always highest level of parameterization
     subject_list = tools.determine_subjects(args.subjects)
-    subj_source = tools.make_subject_source(subject_list)
+    subj_source = gu.make_subject_source(subject_list)
 
     # Can run model+ processing several times on preprocessed data
     if args.altmodel:
@@ -87,7 +88,7 @@ def main(arglist):
     # Convenience class to handle some sterotyped connections
     # between run-specific nodes (defined here) and the inputs
     # to the prepackaged workflow returned above
-    preproc_inwrap = tools.InputWrapper(preproc, subj_source,
+    preproc_inwrap = gu.InputWrapper(preproc, subj_source,
                                         preproc_source, preproc_input)
     preproc_inwrap.connect_inputs()
 
@@ -96,7 +97,7 @@ def main(arglist):
                         name="preproc_sink")
 
     # Similar to above, class to handle sterotyped output connections
-    preproc_outwrap = tools.OutputWrapper(preproc, subj_source,
+    preproc_outwrap = gu.OutputWrapper(preproc, subj_source,
                                           preproc_sink, preproc_output)
     preproc_outwrap.set_subject_container()
     preproc_outwrap.set_mapnode_substitutions(exp["n_runs"])
@@ -106,7 +107,7 @@ def main(arglist):
     preproc.base_dir = work_dir_base
 
     # Configure crashdump output
-    tools.crashdump_config(preproc, crashdump_dir)
+    preproc.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly execute the workflow, depending on the command line
     tools.run_workflow(preproc, "preproc", args)
@@ -137,14 +138,14 @@ def main(arglist):
         realign_params=[["subject_id", "realignment_parameters.par"]],
         timeseries=[["subject_id", model_smooth + "_timeseries.nii.gz"]])
 
-    model_inwrap = tools.InputWrapper(model, subj_source,
+    model_inwrap = gu.InputWrapper(model, subj_source,
                                       model_source, model_input)
     model_inwrap.connect_inputs()
 
     model_sink = Node(DataSink(base_directory=anal_dir_base),
                                name="model_sink")
 
-    model_outwrap = tools.OutputWrapper(model, subj_source,
+    model_outwrap = gu.OutputWrapper(model, subj_source,
                                        model_sink, model_output)
     model_outwrap.set_subject_container()
     model_outwrap.set_mapnode_substitutions(exp["n_runs"])
@@ -152,7 +153,7 @@ def main(arglist):
 
     # Set temporary output locations
     model.base_dir = work_dir_base
-    tools.crashdump_config(model, crashdump_dir)
+    model.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly execute the workflow
     tools.run_workflow(model, "model", args)
@@ -250,7 +251,7 @@ def main(arglist):
     reg_source.inputs.field_template = field_template
 
     # Registration inutnode
-    reg_inwrap = tools.InputWrapper(reg, subj_source,
+    reg_inwrap = gu.InputWrapper(reg, subj_source,
                                     reg_source, reg_input)
     reg_inwrap.connect_inputs()
 
@@ -259,13 +260,13 @@ def main(arglist):
     if not args.timeseries:
         names = exp["contrast_names"]
         reg.connect(
-             contrast_source, ("contrast", tools.find_contrast_number, names),
+             contrast_source, ("contrast", gu.find_contrast_number, names),
              reg_source, "contrast_number")
-        reg.connect(contrast_source, ("contrast", tools.reg_template,
+        reg.connect(contrast_source, ("contrast", gu.reg_template,
                                       mask_template, reg_template),
                     reg_source, "template")
 
-        reg.connect(contrast_source, ("contrast", tools.reg_template_args,
+        reg.connect(contrast_source, ("contrast", gu.reg_template_args,
                                       mask_template_args, reg_template_args),
                     reg_source, "template_args")
     else:
@@ -278,7 +279,7 @@ def main(arglist):
     reg_sink = Node(DataSink(base_directory=anal_dir_base),
                              name="reg_sink")
 
-    reg_outwrap = tools.OutputWrapper(reg, subj_source,
+    reg_outwrap = gu.OutputWrapper(reg, subj_source,
                                     reg_sink, reg_output)
     reg_outwrap.set_subject_container()
     reg_outwrap.set_mapnode_substitutions(exp["n_runs"])
@@ -294,7 +295,7 @@ def main(arglist):
         (r"_run_", "run_")])  # This one's wired to interal function
 
     reg.base_dir = work_dir_base
-    tools.crashdump_config(reg, crashdump_dir)
+    reg.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly run registration workflow and clean up
     tools.run_workflow(reg, "reg", args)
@@ -349,7 +350,7 @@ def main(arglist):
     ffx_source.inputs.template_args = ffx_template_args
 
     # Fixed effects inutnode
-    ffx_inwrap = tools.InputWrapper(ffx, subj_source,
+    ffx_inwrap = gu.InputWrapper(ffx, subj_source,
                                     ffx_source, ffx_input)
     ffx_inwrap.connect_inputs()
 
@@ -359,7 +360,7 @@ def main(arglist):
     if not args.timeseries:
         names = exp["contrast_names"]
         ffx.connect(
-             contrast_source, ("contrast", tools.find_contrast_number, names),
+             contrast_source, ("contrast", gu.find_contrast_number, names),
              ffx_source, "contrast_number")
     if not surface:
         ffx.connect(smooth_source, "smooth", ffx_source, "smooth")
@@ -368,7 +369,7 @@ def main(arglist):
     ffx_sink = Node(DataSink(base_directory=anal_dir_base),
                              name="ffx_sink")
 
-    ffx_outwrap = tools.OutputWrapper(ffx, subj_source,
+    ffx_outwrap = gu.OutputWrapper(ffx, subj_source,
                                       ffx_sink, ffx_output)
     ffx_outwrap.set_mapnode_substitutions(exp["n_runs"])
     ffx_outwrap.set_subject_container()
@@ -382,7 +383,7 @@ def main(arglist):
         (r"/_contrast_", "/")])
 
     ffx.base_dir = work_dir_base
-    tools.crashdump_config(ffx, crashdump_dir)
+    ffx.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly run fixed effects workflow
     tools.run_workflow(ffx, "ffx", args)

@@ -17,6 +17,7 @@ from nipype.interfaces.utility import IdentityInterface
 
 import lyman.workflows as wf
 from lyman import tools
+from lyman import graphutils as gu
 from lyman.tools.commandline import parser
 
 
@@ -98,7 +99,7 @@ def main(arglist):
                              parameterization=False),
                     name="mfx_sink")
 
-    mfx_outwrap = tools.OutputWrapper(mfx, subj_source,
+    mfx_outwrap = gu.OutputWrapper(mfx, subj_source,
                                       mfx_sink, mfx_output)
     mfx_outwrap.sink_outputs()
     mfx.connect(contrast_source, "l1_contrast",
@@ -106,7 +107,7 @@ def main(arglist):
 
     # Set a few last things
     mfx.base_dir = work_dir_base
-    tools.crashdump_config(mfx, crashdump_dir)
+    mfx.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Execute
     tools.run_workflow(mfx, args=args)
