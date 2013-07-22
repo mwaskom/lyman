@@ -58,19 +58,21 @@ def main(arglist):
 
     # Create workflow in function defined elsewhere in this package
     preproc, preproc_input, preproc_output = wf.create_preprocessing_workflow(
-                              do_slice_time_cor=exp["slice_time_correction"],
+                              temporal_interp=exp["slice_time_correction"],
                               frames_to_toss=exp["frames_to_toss"],
                               interleaved=exp["interleaved"],
                               slice_order=exp["slice_order"],
                               TR=exp["TR"],
+                              intensity_threshold=3,
+                              motion_threshold=1,
                               smooth_fwhm=exp["smooth_fwhm"],
                               highpass_sigma=exp["hpf_sigma"],
-                              partial_fov=exp["partial_fov"])
+                              partial_brain=exp["partial_fov"])
 
     # Collect raw nifti data
     outfields = ["timeseries"]
     if exp["partial_fov"]:
-        outfields.append("full_fov_epi")
+        outfields.append("whole_brain_epi")
     preproc_source = Node(DataGrabber(infields=["subject_id"],
                                       outfields=outfields,
                                       base_directory=project["data_dir"],
@@ -79,7 +81,7 @@ def main(arglist):
                           name="preproc_source")
     preproc_template_args = dict(timeseries=[["subject_id"]])
     if exp["partial_fov"]:
-        preproc_template_args["full_fov_epi"] = [["subject_id"]]
+        preproc_template_args["whole_brain_epi"] = [["subject_id"]]
     preproc_source.inputs.template_args = preproc_template_args
 
     # Convenience class to handle some sterotyped connections
