@@ -83,7 +83,7 @@ def create_preprocessing_workflow(name="preproc",
     artifacts.inputs.motion_thresh = motion_threshold
 
     # Estimate a registration from funtional to anatomical space
-    func2anat = create_bbregister_workflow()
+    coregister = create_bbregister_workflow()
 
     # Smooth intelligently in the volume
     susan = create_susan_smooth()
@@ -141,14 +141,14 @@ def create_preprocessing_workflow(name="preproc",
             [("out_file", "inputs.timeseries")]),
         (realign, skullstrip,
             [("outputs.timeseries", "inputs.timeseries")]),
-        (realign, art,
-            [("outputs.realign_parameters", "inputs.realignment_parameters")]),
-        (skullstrip, art,
-            [("outputs.timeseries", "inputs.realigned_timeseries"),
-             ("outputs.mask_file", "inputs.mask_file")]),
-        (skullstrip, func2anat,
+        (realign, artifacts,
+            [("outputs.motion_file", "motion_file")]),
+        (skullstrip, artifacts,
+            [("outputs.timeseries", "timeseries"),
+             ("outputs.mask_file", "mask_file")]),
+        (skullstrip, coregister,
             [("outputs.mean_file", "inputs.source_file")]),
-        (inputnode, func2anat,
+        (inputnode, coregister,
             [("subject_id", "inputs.subject_id")]),
         (skullstrip, susan,
             [("outputs.mask_file", "inputnode.mask_file"),
@@ -171,13 +171,12 @@ def create_preprocessing_workflow(name="preproc",
             [("out_file", "in_file")]),
         ])
 
-    report = MapNode(util.Function(input_names=["subject_id",
-                                                "input_timeseries",
-                                                "realign_report",
-                                                "mask_report",
-                                                "intensity_plot",
-                                                "outlier_volumes",
-                                                "coreg_report"],
+    report = MapNode(Function(input_names=["subject_id",
+                                           "input_timeseries",
+                                           "realign_report",
+                                           "mask_report",
+                                           "artifact_report",
+                                           "coreg_report"],
                                    output_names=["out_files"],
                                    function=write_preproc_report),
                      iterfield=["input_timeseries",
@@ -198,7 +197,7 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.mask_report", "mask_report")]),
         (artifacts, report,
             [("outputs.artifact_report", "artifact_report")]),
-        (func2anat, report,
+        (coregister, report,
             [("outputs.report", "coreg_report")]),
         ])
 
@@ -429,59 +428,42 @@ def create_skullstrip_workflow(name="skullstrip"):
     return skullstrip
 
 
-def create_bbregister_workflow(name="bbregister", contrast_type="t2",
-                               partial_fov=False):
+def create_bbregister_workflow(name="bbregister",
+                               contrast_type="t2",
+                               partial_brain=False):
 
     # Define the workflow inputs
     in_fields = ["subject_id", "source_file"]
-    if partial_fov:
-        in_fields.append("full_fov_epi")
-    inputnode = Node(IdentityInterface(fields=in_fields),
-                     name="inputs")
-
-    mean_fullfov = Node(Function(input_names=["in_file"],
-                                 output_names=["out_file"],
-                                 function=maybe_mean),
-                        name="mean_fullfov")
+    if partial_brain:
+        in_fields.append("whole_brain_epi")
+    inputnode = Node(IdentityInterface(in_fields),
+                     "inputs")
 
     # Estimate the registration to Freesurfer conformed space
     func2anat = MapNode(fs.BBRegister(contrast_type=contrast_type,
                                       init="fsl",
                                       epi_mask=True,
                                       registered_file=True,
-                                      out_fsl_file=True),
-                        iterfield=["source_file"],
-                        name="func2anat")
+                                      out_reg_file="func2anat_tkreg.dat",
+                                      out_fsl_file="func2anat_flirt.mat"),
+                        "source_file",
+                        "func2anat")
 
     # Make an image for quality control on the registration
-    regpng = MapNode(util.Function(input_names=["subject_id", "in_file"],
-                                   output_names=["out_file"],
-                                   function=write_coreg_plot),
-                           iterfield=["in_file"],
-                           name="regpng")
-
-    # Rename some files
-    costname = MapNode(Rename(format_string="func2anat_cost.dat"),
-                       iterfield=["in_file"],
-                       name="costname")
-
-    tkregname = MapNode(Rename(format_string="func2anat_tkreg.dat"),
-                        iterfield=["in_file"],
-                        name="tkregname")
-
-    flirtname = MapNode(util.Rename(format_string="func2anat_flirt.mat"),
-                        iterfield=["in_file"],
-                        name="flirtname")
-
-    # Merge the slicer png and cost file into a report list
-    report = Node(util.Merge(2, axis="hstack"),
-                  name="report")
+    report = MapNode(Function(["subject_id", "in_file"],
+                              ["out_file"],
+                              write_coreg_plot,
+                              ["import os",
+                               "import matplotlib.pyplot as plt",
+                               "import matplotlib as mpl",
+                               "import nibabel as nib",
+                               "import moss"]),
+                           "in_file",
+                           "coreg_report")
 
     # Define the workflow outputs
-    outputnode = Node(util.IdentityInterface(fields=["tkreg_mat",
-                                                     "flirt_mat",
-                                                     "report"]),
-                      name="outputs")
+    outputnode = Node(IdentityInterface(["tkreg_mat", "flirt_mat", "report"]),
+                      "outputs")
 
     bbregister = Workflow(name=name)
 
@@ -489,25 +471,18 @@ def create_bbregister_workflow(name="bbregister", contrast_type="t2",
     bbregister.connect([
         (inputnode,    func2anat,    [("subject_id", "subject_id"),
                                       ("source_file", "source_file")]),
-        (inputnode,    regpng,       [("subject_id", "subject_id")]),
-        (func2anat,    regpng,       [("registered_file", "in_file")]),
-        (func2anat,    tkregname,    [("out_reg_file", "in_file")]),
-        (func2anat,    flirtname,    [("out_fsl_file", "in_file")]),
-        (func2anat,    costname,     [("min_cost_file", "in_file")]),
-        (costname,     report,       [("out_file", "in1")]),
-        (regpng,       report,       [("out_file", "in2")]),
-        (tkregname,    outputnode,   [("out_file", "tkreg_mat")]),
-        (flirtname,    outputnode,   [("out_file", "flirt_mat")]),
-        (report,       outputnode,   [("out", "report")]),
+        (inputnode,    report,       [("subject_id", "subject_id")]),
+        (func2anat,    report,       [("registered_file", "in_file")]),
+        (func2anat,    outputnode,   [("out_reg_file", "tkreg_mat")]),
+        (func2anat,    outputnode,   [("out_fsl_file", "flirt_mat")]),
+        (report,       outputnode,   [("out_file", "report")]),
         ])
 
     # Possibly connect the full_fov image
-    if partial_fov:
+    if partial_brain:
         bbregister.connect([
-            (inputnode, mean_fullfov,
-                [("full_fov_epi", "in_file")]),
-            (mean_fullfov, func2anat,
-                [("out_file", "intermediate_file")]),
+            (inputnode, func2anat,
+                [("whole_brain_epi", "intermediate_file")]),
                 ])
 
     return bbregister
@@ -534,34 +509,9 @@ def prep_timeseries(in_file, frames_to_toss):
     return out_file
 
 
-def maybe_mean(in_file):
-    """Mean over time if image is 4D otherwise pass it right back out."""
-    from os.path import getcwd
-    from nibabel import load, Nifti1Image
-    from nipype.utils.filemanip import fname_presuffix
-
-    # Load in the file and get the shape
-    img = load(in_file)
-    img_shape = img.get_shape()
-
-    # If it's 3D just pass it right back out
-    if len(img_shape) <= 3 or img_shape[3] == 1:
-        return in_file
-
-    # Otherwise, mean over time dimension and write a new file
-    data = img.get_data()
-    mean_data = data.mean(axis=3)
-    mean_img = Nifti1Image(mean_data, img.get_affine(), img.get_header())
-
-    # Write the mean image to disk and return the filename
-    out_file = fname_presuffix(in_file, suffix="_mean", newpath=getcwd())
-    mean_img.to_filename(out_file)
-    return out_file
-
-
 def extract_mc_target(in_file):
     """Extract the middle frame of a timeseries."""
-    img = nib.load(timeseries)
+    img = nib.load(in_file)
     data = img.get_data()
 
     middle_vol = data.shape[-1] // 2
@@ -616,8 +566,7 @@ def realign_report(target_file, realign_params, displace_params):
     n_row, n_col = n_slices // 8, 8
     start = n_slices % n_col // 2
     figsize = (10, 1.375 * n_row)
-    f, axes = plt.subplots(n_row, n_col, figsize=figsize)
-    f.set_facecolor("k")
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
 
     vmin, vmax = 0, moss.percentiles(data, 99)
     for i, ax in enumerate(axes.ravel(), start):
@@ -689,8 +638,7 @@ def write_mask_report(mask_file, orig_file, mean_file):
     figsize = (10, 1.375 * n_row)
 
     # Write the functional mask image
-    f, axes = plt.subplots(n_row, n_col, figsize=figsize)
-    f.set_facecolor("k")
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
     vmin, vmax = 0, moss.percentiles(orig, 98)
 
     for i, ax in enumerate(axes.ravel(), start):
@@ -706,8 +654,7 @@ def write_mask_report(mask_file, orig_file, mean_file):
     plt.close(f)
 
     # Write the mean func image
-    f, axes = plt.subplots(n_row, n_col, figsize=figsize)
-    f.set_facecolor("k")
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
     vmin, vmax = 0, moss.percentiles(mean, 98)
 
     for i, ax in enumerate(axes.ravel(), start):
@@ -777,34 +724,44 @@ def detect_artifacts(timeseries, mask_file, motion_file,
 
 def write_coreg_plot(subject_id, in_file):
     """Plot the wm surface edges on the mean functional."""
-    import os
-    import os.path as op
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import nibabel as nib
-    from nipy.labs import viz
-    bold_img = nib.load(in_file)
-    bold_data = bold_img.get_data()
-    aff = bold_img.get_affine()
+    bold = nib.load(in_file).get_data()
 
+    # Load the white matter volume from recon-all
     subj_dir = os.environ["SUBJECTS_DIR"]
-    wm_file = op.join(subj_dir, subject_id, "mri/wm.mgz")
-    wm_data = nib.load(wm_file).get_data()
+    wm_file = os.path.join(subj_dir, subject_id, "mri/wm.mgz")
+    wm = nib.load(wm_file).get_data()
 
-    f = plt.figure(figsize=(12, 6))
-    cut_coords = np.linspace(0, 60, 8).reshape(2, 4)
-    ax_positions = [(0, 0, 1, .5), (0, .5, 1, .5)]
-    for cc, ap in zip(cut_coords, ax_positions):
-        slicer = viz.plot_anat(bold_data, aff, cut_coords=cc,
-                               draw_cross=False, annotate=False,
-                               slicer="z", axes=ap, figure=f)
-        try:
-            slicer.contour_map(wm_data, aff, colors="gold")
-        except ValueError:
-            pass
+    # Find the limits of the data
+    # note that FS conformed space is not (x, y, z)
+    xdata = np.flatnonzero(bold.any(axis=1).any(axis=1))
+    xmin, xmax = xdata.min(), xdata.max()
+    ydata = np.flatnonzero(bold.any(axis=0).any(axis=0))
+    ymin, ymax = ydata.min(), ydata.max()
+    zdata = np.flatnonzero(wm.any(axis=0).any(axis=1))
+    zmin, zmax = zdata.min() + 10, zdata.max() - 25
 
-    out_file = op.abspath("func2anat.png")
-    plt.savefig(out_file)
+    # Figure out the plot parameters
+    n_slices = (zmax - zmin) // 3
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2 + zmin
+    figsize = (10, 1.375 * n_row)
+    slices = (start + np.arange(zmax - zmin))[::3][:n_slices]
+
+    # Draw the slices and save
+    vmin, vmax = 0, moss.percentiles(bold, 99)
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
+    for i, ax in enumerate(axes.ravel()):
+        i = slices[i]
+        ax.imshow(bold[xmin:xmax, i, ymin:ymax].T, cmap="gray",
+                  vmin=vmin, vmax=vmax)
+        ax.contour(wm[xmin:xmax, i, ymin:ymax].T, linewidths=.5,
+                   cmap=mpl.colors.ListedColormap(["#C41E3A"]))
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    out_file = os.path.abspath("func2anat.png")
+    plt.savefig(out_file, dpi=100, bbox_inches="tight",
+                facecolor="k", edgecolor="k")
     return out_file
 
 
