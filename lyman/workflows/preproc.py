@@ -101,20 +101,6 @@ def create_preprocessing_workflow(name="preproc",
     # Run a conservative skull strip and get a brain mask
     skullstrip = create_skullstrip_workflow()
 
-    # Automatically detect motion and intensity outliers
-    artifacts = MapNode(Function(["timeseries",
-                                  "mask_file",
-                                  "motion_file",
-                                  "intensity_thresh",
-                                  "motion_thresh"],
-                                 ["artifact_report"],
-                                 detect_artifacts,
-                                 imports),
-                        ["timeseries", "mask_file", "motion_file"],
-                        "artifacts")
-    artifacts.inputs.intensity_thresh = intensity_threshold
-    artifacts.inputs.motion_thresh = motion_threshold
-
     # Estimate a registration from funtional to anatomical space
     coregister = create_bbregister_workflow()
 
@@ -131,6 +117,20 @@ def create_preprocessing_workflow(name="preproc",
                                               highpass_sigma,
                                               "unsmoothed_timeseries")
 
+    # Automatically detect motion and intensity outliers
+    artifacts = MapNode(Function(["timeseries",
+                                  "mask_file",
+                                  "motion_file",
+                                  "intensity_thresh",
+                                  "motion_thresh"],
+                                 ["artifact_report"],
+                                 detect_artifacts,
+                                 imports),
+                        ["timeseries", "mask_file", "motion_file"],
+                        "artifacts")
+    artifacts.inputs.intensity_thresh = intensity_threshold
+    artifacts.inputs.motion_thresh = motion_threshold
+
     preproc.connect([
         (inputnode, prepare,
             [("timeseries", "in_file")]),
@@ -141,8 +141,7 @@ def create_preprocessing_workflow(name="preproc",
         (realign, artifacts,
             [("outputs.motion_file", "motion_file")]),
         (skullstrip, artifacts,
-            [("outputs.timeseries", "timeseries"),
-             ("outputs.mask_file", "mask_file")]),
+            [("outputs.mask_file", "mask_file")]),
         (skullstrip, coregister,
             [("outputs.mean_file", "inputs.source_file")]),
         (inputnode, coregister,
@@ -158,6 +157,8 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.timeseries", "inputs.timeseries")]),
         (skullstrip, filter_rough,
             [("outputs.mask_file", "inputs.mask_file")]),
+        (filter_rough, artifacts,
+            [("outputs.timeseries", "timeseries")]),
         ])
 
     # Define the outputs of the top-level workflow
