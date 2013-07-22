@@ -16,8 +16,8 @@ from nipype.interfaces.io import DataGrabber, DataSink
 from nipype.interfaces.utility import IdentityInterface
 
 import lyman.workflows as wf
-from lyman import tools
 from lyman import graphutils as gu
+from lyman import frontend as fe
 from lyman.tools.commandline import parser
 
 
@@ -26,10 +26,10 @@ def main(arglist):
     args = parse_args(arglist)
 
     # Get and process specific information
-    project = tools.gather_project_info()
+    project = fe.gather_project_info()
     if project["default_exp"] is not None and args.experiment is None:
         args.experiment = project["default_exp"]
-    exp = tools.gather_experiment_info(args.experiment, args.altmodel)
+    exp = fe.gather_experiment_info(args.experiment, args.altmodel)
 
     if args.altmodel:
         exp_name = "-".join([args.experiment, args.altmodel])
@@ -45,7 +45,7 @@ def main(arglist):
     crashdump_dir = "/tmp/%d" % time.time()
 
     # Subject source (no iterables here)
-    subject_list = tools.determine_subjects(args.subjects)
+    subject_list = fe.determine_subjects(args.subjects)
     subj_source = Node(IdentityInterface(fields=["subject_id"]),
                        name="subj_source")
     subj_source.inputs.subject_id = subject_list
@@ -110,7 +110,7 @@ def main(arglist):
     mfx.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Execute
-    tools.run_workflow(mfx, args=args)
+    fe.run_workflow(mfx, args=args)
 
     # Clean up
     if project["rm_working_dir"]:

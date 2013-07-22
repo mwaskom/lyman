@@ -1,27 +1,8 @@
 import numpy as np
 import pandas as pd
-from argparse import Namespace
 from nipype.testing import assert_equal
 
 from .. import main
-
-
-def test_determine_engine():
-
-    plugin_dict = dict(linear="Linear",
-                       multiproc="MultiProc",
-                       ipython="IPython",
-                       torque="PBS")
-
-    for arg, plugin_str in plugin_dict.items():
-        args = Namespace(plugin=arg, queue=None)
-        if arg == "multiproc":
-            args.nprocs = 4
-        plugin, plugin_args = main.determine_engine(args)
-        yield assert_equal, plugin, plugin_str
-
-        if arg == "multiproc":
-            yield assert_equal, plugin_args, dict(n_procs=4, qsub_args="")
 
 
 def test_locate_peaks():

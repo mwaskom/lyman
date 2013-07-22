@@ -17,7 +17,7 @@ from nipype.interfaces.utility import IdentityInterface
 
 import lyman.workflows as wf
 from lyman import graphutils as gu
-from lyman import tools
+from lyman import frontend as fe
 from lyman.tools.commandline import parser
 
 
@@ -26,16 +26,16 @@ def main(arglist):
     args = parse_args(arglist)
 
     # Get and process specific information
-    project = tools.gather_project_info()
+    project = fe.gather_project_info()
     if project["default_exp"] is not None and args.experiment is None:
         args.experiment = project["default_exp"]
-    exp = tools.gather_experiment_info(args.experiment, args.altmodel)
+    exp = fe.gather_experiment_info(args.experiment, args.altmodel)
 
     # Set up the SUBJECTS_DIR for Freesurfer
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
 
     # Subject is always highest level of parameterization
-    subject_list = tools.determine_subjects(args.subjects)
+    subject_list = fe.determine_subjects(args.subjects)
     subj_source = gu.make_subject_source(subject_list)
 
     # Can run model+ processing several times on preprocessed data
@@ -110,7 +110,7 @@ def main(arglist):
     preproc.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly execute the workflow, depending on the command line
-    tools.run_workflow(preproc, "preproc", args)
+    fe.run_workflow(preproc, "preproc", args)
 
     # Timeseries Model
     # ================
@@ -156,7 +156,7 @@ def main(arglist):
     model.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly execute the workflow
-    tools.run_workflow(model, "model", args)
+    fe.run_workflow(model, "model", args)
 
     # Across-Run Registration
     # =======================
@@ -298,7 +298,7 @@ def main(arglist):
     reg.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly run registration workflow and clean up
-    tools.run_workflow(reg, "reg", args)
+    fe.run_workflow(reg, "reg", args)
 
     # Cross-Run Fixed Effects Model
     # -----------------------------
@@ -386,7 +386,7 @@ def main(arglist):
     ffx.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly run fixed effects workflow
-    tools.run_workflow(ffx, "ffx", args)
+    fe.run_workflow(ffx, "ffx", args)
 
     # Clean-up
     # --------
