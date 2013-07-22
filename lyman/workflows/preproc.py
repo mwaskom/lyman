@@ -478,7 +478,7 @@ def prep_timeseries(in_file, frames_to_toss):
     hdr = img.get_header()
 
     data = data[..., frames_to_toss:]
-    hdr.set_data_dtype(np.float64)
+    hdr.set_data_dtype(np.float32)
 
     new_img = nib.Nifti1Image(data, aff, hdr)
     out_file = os.path.abspath("timeseries.nii.gz")
