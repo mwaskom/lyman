@@ -89,50 +89,14 @@ def create_preprocessing_workflow(name="preproc",
     susan = create_susan_smooth()
     susan.inputs.inputnode.fwhm = smooth_fwhm
 
-    # Scale the grand median of the timeserieses to 10000
-    scale_smooth = MapNode(Function(input_names=["in_file",
-                                                 "mask",
-                                                 "statistic",
-                                                 "target"],
-                                     output_names=["out_file"],
-                                     function=scale_timeseries),
-                       iterfield=["in_file", "mask"],
-                       name="scale_smooth")
-    scale_smooth.inputs.statistic = "median"
-    scale_smooth.inputs.target = 10000
+    # Scale and filter the timeseries
+    filter_smooth = create_filtering_workflow("filter_smooth",
+                                              highpass_sigma,
+                                              "smoothed_timeseries")
 
-    scale_rough = MapNode(util.Function(input_names=["in_file",
-                                                      "mask",
-                                                      "statistic",
-                                                      "target"],
-                                        output_names=["out_file"],
-                                        function=scale_timeseries),
-                           iterfield=["in_file", "mask"],
-                           name="scale_rough")
-    scale_rough.inputs.statistic = "median"
-    scale_rough.inputs.target = 10000
-
-    # High pass filter the two timeserieses
-    hpfilt_smooth = MapNode(fsl.TemporalFilter(
-                                highpass_sigma=highpass_sigma),
-                            iterfield=["in_file"],
-                            name="hpfilt_smooth")
-
-    hpfilt_rough = MapNode(fsl.TemporalFilter(
-                               highpass_sigma=highpass_sigma),
-                           iterfield=["in_file"],
-                           name="hpfilt_rough")
-
-    # Rename the output timeserieses
-    rename_smooth = MapNode(util.Rename(format_string="smoothed_timeseries",
-                                        keep_ext=True),
-                            iterfield=["in_file"],
-                            name="rename_smooth")
-
-    rename_rough = MapNode(util.Rename(format_string="unsmoothed_timeseries",
-                                       keep_ext=True),
-                           iterfield=["in_file"],
-                           name="rename_rough")
+    filter_rough = create_filtering_workflow("filter_rough",
+                                              highpass_sigma,
+                                              "unsmoothed_timeseries")
 
     preproc.connect([
         (inputnode, prepare,
@@ -153,22 +117,14 @@ def create_preprocessing_workflow(name="preproc",
         (skullstrip, susan,
             [("outputs.mask_file", "inputnode.mask_file"),
              ("outputs.timeseries", "inputnode.in_files")]),
-        (susan, scale_smooth,
-            [("outputnode.smoothed_files", "in_file")]),
-        (skullstrip, scale_smooth,
-            [("outputs.mask_file", "mask")]),
-        (skullstrip, scale_rough,
-            [("outputs.timeseries", "in_file")]),
-        (skullstrip, scale_rough,
-            [("outputs.mask_file", "mask")]),
-        (scale_smooth, hpfilt_smooth,
-            [("out_file", "in_file")]),
-        (scale_rough, hpfilt_rough,
-            [("out_file", "in_file")]),
-        (hpfilt_smooth, rename_smooth,
-            [("out_file", "in_file")]),
-        (hpfilt_rough, rename_rough,
-            [("out_file", "in_file")]),
+        (susan, filter_smooth,
+            [("outputnode.smoothed_files", "iinputs.timeseries")]),
+        (skullstrip, filter_smooth,
+            [("outputs.mask_file", "inputs.mask_file")]),
+        (skullstrip, filter_rough,
+            [("outputs.timeseries", "inputs.timeseries")]),
+        (skullstrip, filter_rough,
+            [("outputs.mask_file", "inputs.mask_file")]),
         ])
 
     report = MapNode(Function(input_names=["subject_id",
@@ -248,8 +204,6 @@ def create_preprocessing_workflow(name="preproc",
 def create_realignment_workflow(name="realignment", temporal_interp=True,
                                 TR=2, slice_order="up", interleaved=True):
     """Motion and slice-time correct the timeseries and summarize."""
-
-    # Define the workflow inputs
     inputnode = Node(IdentityInterface(["timeseries"], "inputs"))
 
     # Get the middle volume of each run for motion correction
@@ -431,8 +385,7 @@ def create_skullstrip_workflow(name="skullstrip"):
 def create_bbregister_workflow(name="bbregister",
                                contrast_type="t2",
                                partial_brain=False):
-
-    # Define the workflow inputs
+    """Find a linear transformation to align the EPI file with the anatomy."""
     in_fields = ["subject_id", "source_file"]
     if partial_brain:
         in_fields.append("whole_brain_epi")
@@ -486,6 +439,44 @@ def create_bbregister_workflow(name="bbregister",
                 ])
 
     return bbregister
+
+
+def create_filtering_workflow(name="filter",
+                              highpass_sigma=32,
+                              output_name="timeseries"):
+    """Scale the timeseries and high-pass-filter it."""
+    inputnode = Node(IdentityInterface(["timeseries", "mask_file"]),
+                     "inputs")
+
+    scale = MapNode(Function(["in_file",
+                              "mask_file"],
+                             ["out_file"],
+                             scale_timeseries,
+                             ["import os",
+                              "import numpy as np",
+                              "import nibabel as nib"]),
+                    ["in_file", "mask_file"],
+                    "scale")
+
+    filter = MapNode(fsl.TemporalFilter(highpass_sigma=highpass_sigma,
+                                        out_file=output_name + ".nii.gz"),
+                     "in_file",
+                     "filter")
+
+    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
+
+    filtering = Workflow(name)
+    filtering.connect([
+        (inputnode, scale,
+            [("timeseries", "in_file"),
+             ("mask_file", "mask_file")]),
+        (scale, filter,
+            [("out_file", "in_file")]),
+        (filter, outputnode,
+            [("out_file", "timeseries")]),
+        ])
+
+    return filtering
 
 
 # ------------------------
@@ -765,17 +756,15 @@ def write_coreg_plot(subject_id, in_file):
     return out_file
 
 
-def scale_timeseries(in_file, mask, statistic="median", target=10000):
-
-    import os.path as op
-    import numpy as np
-    import nibabel as nib
-    from nipype.utils.filemanip import split_filename
-
+def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
+    """Scale an entire series with a single number."""
     ts_img = nib.load(in_file)
     ts_data = ts_img.get_data()
     mask = nib.load(mask).get_data().astype(bool)
 
+    # Flexibly get the statistic value
+    # this has to be stringly-typed because nipype
+    # can't pass around functions
     stat_value = getattr(np, statistic)(ts_data[mask])
 
     scale_value = float(target) / stat_value
@@ -784,8 +773,7 @@ def scale_timeseries(in_file, mask, statistic="median", target=10000):
                                  ts_img.get_affine(),
                                  ts_img.get_header())
 
-    pth, fname, ext = split_filename(in_file)
-    out_file = op.abspath(fname + "_scaled.nii.gz")
+    out_file = os.path.abspath("timeseries_scaled.nii.gz")
     scaled_img.to_filename(out_file)
 
     return out_file
