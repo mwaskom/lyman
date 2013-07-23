@@ -18,7 +18,7 @@ from sklearn.cross_validation import (KFold,
                                       LeaveOneLabelOut)
 
 import moss
-from lyman.frontend import gather_project_info, gather_experiment_info
+from lyman import gather_project_info, gather_experiment_info
 
 
 def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,

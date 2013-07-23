@@ -1,3 +1,4 @@
+"""Forward facing lyman tools with information about ecosystem."""
 import os
 import re
 import sys
@@ -76,11 +77,16 @@ def verify_experiment_info(exp_dict):
         raise ValueError("slice_order must be 'up' or 'down'")
 
 
-def determine_subjects(subject_arg):
-    """Given list of names or file with list of names, return the list."""
-    if op.isfile(subject_arg[0]):
-        return np.loadtxt(subject_arg[0], str).tolist()
-    return subject_arg
+def determine_subjects(subject_arg=None):
+    """Intelligently find a list of subjects in a variety of ways."""
+    if subject_arg is None:
+        subject_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
+        subjects = np.loadtxt(subject_file, str).tolist()
+    elif op.isfile(subject_arg[0]):
+        subjects = np.loadtxt(subject_arg[0], str).tolist()
+    else:
+        subjects = subject_arg
+    return subjects
 
 
 def determine_engine(args):
