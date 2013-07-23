@@ -618,10 +618,10 @@ def write_mask_report(mask_file, orig_file, mean_file):
     f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
     vmin, vmax = 0, moss.percentiles(orig, 98)
 
+    cmap = mpl.colors.ListedColormap(["MediumSpringGreen"])
     for i, ax in enumerate(axes.ravel(), start):
         ax.imshow(orig[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
-        ax.imshow(mask[..., i].T, alpha=.6,
-                  cmap=mpl.colors.ListedColormap(["MediumSpringGreen"]))
+        ax.imshow(mask[..., i].T, alpha=.6, cmap=cmap)
         ax.set_xticks([])
         ax.set_yticks([])
     f.subplots_adjust(hspace=1e-5, wspace=1e-5)
@@ -714,7 +714,7 @@ def write_coreg_plot(subject_id, in_file):
     xmin, xmax = xdata.min(), xdata.max()
     ydata = np.flatnonzero(bold.any(axis=0).any(axis=0))
     ymin, ymax = ydata.min(), ydata.max()
-    zdata = np.flatnonzero(wm.any(axis=0).any(axis=1))
+    zdata = np.flatnonzero(bold.any(axis=0).any(axis=1))
     zmin, zmax = zdata.min() + 10, zdata.max() - 25
 
     # Figure out the plot parameters
@@ -727,12 +727,16 @@ def write_coreg_plot(subject_id, in_file):
     # Draw the slices and save
     vmin, vmax = 0, moss.percentiles(bold, 99)
     f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
-    for i, ax in enumerate(axes.ravel()):
+    cmap = mpl.colors.ListedColormap(["#C41E3A"])
+    for i, ax in enumerate(reversed(axes.ravel())):
         i = slices[i]
-        ax.imshow(bold[xmin:xmax, i, ymin:ymax].T, cmap="gray",
-                  vmin=vmin, vmax=vmax)
-        ax.contour(wm[xmin:xmax, i, ymin:ymax].T, linewidths=.5,
-                   cmap=mpl.colors.ListedColormap(["#C41E3A"]))
+        ax.imshow(np.flipud(bold[xmin:xmax, i, ymin:ymax].T),
+                  cmap="gray", vmin=vmin, vmax=vmax)
+        try:
+            ax.contour(np.flipud(wm[xmin:xmax, i, ymin:ymax].T),
+                       linewidths=.5, cmap=cmap)
+        except ValueError:
+            pass
         ax.set_xticks([])
         ax.set_yticks([])
 
