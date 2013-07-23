@@ -15,10 +15,9 @@ from nipype.pipeline.engine import Node, MapNode
 from nipype.interfaces.io import DataGrabber, DataSink
 from nipype.interfaces.utility import IdentityInterface
 
+import lyman
 import lyman.workflows as wf
-from lyman import graphutils as gu
-from lyman import frontend as fe
-from lyman.tools.commandline import parser
+from lyman import tools
 
 
 def main(arglist):
@@ -26,10 +25,10 @@ def main(arglist):
     args = parse_args(arglist)
 
     # Get and process specific information
-    project = fe.gather_project_info()
+    project = lyman.gather_project_info()
     if project["default_exp"] is not None and args.experiment is None:
         args.experiment = project["default_exp"]
-    exp = fe.gather_experiment_info(args.experiment, args.altmodel)
+    exp = lyman.gather_experiment_info(args.experiment, args.altmodel)
 
     if args.altmodel:
         exp_name = "-".join([args.experiment, args.altmodel])
@@ -45,7 +44,7 @@ def main(arglist):
     crashdump_dir = "/tmp/%d" % time.time()
 
     # Subject source (no iterables here)
-    subject_list = fe.determine_subjects(args.subjects)
+    subject_list = lyman.determine_subjects(args.subjects)
     subj_source = Node(IdentityInterface(fields=["subject_id"]),
                        name="subj_source")
     subj_source.inputs.subject_id = subject_list
@@ -99,7 +98,7 @@ def main(arglist):
                              parameterization=False),
                     name="mfx_sink")
 
-    mfx_outwrap = gu.OutputWrapper(mfx, subj_source,
+    mfx_outwrap = tools.OutputWrapper(mfx, subj_source,
                                       mfx_sink, mfx_output)
     mfx_outwrap.sink_outputs()
     mfx.connect(contrast_source, "l1_contrast",
@@ -110,7 +109,7 @@ def main(arglist):
     mfx.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Execute
-    fe.run_workflow(mfx, args=args)
+    lyman.run_workflow(mfx, args=args)
 
     # Clean up
     if project["rm_working_dir"]:
@@ -119,6 +118,7 @@ def main(arglist):
 
 def parse_args(arglist):
     """Take an arglist and return an argparse Namespace."""
+    parser = tools.parser
     parser.add_argument("-experiment", help="experimental paradigm")
     parser.add_argument("-altmodel", help="alternate model to fit")
     parser.add_argument("-regspace", default="mni",

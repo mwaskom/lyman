@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from nipype.testing import assert_equal
 
-from .. import main
+from .. import mixedfx as mfx 
 
 
 def test_locate_peaks():
@@ -18,7 +18,7 @@ def test_locate_peaks():
         res = dict(zip(["MaxProb Region", "Prob"], list(res)))
         print res
         res = pd.DataFrame(res, index=[0])
-        yield assert_equal, np.array(res), np.array(main.locate_peaks(coord))
+        yield assert_equal, np.array(res), np.array(mfx.locate_peaks(coord))
 
 
 def test_shorten_name():
@@ -30,7 +30,7 @@ def test_shorten_name():
              ("Right Hippocampus", "R Hippocampus", "sub")]
 
     for orig, new, atlas in names:
-        yield assert_equal, new, main.shorten_name(orig, atlas)
+        yield assert_equal, new, mfx.shorten_name(orig, atlas)
 
 
 def test_vox_to_mni():
@@ -42,4 +42,4 @@ def test_vox_to_mni():
     for vox, mni in coords:
         vox = np.atleast_2d(vox)
         mni = np.atleast_2d(mni)
-        yield assert_equal, mni, main.vox_to_mni(vox)
+        yield assert_equal, mni, mfx.vox_to_mni(vox)
