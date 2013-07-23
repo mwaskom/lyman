@@ -11,9 +11,8 @@ import os.path as op
 
 import matplotlib as mpl
 mpl.use("Agg")
-from nipype.pipeline.engine import Node, MapNode
-from nipype.interfaces.io import DataGrabber, DataSink
-from nipype.interfaces.utility import IdentityInterface
+
+from nipype import Node, MapNode, DataGrabber, DataSink, IdentityInterface
 
 import lyman
 import lyman.workflows as wf
@@ -124,7 +123,8 @@ def parse_args(arglist):
     parser.add_argument("-regspace", default="mni",
                         choices=wf.spaces,
                         help="common space for registration and fixed effects")
-    parser.add_argument("-output", default="group", help="output directory name")
+    parser.add_argument("-output", default="group",
+                        help="output directory name")
     return parser.parse_args(arglist)
 
 if __name__ == "__main__":

@@ -11,9 +11,8 @@ import os.path as op
 
 import matplotlib as mpl
 mpl.use("Agg")
-from nipype.pipeline.engine import Node
-from nipype.interfaces.io import DataGrabber, DataSink
-from nipype.interfaces.utility import IdentityInterface
+
+from nipype import Node, DataGrabber, DataSink, IdentityInterface
 
 import lyman
 import lyman.workflows as wf
