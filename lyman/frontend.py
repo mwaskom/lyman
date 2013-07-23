@@ -10,14 +10,21 @@ import numpy as np
 
 def gather_project_info():
     """Import project information based on environment settings."""
-    proj_file = op.join(os.environ["LYMAN_DIR"], "project.py")
+    lyman_dir = os.environ["LYMAN_DIR"]
+    proj_file = op.join(lyman_dir, "project.py")
     try:
         project = sys.modules["project"]
     except KeyError:
         project = imp.load_source("project", proj_file)
-    return dict(
-        [(k, v) for k, v in project.__dict__.items()
-            if not re.match("__.*__", k)])
+
+    project_dict = dict()
+    for dir in ["data", "analysis", "working"]:
+        path = op.abspath(op.join(lyman_dir, getattr(project, dir + "_dir")))
+        project_dict[dir + "_dir"] = path
+    project_dict["default_exp"] = project.default_exp
+    project_dict["rm_working_dir"] = project.rm_working_dir
+
+    return project_dict
 
 
 def gather_experiment_info(experiment_name, altmodel=None):
