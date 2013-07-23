@@ -40,7 +40,7 @@ import time
 import os.path as op
 import argparse
 
-from lyman import MaskFactory
+from lyman.maskfactory import MaskFactory
 
 
 def main(arglist):
