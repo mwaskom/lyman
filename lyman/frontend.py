@@ -20,40 +20,57 @@ def gather_project_info():
             if not re.match("__.*__", k)])
 
 
-def gather_experiment_info(experiment_name, altmodel=None):
+def gather_experiment_info(exp_name=None, altmodel=None):
     """Import an experiment module and add some formatted information."""
-    if altmodel is None:
-        module_name = experiment_name
-    else:
-        module_name = "-".join([experiment_name, altmodel])
-    exp_file = op.join(os.environ["LYMAN_DIR"], module_name + ".py")
-    try:
-        exp = sys.modules[module_name]
-    except KeyError:
-        exp = imp.load_source(module_name, exp_file)
+    lyman_dir = os.environ["LYMAN_DIR"]
 
-    # Create an experiment dict stripping the OOP hooks
-    exp_dict = dict(
-        [(k, v) for k, v in exp.__dict__.items() if not re.match("__.*__", k)])
+    # Allow easy use of default experiment
+    if exp_name is None:
+        project = gather_project_info()
+        exp_name = project["default_exp"]
+
+    # Import the base experiment
+    try:
+        exp = sys.modules[exp_name]
+    except KeyError:
+        exp_file = op.join(lyman_dir, exp_name + ".py")
+        exp = imp.load_source(exp_name, exp_file)
+
+    keep = lambda k: not re.match("__.*__". k)
+    exp_dict = {k: v for k, v in exp.__dict__.items() if keep(k)}
+
+    # Possibly import the alternate model details
+    if altmodel is not None:
+        try:
+            alt = sys.modules[altmodel]
+        except KeyError:
+            alt_file = op.join(lyman_dir, "%s-%s.py" % (exp_name, altmodel))
+            alt = imp.load_source(altmodel, alt_file)
+
+    alt_dict = {k: v for k, v in alt.__dict__.items() if keep(k)}
+
+    # Update the base information with the altmodel info
+    exp_dict.update(alt_dict)
 
     # Verify some experiment dict attributes
     verify_experiment_info(exp_dict)
 
     # Save the __doc__ attribute to the dict
-    exp_dict["comments"] = exp.__doc__
+    exp_dict["comments"] = exp.__doc__ + alt.__doc__
 
     # Check if it looks like this is a partial FOV acquisition
-    parfov = True if "full_fov_epi" in exp_dict else False
-    exp_dict["partial_fov"] = parfov
+    exp_dict["partial_brain"] = bool(exp_dict.get("whole_brain_epi"))
+
+    # Temporal resolution. Mandatory.
+    exp_dict["TR"] = float(exp_dict["TR"])
 
     # Convert HPF cutoff to sigma for fslmaths
-    exp_dict["TR"] = float(exp_dict["TR"])
-    exp_dict["hpf_cutoff"] = float(exp_dict["hpf_cutoff"])
+    exp_dict["hpf_cutoff"] = float(exp_dict.get("hpf_cutoff", np.inf))
     exp_dict["hpf_sigma"] = (exp_dict["hpf_cutoff"] / 2.35) / exp_dict["TR"]
 
     # Setup the hrf_bases dictionary
-    exp_dict["hrf_bases"] = {exp_dict["hrf_model"]:
-                             {"derivs": exp_dict["hrf_derivs"]}}
+    exp_dict["hrf_bases"] = {exp_dict.get("hrf_model"):
+                             {"derivs": exp_dict.get("hrf_derivs")}}
 
     # Build contrasts list if neccesary
     if "contrasts" not in exp_dict:
@@ -72,7 +89,7 @@ def verify_experiment_info(exp_dict):
     if exp_dict["units"] not in ["secs", "scans"]:
         raise ValueError("units must be 'secs' or 'scans'")
 
-    if (exp_dict["slice_time_correction"]
+    if (exp_dict["temporal_interp"]
             and exp_dict["slice_order"] not in ["up", "down"]):
         raise ValueError("slice_order must be 'up' or 'down'")
 
