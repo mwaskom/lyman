@@ -251,11 +251,13 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
     husl_colors = reversed(seaborn.husl_palette(len(peaks)))
     peak_cmap = mpl.colors.ListedColormap(list(husl_colors))
     f, axes = plt.subplots(**pltkws)
+    bg = np.zeros(mni_data.shape[:2])
     for i, ax in zip(slices, axes.ravel()):
+        ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
         ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
-                  cmap="gray", vmin=vmin, vmax=vmax)
-        ax.imshow(peak_data[xmin:xmax, ymin:ymax, i].T, cmap=peak_cmap,
-                  vmin=1, vmax=len(peaks) + 1, interpolation="nearest")
+                  cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
+        ax.imshow(peak_data[xmin:xmax, ymin:ymax, i].T,
+                  cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
         ax.set_xticks([])
         ax.set_yticks([])
     peaks_png = os.path.abspath("%s_peaks.png" % zname)
