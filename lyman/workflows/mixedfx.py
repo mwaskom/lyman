@@ -1,320 +1,290 @@
 import os
-import re
 import os.path as op
 
 import numpy as np
+import scipy as sp
 import pandas as pd
 import nibabel as nib
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 
-from nipype.interfaces import fsl
-from nipype.interfaces.utility import IdentityInterface, Function
-from nipype.pipeline.engine import Node, MapNode, Workflow
-from .. import tools
+from nipype import fsl, IdentityInterface, Function, Node, MapNode, Workflow
+
+import seaborn
+from moss import locator
+
+imports = ["import os",
+           "import os.path as op",
+           "import numpy as np",
+           "import scipy as sp",
+           "import pandas as pd",
+           "import nibabel as nib",
+           "import matplotlib as mpl",
+           "import matplotlib.pyplot as plt",
+           "from nipype import fsl",
+           "from moss import locator",
+           "import seaborn"]
 
 
 def create_volume_mixedfx_workflow(name="volume_group",
                                    subject_list=[],
-                                   regressors=[], contrasts=[],
+                                   regressors=[],
+                                   contrasts=[],
                                    flame_mode="flame1",
-                                   overlay_thresh=(2.3, 4.265),
-                                   cluster_zthresh=2.3, grf_pthresh=0.05):
+                                   cluster_zthresh=2.3,
+                                   grf_pthresh=0.05):
 
-    inputnode = Node(IdentityInterface(fields=["l1_contrast",
-                                               "copes",
-                                               "varcopes",
-                                               "dofs"]),
-                     name="inputnode")
+    inputnode = Node(IdentityInterface(["l1_contrast",
+                                        "copes",
+                                        "varcopes",
+                                        "dofs"]),
+                     "inputnode")
 
-    mergecope = Node(fsl.Merge(dimension="t"),
-                     name="mergecope")
+    mergecope = Node(fsl.Merge(dimension="t"), "mergecope")
 
-    mergevarcope = Node(fsl.Merge(dimension="t"),
-                        name="mergevarcope")
+    mergevarcope = Node(fsl.Merge(dimension="t"), "mergevarcope")
 
-    mergedof = Node(fsl.Merge(dimension="t"),
-                    name="mergedof")
+    mergedof = Node(fsl.Merge(dimension="t"), "mergedof")
 
     design = Node(fsl.MultipleRegressDesign(regressors=regressors,
                                             contrasts=contrasts),
-                  name="design")
+                  "design")
 
-    brain_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
-    bg_image = fsl.Info.standard_image("avg152T1_brain.nii.gz")
+    makemask = Node(Function(["varcope_file"],
+                             ["mask_file"],
+                             make_group_mask,
+                             imports),
+                    "makemask")
 
-    flameo = Node(fsl.FLAMEO(run_mode=flame_mode,
-                             mask_file=brain_mask),
-                  name="flameo")
+    flameo = Node(fsl.FLAMEO(run_mode=flame_mode), "flameo")
 
-    maskpng = Node(Function(input_names=["varcope_file",
-                                         "background_file",
-                                         "brain_mask"],
-                            output_names=["out_file"],
-                            function=mfx_mask_func),
-                   name="maskpng")
-    maskpng.inputs.brain_mask = brain_mask
-    maskpng.inputs.background_file = bg_image
-
-    smoothest = MapNode(fsl.SmoothEstimate(mask_file=brain_mask),
-                        iterfield=["zstat_file"],
-                        name="smoothest")
+    smoothest = MapNode(fsl.SmoothEstimate(), "zstat_file", "smoothest")
 
     cluster = MapNode(fsl.Cluster(threshold=cluster_zthresh,
                                   pthreshold=0.05,
                                   out_threshold_file=True,
                                   out_index_file=True,
                                   out_localmax_txt_file=True,
+                                  peak_distance=15,
                                   use_mm=True),
-                      iterfield=["in_file", "dlh", "volume"],
-                      name="cluster")
+                      ["in_file", "dlh", "volume"],
+                      "cluster")
 
-    overlay = MapNode(fsl.Overlay(auto_thresh_bg=True,
-                                  stat_thresh=overlay_thresh,
-                                  background_image=bg_image),
-                      iterfield=["stat_image"],
-                      name="overlay")
+    peaktable = MapNode(Function(["localmax_file"],
+                                 ["out_file"],
+                                 imports=imports,
+                                 function=cluster_table),
+                        "localmax_file",
+                        "peaktable")
 
-    slicer = MapNode(fsl.Slicer(image_width=872),
-                     iterfield=["in_file"],
-                     name="slicer")
-    slicer.inputs.sample_axial = 2
+    report = MapNode(Function(["mask_file",
+                               "zstat_file",
+                               "localmax_file",
+                               "cope_file"],
+                              ["report"],
+                              mfx_report,
+                              imports),
+                     ["zstat_file", "localmax_file"],
+                     "report")
 
-    boxplot = MapNode(Function(input_names=["cope_file", "localmax_file"],
-                               output_names=["out_file"],
-                               function=mfx_boxplot),
-                      iterfield=["localmax_file"],
-                      name="boxplot")
+    outputnode = Node(IdentityInterface(["mask_file",
+                                         "flameo_stats",
+                                         "thresh_zstat",
+                                         "cluster_image",
+                                         "cluster_peaks",
+                                         "report"]),
+                      "outputnode")
 
-    peaktable = MapNode(Function(input_names=["localmax_file"],
-                                 output_names=["out_file"],
-                                 imports=[
-                    "import os.path as op",
-                    "import pandas as pd",
-                    "import numpy as np",
-                    "from lyman.tools import locate_peaks, vox_to_mni"],
-                                 function=tools.cluster_table),
-                        iterfield=["localmax_file"],
-                        name="peaktable")
-
-    # Build pdf and html reports
-    report = Node(Function(input_names=["subject_list",
-                                        "l1_contrast",
-                                        "zstat_pngs",
-                                        "boxplots",
-                                        "peak_tables",
-                                        "mask_png",
-                                        "contrasts"],
-                              output_names=["reports"],
-                              function=write_mfx_report),
-                     name="report")
-    report.inputs.subject_list = subject_list
-    report.inputs.contrasts = contrasts
-
-    outputnode = Node(IdentityInterface(fields=["flameo_stats",
-                                                "thresh_zstat",
-                                                "cluster_image",
-                                                "cluster_peaks",
-                                                "zstat_pngs",
-                                                "mask_png",
-                                                "boxplots",
-                                                "reports"]),
-                      name="outputnode")
-
-    group_anal = Workflow(name=name)
-
-    group_anal.connect([
+    group = Workflow(name)
+    group.connect([
         (inputnode, mergecope,
             [("copes", "in_files")]),
         (inputnode, mergevarcope,
             [("varcopes", "in_files")]),
         (inputnode, mergedof,
             [("dofs", "in_files")]),
-        (inputnode, report,
-            [("l1_contrast", "l1_contrast")]),
         (mergecope, flameo,
             [("merged_file", "cope_file")]),
         (mergevarcope, flameo,
             [("merged_file", "var_cope_file")]),
-        (mergevarcope, maskpng,
+        (mergevarcope, makemask,
             [("merged_file", "varcope_file")]),
         (mergedof, flameo,
             [("merged_file", "dof_var_cope_file")]),
+        (makemask, flameo,
+            [("mask_file", "mask_file")]),
         (design, flameo,
             [("design_con", "t_con_file"),
              ("design_grp", "cov_split_file"),
              ("design_mat", "design_file")]),
         (flameo, smoothest,
             [("zstats", "zstat_file")]),
+        (makemask, smoothest,
+            [("mask_file", "mask_file")]),
         (smoothest, cluster,
             [("dlh", "dlh"),
              ("volume", "volume")]),
         (flameo, cluster,
             [("zstats", "in_file")]),
-        (mergecope, boxplot,
+        (makemask, report,
+            [("mask_file", "mask_file")]),
+        (cluster, report,
+            [("threshold_file", "zstat_file"),
+             ("localmax_txt_file", "localmax_file")]),
+        (mergecope, report,
             [("merged_file", "cope_file")]),
-        (cluster, boxplot,
-            [("localmax_txt_file", "localmax_file")]),
         (cluster, peaktable,
             [("localmax_txt_file", "localmax_file")]),
-        (cluster, overlay,
-            [("threshold_file", "stat_image")]),
-        (overlay, slicer,
-            [("out_file", "in_file")]),
-        (slicer, outputnode,
-            [("out_file", "zstat_pngs")]),
-        (slicer, report,
-            [("out_file", "zstat_pngs")]),
-        (maskpng, report,
-            [("out_file", "mask_png")]),
-        (boxplot, report,
-            [("out_file", "boxplots")]),
-        (peaktable, report,
-            [("out_file", "peak_tables")]),
-        (report, outputnode,
-            [("reports", "reports")]),
+        (makemask, outputnode,
+            [("mask_file", "mask_file")]),
+        (flameo, outputnode,
+            [("stats_dir", "flameo_stats")]),
         (cluster, outputnode,
             [("threshold_file", "thresh_zstat"),
              ("index_file", "cluster_image")]),
         (peaktable, outputnode,
              [("out_file", "cluster_peaks")]),
-        (boxplot, outputnode,
-            [("out_file", "boxplots")]),
-        (maskpng, outputnode,
-            [("out_file", "mask_png")]),
-        (flameo, outputnode,
-            [("stats_dir", "flameo_stats")])
+        (report, outputnode,
+            [("report", "report")]),
         ])
 
-    return group_anal, inputnode, outputnode
+    return group, inputnode, outputnode
 
 
-def mfx_mask_func(varcope_file, brain_mask, background_file):
-    from os.path import abspath
-    from nibabel import load, Nifti1Image
-    from subprocess import check_output
-    import numpy as np
-    varcope_img = load(varcope_file)
-    varcope_data = varcope_img.get_data()
-    mask_img = load(brain_mask)
-    mask_data = mask_img.get_data()
+def make_group_mask(varcope_file):
+    """Find the intersection of the MNI brain and var > 0 voxels."""
+    mni_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
+    mni_img = nib.load(mni_mask)
+    mask_data = mni_img.get_data().astype(bool)
 
-    pos_vars = np.all(varcope_data, axis=-1)
-    pos_vars = np.logical_and(pos_vars, mask_data)
+    # Find the voxels with positive variance
+    var_data = nib.load(varcope_file).get_data()
+    good_var = var_data.all(axis=-1)
 
-    pos_img = Nifti1Image(pos_vars,
-                          mask_img.get_affine(),
-                          mask_img.get_header())
-    pos_file = "pos_var.nii.gz"
-    pos_img.to_filename(pos_file)
+    # Find the intersection
+    mask_data *= good_var
 
-    overlay_cmd = ["overlay", "1", "0", background_file,
-                   "-a", pos_file, "0.5", "1.5", "pos_overlay.nii.gz"]
-    check_output(overlay_cmd)
-
-    out_file = abspath("pos_variance.png")
-    slicer_cmd = ["slicer", "pos_overlay.nii.gz", "-S", "2", "872", out_file]
-    check_output(slicer_cmd)
-
-    return out_file
+    # Save the mask file
+    new_img = nib.Nifti1Image(mask_data,
+                              mni_img.get_affine(),
+                              mni_img.get_header())
+    new_img.set_data_dtype(np.int16)
+    mask_file = os.path.abspath("group_mask.nii.gz")
+    new_img.to_filename(mask_file)
+    return mask_file
 
 
-def mfx_boxplot(cope_file, localmax_file):
-    """Plot the distribution of fixed effects COPEs at each local maximum."""
-    from os.path import abspath
-    from nibabel import load
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import seaborn as sns
-    sns.set()
+def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
+    """Plot various information related to the results."""
+    mni_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
+    mni_data = nib.load(mni_brain).get_data()
 
-    out_file = abspath("peak_boxplot.png")
-    peak_array = np.loadtxt(localmax_file, int, skiprows=1, usecols=(2, 3, 4))
+    mask_data = nib.load(mask_file).get_data()
+    mask = np.where(mask_data, 1, np.nan)
 
-    if not peak_array.any():
-        # If there wre no significant peaks, return an empty text file
-        with open(out_file, "w") as f:
-            f.write("")
-        return out_file
+    z_data = nib.load(zstat_file).get_data()
+    z_data[z_data < 2.3] = np.nan
 
-    cope_data = load(cope_file).get_data()
+    peaks = pd.read_table(localmax_file,
+                          delimiter="\t")[["x", "y", "z"]].values
+
+    # Find the plot parameters
+    xdata = np.flatnonzero(mni_data.any(axis=1).any(axis=1))
+    xmin, xmax = xdata.min(), xdata.max() + 1
+    ydata = np.flatnonzero(mni_data.any(axis=0).any(axis=1))
+    ymin, ymax = ydata.min(), ydata.max() + 1
+    zdata = np.flatnonzero(mni_data.any(axis=0).any(axis=0))
+    zmin, zmax = zdata.min(), zdata.max() + 1
+
+    n_slices = (zmax - zmin) // 2
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2 + zmin + 4
+    figsize = (10, 1.375 * n_row)
+    slices = (start + np.arange(zmax - zmin))[::2][:n_slices]
+    pltkws = dict(nrows=n_row, ncols=n_col, figsize=figsize, facecolor="k")
+    pngkws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
+
+    vmin, vmax = 0, mni_data.max()
+
+    # First plot the mask image
+    f, axes = plt.subplots(**pltkws)
+    cmap = mpl.colors.ListedColormap(["MediumSpringGreen"])
+    for i, ax in zip(slices, axes.ravel()):
+        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
+                  cmap="gray", vmin=vmin, vmax=vmax)
+        ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
+                  alpha=.7, cmap=cmap, interpolation="nearest")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    mask_png = os.path.abspath("group_mask.png")
+    plt.savefig(mask_png, **pngkws)
+
+    # Now plot the zstat image
+    mask = np.where(mask_data, np.nan, 1)
+    mask_cmap = mpl.colors.ListedColormap(["#160016"])
+    f, axes = plt.subplots(**pltkws)
+    for i, ax in zip(slices, axes.ravel()):
+        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
+                  cmap="gray", vmin=vmin, vmax=vmax)
+        ax.imshow(z_data[xmin:xmax, ymin:ymax, i].T,
+                  cmap="YlOrRd_r", vmin=2.3, vmax=4.26)
+        ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
+                  cmap=mask_cmap, alpha=.5, interpolation="nearest")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    zname = os.path.basename(zstat_file).replace(".nii.gz", "")
+    zstat_png = os.path.abspath("%s.png" % zname)
+    plt.savefig(zstat_png, **pngkws)
+
+    # Now plot the peak centroids
+    peak_data = np.zeros_like(z_data)
+    y, x = np.ogrid[-4: 4 + 1, -4:4 + 1]
+    disk = x ** 2 + y ** 2 <= 4 ** 2
+    dilator = np.dstack([disk, disk, np.zeros_like(disk)])
+    for i, peak in enumerate(peaks, 1):
+        spot = np.zeros_like(z_data)
+        spot[tuple(peak)] = 1
+        spot = sp.ndimage.binary_dilation(spot, dilator)
+        peak_data[spot] = i
+    peak_data[peak_data == 0] = np.nan
+
+    husl_colors = reversed(seaborn.husl_palette(len(peaks)))
+    peak_cmap = mpl.colors.ListedColormap(list(husl_colors))
+    f, axes = plt.subplots(**pltkws)
+    for i, ax in zip(slices, axes.ravel()):
+        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
+                  cmap="gray", vmin=vmin, vmax=vmax)
+        ax.imshow(peak_data[xmin:xmax, ymin:ymax, i].T, cmap=peak_cmap,
+                  vmin=1, vmax=len(peaks) + 1, interpolation="nearest")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    peaks_png = os.path.abspath("%s_peaks.png" % zname)
+    plt.savefig(peaks_png, **pngkws)
+
+    # Now make a boxplot of the peaks
+    seaborn.set()
+    cope_data = nib.load(cope_file).get_data()
     peak_dists = []
-    for coords in peak_array:
+    for coords in reversed(peaks):
         peak_dists.append(cope_data[tuple(coords)])
     peak_dists.reverse()
     n_peaks = len(peak_dists)
-    fig = plt.figure(figsize=(7, float(n_peaks) / 2 + 0.5))
+    fig = plt.figure(figsize=(8, float(n_peaks) / 3 + 0.33))
     ax = fig.add_subplot(111)
-    sns.boxplot(np.transpose(peak_dists), color="PaleGreen",
-                vert=0, widths=0.5, ax=ax)
+    seaborn.boxplot(np.transpose(peak_dists),
+                    color="husl",
+                    vert=0, ax=ax)
     ax.axvline(0, c="#222222", ls="--")
     labels = range(1, n_peaks + 1)
     labels.reverse()
     ax.set_yticklabels(labels)
     ax.set_ylabel("Local Maximum")
     ax.set_xlabel("COPE Value")
-    ax.set_title("COPE Distributions")
     plt.tight_layout()
-    plt.savefig(out_file)
+    boxplot_png = os.path.abspath("peak_boxplot.png")
+    plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
 
-    return out_file
-
-
-def write_mfx_report(subject_list, l1_contrast, mask_png,
-                     zstat_pngs, peak_tables, boxplots, contrasts):
-    import time
-    import pandas as pd
-    from lyman.tools import write_workflow_report
-    from lyman.workflows.reporting import mfx_report_template
-
-    # Fill in the initial report template dict
-    report_dict = dict(now=time.asctime(),
-                       l1_contrast=l1_contrast,
-                       subject_list=", ".join(subject_list),
-                       mask_png=mask_png,
-                       n_subs=len(subject_list))
-
-    # Add the zstat image templates and update the dict
-    for i, con in enumerate(contrasts, 1):
-        report_dict["con%d_name" % i] = con[0]
-        report_dict["zstat%d_png" % i] = zstat_pngs[i - 1]
-        report_dict["boxplot%d_png" % i] = boxplots[i - 1]
-        header = "Zstat %d: %s" % (i, con[0])
-        mfx_report_template = "\n".join([
-             mfx_report_template,
-             header,
-             "".join(["^" for l in header]),
-             "",
-             "".join([".. image:: %(zstat", str(i), "_png)s"]),
-             "    :width: 6.5in",
-             "",
-             "Local Maxima",
-             "^^^^^^^^^^^^",
-             "",
-             "",
-             ])
-        peak_csv = peak_tables[i - 1]
-        peak_df = pd.read_csv(peak_csv, index_col="Peak").reset_index()
-        peak_str = peak_df.to_string(index=False)
-        peak_lines = ["    " + l for l in peak_str.split("\n")]
-        peak_str = "::\n\n" + "\n".join(peak_lines) + "\n"
-
-        mfx_report_template += peak_str
-
-        mfx_report_template = "\n".join([
-            mfx_report_template,
-            "\n".join([
-                "",
-                "COPE Distributions",
-                "^^^^^^^^^^^^^^^^^^",
-                "",
-                "".join([".. image:: %(boxplot", str(i), "_png)s"]),
-                "",
-                ])
-            ])
-
-    out_files = write_workflow_report("mfx",
-                                      mfx_report_template,
-                                      report_dict)
-    return out_files
+    return [mask_png, zstat_png, peaks_png, boxplot_png]
 
 def cluster_table(localmax_file):
     """Add some info to an FSL cluster file and format it properly."""
@@ -325,196 +295,12 @@ def cluster_table(localmax_file):
 
     # Find out where the peaks most likely are
     coords = ["x", "y", "z"]
-    loc_df = locate_peaks(np.array(df[coords]))
+    loc_df = locator.locate_peaks(np.array(df[coords]))
     df = pd.concat([df, loc_df], axis=1)
-    mni_coords = vox_to_mni(np.array(df[coords])).T
+    mni_coords = locator.vox_to_mni(np.array(df[coords])).T
     for i, ax in enumerate(coords):
         df[ax] = mni_coords[i]
 
     out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
     df.to_csv(out_file)
     return out_file
-
-
-def locate_peaks(vox_coords):
-    """Find most probable region in HarvardOxford Atlas of a vox coord."""
-    sub_names = harvard_oxford_sub_names
-    ctx_names = harvard_oxford_ctx_names
-    at_dir = op.join(os.environ["FSLDIR"], "data", "atlases")
-    ctx_data = nib.load(op.join(at_dir, "HarvardOxford",
-                            "HarvardOxford-cort-prob-2mm.nii.gz")).get_data()
-    sub_data = nib.load(op.join(at_dir, "HarvardOxford",
-                            "HarvardOxford-sub-prob-2mm.nii.gz")).get_data()
-
-    loc_list = []
-    for coord in vox_coords:
-        coord = tuple(coord)
-        ctx_index = np.argmax(ctx_data[coord])
-        ctx_prob = ctx_data[coord][ctx_index]
-        sub_index = np.argmax(sub_data[coord])
-        sub_prob = sub_data[coord][sub_index]
-
-        if not max(sub_prob, ctx_prob):
-            loc_list.append(("Unknown", 0))
-            continue
-        if not ctx_prob and sub_index in [0, 11]:
-            loc_list.append((sub_names[sub_index], sub_prob))
-            continue
-        if sub_prob > ctx_prob and sub_index not in [0, 1, 11, 12]:
-            loc_list.append((sub_names[sub_index], sub_prob))
-            continue
-        loc_list.append((ctx_names[ctx_index], ctx_prob))
-
-    return pd.DataFrame(loc_list, columns=["MaxProb Region", "Prob"])
-
-
-def shorten_name(region_name, atlas):
-    """Implement regexp sub for verbose Harvard Oxford Atlas region."""
-    sub_list = dict(ctx=harvard_oxford_ctx_subs,
-                    sub=harvard_oxford_sub_subs)
-    for pat, rep in sub_list[atlas]:
-        region_name = re.sub(pat, rep, region_name).strip()
-    return region_name
-
-
-def vox_to_mni(vox_coords):
-    """Given ijk voxel coordinates, return xyz from image affine.
-
-    The _to_mni part is rather a misnomer, although this at the moment
-    only gets used in the group volume workflows.
-
-    """
-    import numpy as np
-    from nibabel import load
-    from nipype.interfaces.fsl import Info
-
-    mni_file = Info.standard_image("avg152T1.nii.gz")
-    aff = load(mni_file).get_affine()
-    mni_coords = np.zeros_like(vox_coords)
-    for i, coord in enumerate(vox_coords):
-        coord = coord.astype(float)
-        mni_coords[i] = np.dot(aff, np.r_[coord, 1])[:3].astype(int)
-    return mni_coords
-
-
-harvard_oxford_sub_subs = [
-    ("Left", "L"),
-    ("Right", "R"),
-    ("Cerebral Cortex", "Ctx"),
-    ("Cerebral White Matter", "Cereb WM"),
-    ("Lateral Ventrica*le*", "LatVent"),
-]
-
-harvard_oxford_ctx_subs = [
-    ("Superior", "Sup"),
-    ("Middle", "Mid"),
-    ("Inferior", "Inf"),
-    ("Lateral", "Lat"),
-    ("Medial", "Med"),
-    ("Frontal", "Front"),
-    ("Parietal", "Par"),
-    ("Temporal", "Temp"),
-    ("Occipital", "Occ"),
-    ("Cingulate", "Cing"),
-    ("Cortex", "Ctx"),
-    ("Gyrus", "G"),
-    ("Sup Front G", "SFG"),
-    ("Mid Front G", "MFG"),
-    ("Inf Front G", "IFG"),
-    ("Sup Temp G", "STG"),
-    ("Mid Temp G", "MTG"),
-    ("Inf Temp G", "ITG"),
-    ("Parahippocampal", "Parahip"),
-    ("Juxtapositional", "Juxt"),
-    ("Intracalcarine", "Intracalc"),
-    ("Supramarginal", "Supramarg"),
-    ("Supracalcarine", "Supracalc"),
-    ("Paracingulate", "Paracing"),
-    ("Fusiform", "Fus"),
-    ("Orbital", "Orb"),
-    ("Opercul[ua][mr]", "Oper"),
-    ("temporooccipital", "tempocc"),
-    ("triangularis", "triang"),
-    ("opercularis", "oper"),
-    ("division", ""),
-    ("par[st] *", ""),
-    ("anterior", "ant"),
-    ("posterior", "post"),
-    ("superior", "sup"),
-    ("inferior", "inf"),
-    (" +", " "),
-    ("\(.+\)", ""),
-]
-
-harvard_oxford_sub_names = [
-    'L Cereb WM',
-    'L Ctx',
-    'L LatVent',
-    'L Thalamus',
-    'L Caudate',
-    'L Putamen',
-    'L Pallidum',
-    'Brain-Stem',
-    'L Hippocampus',
-    'L Amygdala',
-    'L Accumbens',
-    'R Cereb WM',
-    'R Ctx',
-    'R LatVent',
-    'R Thalamus',
-    'R Caudate',
-    'R Putamen',
-    'R Pallidum',
-    'R Hippocampus',
-    'R Amygdala',
-    'R Accumbens']
-
-harvard_oxford_ctx_names = [
-    'Front Pole',
-    'Insular Ctx',
-    'SFG',
-    'MFG',
-    'IFG, triang',
-    'IFG, oper',
-    'Precentral G',
-    'Temp Pole',
-    'STG, ant',
-    'STG, post',
-    'MTG, ant',
-    'MTG, post',
-    'MTG, tempocc',
-    'ITG, ant',
-    'ITG, post',
-    'ITG, tempocc',
-    'Postcentral G',
-    'Sup Par Lobule',
-    'Supramarg G, ant',
-    'Supramarg G, post',
-    'Angular G',
-    'Lat Occ Ctx, sup',
-    'Lat Occ Ctx, inf',
-    'Intracalc Ctx',
-    'Front Med Ctx',
-    'Juxt Lobule Ctx',
-    'Subcallosal Ctx',
-    'Paracing G',
-    'Cing G, ant',
-    'Cing G, post',
-    'Precuneous Ctx',
-    'Cuneal Ctx',
-    'Front Orb Ctx',
-    'Parahip G, ant',
-    'Parahip G, post',
-    'Lingual G',
-    'Temp Fus Ctx, ant',
-    'Temp Fus Ctx, post',
-    'Temp Occ Fus Ctx',
-    'Occ Fus G',
-    'Front Oper Ctx',
-    'Central Oper Ctx',
-    'Par Oper Ctx',
-    'Planum Polare',
-    'Heschl"s G',
-    'Planum Tempe',
-    'Supracalc Ctx',
-    'Occ Pole']
