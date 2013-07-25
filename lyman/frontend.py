@@ -36,7 +36,7 @@ def gather_experiment_info(exp_name=None, altmodel=None):
         exp_file = op.join(lyman_dir, exp_name + ".py")
         exp = imp.load_source(exp_name, exp_file)
 
-    keep = lambda k: not re.match("__.*__". k)
+    keep = lambda k: not re.match("__.*__", k)
     exp_dict = {k: v for k, v in exp.__dict__.items() if keep(k)}
 
     # Possibly import the alternate model details
@@ -47,16 +47,18 @@ def gather_experiment_info(exp_name=None, altmodel=None):
             alt_file = op.join(lyman_dir, "%s-%s.py" % (exp_name, altmodel))
             alt = imp.load_source(altmodel, alt_file)
 
-    alt_dict = {k: v for k, v in alt.__dict__.items() if keep(k)}
+        alt_dict = {k: v for k, v in alt.__dict__.items() if keep(k)}
 
-    # Update the base information with the altmodel info
-    exp_dict.update(alt_dict)
+        # Update the base information with the altmodel info
+        exp_dict.update(alt_dict)
 
     # Verify some experiment dict attributes
     verify_experiment_info(exp_dict)
 
     # Save the __doc__ attribute to the dict
-    exp_dict["comments"] = exp.__doc__ + alt.__doc__
+    exp_dict["comments"] = exp.__doc__
+    if altmodel is not None:
+        exp_dict["comments"] += alt.__doc__
 
     # Check if it looks like this is a partial FOV acquisition
     exp_dict["partial_brain"] = bool(exp_dict.get("whole_brain_epi"))
