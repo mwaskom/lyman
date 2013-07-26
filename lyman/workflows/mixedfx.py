@@ -105,7 +105,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                               imports),
                      ["zstat_file", "localmax_file", "seg_file"],
                      "report")
-    report.inputs.subjects = subjects
+    report.inputs.subjects = subject_list
 
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",
@@ -383,7 +383,7 @@ def mfx_report(mask_file, zstat_file, localmax_file,
 
     # Save the list of subjects in this analysis
     subj_file = op.abspath("subjects.txt")
-    np.savetxt(subj_file, subjects)
+    np.savetxt(subj_file, subjects, "%s")
 
     return [mask_png, zstat_png, peaks_png, boxplot_png, seg_png, subj_file]
 
