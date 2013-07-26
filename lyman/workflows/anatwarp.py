@@ -15,14 +15,13 @@ import nibabel as nib
 from nipy.labs import viz
 import seaborn as sns
 
-from nipype import (IdentityInterface, Rename, Function,
-                    DataGrabber, DataSink)
+from nipype import IdentityInterface, Function, DataGrabber, DataSink
 from nipype import fsl
 from nipype import freesurfer as fs
 from nipype import Node, Workflow
 
 
-def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
+def create_anatwarp_workflow(data_dir=None, subjects=None, name="anatwarp"):
     """Set up the anatomical normalzation workflow.
 
     Your anatomical data must have been processed in Freesurfer.
@@ -41,6 +40,11 @@ def create_anatwarp_workflow(data_dir, subjects, name="anatwarp"):
         workflow name
 
     """
+    if data_dir is None:
+        data_dir = os.environ["SUBJECTS_DIR"]
+    if subjects is None:
+        subjects = []
+
     # Get target images
     target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
     target_head = fsl.Info.standard_image("avg152T1.nii.gz")
