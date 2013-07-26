@@ -12,6 +12,7 @@ import os.path as op
 import matplotlib as mpl
 mpl.use("Agg")
 
+import nipype
 from nipype import Node, DataGrabber, DataSink, IdentityInterface
 
 import lyman
@@ -25,8 +26,6 @@ def main(arglist):
 
     # Get and process specific information
     project = lyman.gather_project_info()
-    if project["default_exp"] is not None and args.experiment is None:
-        args.experiment = project["default_exp"]
     exp = lyman.gather_experiment_info(args.experiment, args.altmodel)
 
     # Set up the SUBJECTS_DIR for Freesurfer
@@ -46,7 +45,9 @@ def main(arglist):
     anal_dir_base = op.join(project["analysis_dir"], exp_name)
     work_dir_base = op.join(project["working_dir"], exp_name)
     preproc_dir = op.join(project["analysis_dir"], args.experiment)
-    crashdump_dir = "/tmp/%d" % time.time()
+
+    nipype.config.set("execution", "crashdump_dir", "/tmp/%s-%d" % (os.getlogin(),
+                                                                    time.time()))
 
     # This might not exist if we're running an altmodel
     if not os.path.exists(anal_dir_base):
@@ -104,9 +105,6 @@ def main(arglist):
     # Set the base for the possibly temporary working directory
     preproc.base_dir = work_dir_base
 
-    # Configure crashdump output
-    preproc.config["execution"]["crashdump_dir"] = crashdump_dir
-
     # Possibly execute the workflow, depending on the command line
     lyman.run_workflow(preproc, "preproc", args)
 
@@ -151,7 +149,6 @@ def main(arglist):
 
     # Set temporary output locations
     model.base_dir = work_dir_base
-    model.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly execute the workflow
     lyman.run_workflow(model, "model", args)
@@ -293,7 +290,6 @@ def main(arglist):
         (r"_run_", "run_")])  # This one's wired to interal function
 
     reg.base_dir = work_dir_base
-    reg.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly run registration workflow and clean up
     lyman.run_workflow(reg, "reg", args)
@@ -381,7 +377,6 @@ def main(arglist):
         (r"/_contrast_", "/")])
 
     ffx.base_dir = work_dir_base
-    ffx.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Possibly run fixed effects workflow
     lyman.run_workflow(ffx, "ffx", args)
