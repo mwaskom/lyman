@@ -113,7 +113,7 @@ def determine_subjects(subject_arg=None):
     else:
         try:
             subject_file = op.join(os.environ["LYMAN_DIR"],
-                                   subject_arg = ".txt")
+                                   subject_arg[0] + ".txt")
             subjects = np.loadtxt(subject_file, str).tolist()
         except IOError:
             subjects = subject_arg
