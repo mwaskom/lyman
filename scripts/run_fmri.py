@@ -57,7 +57,7 @@ def main(arglist):
 
     # Create workflow in function defined elsewhere in this package
     preproc, preproc_input, preproc_output = wf.create_preprocessing_workflow(
-                              temporal_interp=exp["slice_time_correction"],
+                              temporal_interp=exp["temporal_interp"],
                               frames_to_toss=exp["frames_to_toss"],
                               interleaved=exp["interleaved"],
                               slice_order=exp["slice_order"],
@@ -66,11 +66,11 @@ def main(arglist):
                               motion_threshold=1,
                               smooth_fwhm=exp["smooth_fwhm"],
                               highpass_sigma=exp["hpf_sigma"],
-                              partial_brain=exp["partial_fov"])
+                              partial_brain=exp["partial_brain"])
 
     # Collect raw nifti data
     outfields = ["timeseries"]
-    if exp["partial_fov"]:
+    if exp["partial_brain"]:
         outfields.append("whole_brain_epi")
     preproc_source = Node(DataGrabber(infields=["subject_id"],
                                       outfields=outfields,
@@ -79,7 +79,7 @@ def main(arglist):
                                       sort_filelist=True),
                           name="preproc_source")
     preproc_template_args = dict(timeseries=[["subject_id"]])
-    if exp["partial_fov"]:
+    if exp["partial_brain"]:
         preproc_template_args["whole_brain_epi"] = [["subject_id"]]
     preproc_source.inputs.template_args = preproc_template_args
 
