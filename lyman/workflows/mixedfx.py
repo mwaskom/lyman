@@ -29,13 +29,20 @@ imports = ["import os",
 
 
 def create_volume_mixedfx_workflow(name="volume_group",
-                                   subject_list=[],
-                                   regressors=[],
-                                   contrasts=[],
+                                   subject_list=None,
+                                   regressors=None,
+                                   contrasts=None,
                                    flame_mode="flame1",
                                    cluster_zthresh=2.3,
                                    grf_pthresh=0.05,
                                    peak_distance=30):
+
+    if subject_list is None:
+        subject_list = []
+    if regressors is None:
+        regressors = []
+    if contrasts is None:
+        contrasts = []
 
     inputnode = Node(IdentityInterface(["l1_contrast",
                                         "copes",
