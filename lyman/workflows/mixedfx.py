@@ -98,12 +98,14 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                "zstat_file",
                                "localmax_file",
                                "cope_file",
-                               "seg_file"],
+                               "seg_file",
+                               "subjects"],
                               ["report"],
                               mfx_report,
                               imports),
                      ["zstat_file", "localmax_file", "seg_file"],
                      "report")
+    report.inputs.subjects = subjects
 
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",
@@ -255,7 +257,8 @@ def watershed_segment(zstat_file, localmax_file):
     return seg_file, peak_file, lut_file
 
 
-def mfx_report(mask_file, zstat_file, localmax_file, cope_file, seg_file):
+def mfx_report(mask_file, zstat_file, localmax_file,
+               cope_file, seg_file, subjects):
     """Plot various information related to the results."""
     mni_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
     mni_data = nib.load(mni_brain).get_data()
@@ -348,14 +351,12 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file, seg_file):
     # Now make a boxplot of the peaks
     seaborn.set()
     cope_data = nib.load(cope_file).get_data()
-    peak_dists = []
-    for coords in reversed(peaks):
-        peak_dists.append(cope_data[tuple(coords)])
+    peak_dists = list(cope_data[tuple(peaks.T)])
+    peak_dists.reverse()
     n_peaks = len(peak_dists)
-    fig = plt.figure(figsize=(8, float(n_peaks) / 3 + 0.33))
-    ax = fig.add_subplot(111)
+    f, ax = plt.subplots(figsize=(8, float(n_peaks) / 3 + 0.33))
     colors = list(reversed(husl_colors))
-    seaborn.boxplot(np.transpose(peak_dists), color=colors, vert=0, ax=ax)
+    seaborn.boxplot(np.transpose(peak_dists), color=colors, vert=False, ax=ax)
     ax.axvline(0, c="#222222", ls="--")
     labels = np.arange(1, n_peaks + 1)[::-1]
     ax.set_yticklabels(labels)
@@ -380,7 +381,11 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file, seg_file):
     seg_png = seg_file.replace(".nii.gz", ".png")
     plt.savefig(seg_png, **pngkws)
 
-    return [mask_png, zstat_png, peaks_png, boxplot_png, seg_png]
+    # Save the list of subjects in this analysis
+    subj_file = op.abspath("subjects.txt")
+    np.savetxt(subj_file, subjects)
+
+    return [mask_png, zstat_png, peaks_png, boxplot_png, seg_png, subj_file]
 
 
 def cluster_table(localmax_file):
