@@ -5,6 +5,7 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 import nibabel as nib
+from skimage import morphology
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -21,6 +22,7 @@ imports = ["import os",
            "import nibabel as nib",
            "import matplotlib as mpl",
            "import matplotlib.pyplot as plt",
+           "from skimage import morphology",
            "from nipype import fsl",
            "from moss import locator",
            "import seaborn"]
@@ -32,7 +34,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                    contrasts=[],
                                    flame_mode="flame1",
                                    cluster_zthresh=2.3,
-                                   grf_pthresh=0.05):
+                                   grf_pthresh=0.05,
+                                   peak_distance=30):
 
     inputnode = Node(IdentityInterface(["l1_contrast",
                                         "copes",
@@ -61,11 +64,11 @@ def create_volume_mixedfx_workflow(name="volume_group",
     smoothest = MapNode(fsl.SmoothEstimate(), "zstat_file", "smoothest")
 
     cluster = MapNode(fsl.Cluster(threshold=cluster_zthresh,
-                                  pthreshold=0.05,
+                                  pthreshold=grf_pthresh,
                                   out_threshold_file=True,
                                   out_index_file=True,
                                   out_localmax_txt_file=True,
-                                  peak_distance=15,
+                                  peak_distance=peak_distance,
                                   use_mm=True),
                       ["in_file", "dlh", "volume"],
                       "cluster")
@@ -77,14 +80,22 @@ def create_volume_mixedfx_workflow(name="volume_group",
                         "localmax_file",
                         "peaktable")
 
+    watershed = MapNode(Function(["zstat_file", "localmax_file"],
+                                 ["seg_file", "peak_file", "lut_file"],
+                                 watershed_segment,
+                                 imports),
+                        ["zstat_file", "localmax_file"],
+                        "watershed")
+
     report = MapNode(Function(["mask_file",
                                "zstat_file",
                                "localmax_file",
-                               "cope_file"],
+                               "cope_file",
+                               "seg_file"],
                               ["report"],
                               mfx_report,
                               imports),
-                     ["zstat_file", "localmax_file"],
+                     ["zstat_file", "localmax_file", "seg_file"],
                      "report")
 
     outputnode = Node(IdentityInterface(["copes",
@@ -94,6 +105,9 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                          "thresh_zstat",
                                          "cluster_image",
                                          "cluster_peaks",
+                                         "seg_file",
+                                         "peak_file",
+                                         "lut_file",
                                          "report"]),
                       "outputnode")
 
@@ -128,6 +142,9 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("volume", "volume")]),
         (flameo, cluster,
             [("zstats", "in_file")]),
+        (cluster, watershed,
+            [("threshold_file", "zstat_file"),
+             ("localmax_txt_file", "localmax_file")]),
         (makemask, report,
             [("mask_file", "mask_file")]),
         (cluster, report,
@@ -135,6 +152,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("localmax_txt_file", "localmax_file")]),
         (mergecope, report,
             [("merged_file", "cope_file")]),
+        (watershed, report,
+            [("seg_file", "seg_file")]),
         (cluster, peaktable,
             [("localmax_txt_file", "localmax_file")]),
         (mergecope, outputnode,
@@ -150,6 +169,10 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("index_file", "cluster_image")]),
         (peaktable, outputnode,
              [("out_file", "cluster_peaks")]),
+        (watershed, outputnode,
+            [("seg_file", "seg_file"),
+             ("peak_file", "peak_file"),
+             ("lut_file", "lut_file")]),
         (report, outputnode,
             [("report", "report")]),
         ])
@@ -180,7 +203,52 @@ def make_group_mask(varcope_file):
     return mask_file
 
 
-def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
+def watershed_segment(zstat_file, localmax_file):
+    """Segment the thresholded zstat image."""
+    z_img = nib.load(zstat_file)
+    z_data = z_img.get_data()
+    peaks = pd.read_table(localmax_file, "\t")[["x", "y", "z"]].values
+
+    # Use the cluster peaks as markers for the segmentation
+    markers = np.zeros_like(z_data)
+    markers[tuple(peaks.T)] = np.arange(len(peaks)) + 1
+    seg = morphology.watershed(-z_data, markers, mask=z_data > 0)
+
+    seg_img = nib.Nifti1Image(seg.astype(np.int16),
+                              z_img.get_affine(),
+                              z_img.get_header())
+    seg_img.set_data_dtype(np.int16)
+
+    seg_file = op.basename(zstat_file).replace(".nii.gz", "_seg.nii.gz")
+    seg_file = op.abspath(seg_file)
+    seg_img.to_filename(seg_file)
+
+    peak_img = nib.Nifti1Image(markers.astype(np.int16),
+                               z_img.get_affine(),
+                               z_img.get_header())
+    peak_img.set_data_dtype(np.int16)
+
+    peak_file = op.basename(zstat_file).replace(".nii.gz", "_peaks.nii.gz")
+    peak_file = op.abspath(peak_file)
+    peak_img.to_filename(peak_file)
+
+    n = int(markers.max())
+    colors = np.array(seaborn.husl_palette(n))
+    colors = np.hstack([colors, np.zeros((n, 1))])
+    lut_data = pd.DataFrame(columns=["#ID", "ROI", "R", "G", "B", "A"],
+                            index=np.arange(n + 1))
+    names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
+    lut_data["ROI"] = np.array(names)
+    lut_data.loc[0, "R":"A"] = [0, 0, 0, 0]
+    lut_data.loc[1:, "R":"A"] = (colors * 255).astype(int)
+    lut_data["#ID"] = np.arange(n + 1)
+    lut_file = seg_file.replace(".nii.gz", ".txt")
+    lut_data.to_csv(lut_file, "\t", index=False)
+
+    return seg_file, peak_file, lut_file
+
+
+def mfx_report(mask_file, zstat_file, localmax_file, cope_file, seg_file):
     """Plot various information related to the results."""
     mni_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
     mni_data = nib.load(mni_brain).get_data()
@@ -188,11 +256,13 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
     mask_data = nib.load(mask_file).get_data()
     mask = np.where(mask_data, 1, np.nan)
 
-    z_data = nib.load(zstat_file).get_data()
-    z_data[z_data < 2.3] = np.nan
+    z_stat = nib.load(zstat_file).get_data()
+    z_plot = z_stat.copy()
+    z_plot[z_stat == 0] = np.nan
 
-    peaks = pd.read_table(localmax_file,
-                          delimiter="\t")[["x", "y", "z"]].values
+    peaks = pd.read_table(localmax_file, "\t")[["x", "y", "z"]].values
+
+    seg_data = nib.load(seg_file).get_data().astype(float)
 
     # Find the plot parameters
     xdata = np.flatnonzero(mni_data.any(axis=1).any(axis=1))
@@ -220,8 +290,7 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
                   cmap="gray", vmin=vmin, vmax=vmax)
         ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
                   alpha=.7, cmap=cmap, interpolation="nearest")
-        ax.set_xticks([])
-        ax.set_yticks([])
+        ax.axis("off")
     mask_png = os.path.abspath("group_mask.png")
     plt.savefig(mask_png, **pngkws)
 
@@ -232,40 +301,40 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
     for i, ax in zip(slices, axes.ravel()):
         ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
                   cmap="gray", vmin=vmin, vmax=vmax)
-        ax.imshow(z_data[xmin:xmax, ymin:ymax, i].T,
+        ax.imshow(z_plot[xmin:xmax, ymin:ymax, i].T,
                   cmap="YlOrRd_r", vmin=2.3, vmax=4.26)
         ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
                   cmap=mask_cmap, alpha=.5, interpolation="nearest")
-        ax.set_xticks([])
-        ax.set_yticks([])
+        ax.axis("off")
     zname = os.path.basename(zstat_file).replace(".nii.gz", "")
     zstat_png = os.path.abspath("%s.png" % zname)
     plt.savefig(zstat_png, **pngkws)
 
     # Now plot the peak centroids
-    peak_data = np.zeros_like(z_data)
+    peak_data = np.zeros_like(z_stat)
+    disk_data = np.zeros_like(z_stat)
     y, x = np.ogrid[-4: 4 + 1, -4:4 + 1]
     disk = x ** 2 + y ** 2 <= 4 ** 2
     dilator = np.dstack([disk, disk, np.zeros_like(disk)])
     for i, peak in enumerate(peaks, 1):
-        spot = np.zeros_like(z_data)
+        spot = np.zeros_like(z_stat)
         spot[tuple(peak)] = 1
-        spot = sp.ndimage.binary_dilation(spot, dilator)
-        peak_data[spot] = i
-    peak_data[peak_data == 0] = np.nan
+        peak_data += spot
+        disk = sp.ndimage.binary_dilation(spot, dilator)
+        disk_data[disk] = i
+    disk_data[disk_data == 0] = np.nan
 
-    husl_colors = reversed(seaborn.husl_palette(len(peaks)))
-    peak_cmap = mpl.colors.ListedColormap(list(husl_colors))
+    husl_colors = seaborn.husl_palette(len(peaks))
+    peak_cmap = mpl.colors.ListedColormap(husl_colors)
     f, axes = plt.subplots(**pltkws)
     bg = np.zeros(mni_data.shape[:2])
     for i, ax in zip(slices, axes.ravel()):
         ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
         ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
                   cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
-        ax.imshow(peak_data[xmin:xmax, ymin:ymax, i].T,
+        ax.imshow(disk_data[xmin:xmax, ymin:ymax, i].T,
                   cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
-        ax.set_xticks([])
-        ax.set_yticks([])
+        ax.axis("off")
     peaks_png = os.path.abspath("%s_peaks.png" % zname)
     plt.savefig(peaks_png, **pngkws)
 
@@ -275,16 +344,13 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
     peak_dists = []
     for coords in reversed(peaks):
         peak_dists.append(cope_data[tuple(coords)])
-    peak_dists.reverse()
     n_peaks = len(peak_dists)
     fig = plt.figure(figsize=(8, float(n_peaks) / 3 + 0.33))
     ax = fig.add_subplot(111)
-    seaborn.boxplot(np.transpose(peak_dists),
-                    color="husl",
-                    vert=0, ax=ax)
+    colors = list(reversed(husl_colors))
+    seaborn.boxplot(np.transpose(peak_dists), color=colors, vert=0, ax=ax)
     ax.axvline(0, c="#222222", ls="--")
-    labels = range(1, n_peaks + 1)
-    labels.reverse()
+    labels = np.arange(1, n_peaks + 1)[::-1]
     ax.set_yticklabels(labels)
     ax.set_ylabel("Local Maximum")
     ax.set_xlabel("COPE Value")
@@ -292,7 +358,23 @@ def mfx_report(mask_file, zstat_file, localmax_file, cope_file):
     boxplot_png = os.path.abspath("peak_boxplot.png")
     plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
 
-    return [mask_png, zstat_png, peaks_png, boxplot_png]
+    # Watershed segmentation image
+    seg_data[seg_data == 0] = np.nan
+    f, axes = plt.subplots(**pltkws)
+    for i, ax in zip(slices, axes.ravel()):
+        ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
+        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
+                  cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
+        ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
+                  cmap=mask_cmap, alpha=.5, interpolation="nearest")
+        ax.imshow(seg_data[xmin:xmax, ymin:ymax, i].T, interpolation="nearest",
+                  cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
+        ax.axis("off")
+    seg_png = seg_file.replace(".nii.gz", ".png")
+    plt.savefig(seg_png, **pngkws)
+
+    return [mask_png, zstat_png, peaks_png, boxplot_png, seg_png]
+
 
 def cluster_table(localmax_file):
     """Add some info to an FSL cluster file and format it properly."""
