@@ -291,6 +291,8 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     """
     project = gather_project_info()
     exp = gather_experiment_info(exp_name)
+    if exp_name is None:
+        exp_name = project["default_exp"]
 
     if mask_name is None:
         mask_name = roi_name
