@@ -3,9 +3,12 @@ import os
 import re
 from glob import glob
 from lyman import workflows as wf
+from nipype import config
 
 
 def main():
+
+    config.set('logging', 'workflow_level', 'CRITICAL')
 
     # Find the functions that create workflows
     wf_funcs = [k for k in wf.__dict__ if
