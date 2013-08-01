@@ -177,14 +177,14 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("threshold_file", "thresh_zstat"),
              ("index_file", "cluster_image")]),
         (peaktable, outputnode,
-             [("out_file", "cluster_peaks")]),
+            [("out_file", "cluster_peaks")]),
         (watershed, outputnode,
             [("seg_file", "seg_file"),
              ("peak_file", "peak_file"),
              ("lut_file", "lut_file")]),
         (report, outputnode,
             [("report", "report")]),
-        ])
+                   ])
 
     return group, inputnode, outputnode
 
@@ -216,42 +216,50 @@ def watershed_segment(zstat_file, localmax_file):
     """Segment the thresholded zstat image."""
     z_img = nib.load(zstat_file)
     z_data = z_img.get_data()
+
+    # Set up the output filenames
+    seg_file = op.basename(zstat_file).replace(".nii.gz", "_seg.nii.gz")
+    seg_file = op.abspath(seg_file)
+    peak_file = op.basename(zstat_file).replace(".nii.gz", "_peaks.nii.gz")
+    peak_file = op.abspath(peak_file)
+    lut_file = seg_file.replace(".nii.gz", ".txt")
+
+    # Read in the peak txt file from FSL cluster
     peaks = pd.read_table(localmax_file, "\t")[["x", "y", "z"]].values
-
-    # Use the cluster peaks as markers for the segmentation
     markers = np.zeros_like(z_data)
-    markers[tuple(peaks.T)] = np.arange(len(peaks)) + 1
-    seg = morphology.watershed(-z_data, markers, mask=z_data > 0)
 
+    # Do the watershed, or not, depending on whether we had peaks
+    if len(peaks):
+        markers[tuple(peaks.T)] = np.arange(len(peaks)) + 1
+        seg = morphology.watershed(-z_data, markers, mask=z_data > 0)
+    else:
+        seg = np.zeros_like(z_data)
+
+    # Create a Nifti image with the segmentation and save it
     seg_img = nib.Nifti1Image(seg.astype(np.int16),
                               z_img.get_affine(),
                               z_img.get_header())
     seg_img.set_data_dtype(np.int16)
-
-    seg_file = op.basename(zstat_file).replace(".nii.gz", "_seg.nii.gz")
-    seg_file = op.abspath(seg_file)
     seg_img.to_filename(seg_file)
 
+    # Create a Nifti image with just the peaks and save it
     peak_img = nib.Nifti1Image(markers.astype(np.int16),
                                z_img.get_affine(),
                                z_img.get_header())
     peak_img.set_data_dtype(np.int16)
-
-    peak_file = op.basename(zstat_file).replace(".nii.gz", "_peaks.nii.gz")
-    peak_file = op.abspath(peak_file)
     peak_img.to_filename(peak_file)
 
+    # Write a lookup-table in Freesurfer format so we can
+    # view the segmentation in Freeview
     n = int(markers.max())
-    colors = np.array(seaborn.husl_palette(n))
-    colors = np.hstack([colors, np.zeros((n, 1))])
+    colors = [[0, 0, 0]] + seaborn.husl_palette(n)
+    colors = np.hstack([colors, np.zeros((n + 1, 1))])
     lut_data = pd.DataFrame(columns=["#ID", "ROI", "R", "G", "B", "A"],
                             index=np.arange(n + 1))
     names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
     lut_data["ROI"] = np.array(names)
-    lut_data.loc[0, "R":"A"] = [0, 0, 0, 0]
-    lut_data.loc[1:, "R":"A"] = (colors * 255).astype(int)
     lut_data["#ID"] = np.arange(n + 1)
-    lut_file = seg_file.replace(".nii.gz", ".txt")
+    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int)
     lut_data.to_csv(lut_file, "\t", index=False)
 
     return seg_file, peak_file, lut_file
@@ -273,6 +281,14 @@ def mfx_report(mask_file, zstat_file, localmax_file,
     peaks = pd.read_table(localmax_file, "\t")[["x", "y", "z"]].values
 
     seg_data = nib.load(seg_file).get_data().astype(float)
+
+    # Set up the output names
+    mask_png = os.path.abspath("group_mask.png")
+    zname = os.path.basename(zstat_file).replace(".nii.gz", "")
+    zstat_png = os.path.abspath("%s.png" % zname)
+    peaks_png = os.path.abspath("%s_peaks.png" % zname)
+    boxplot_png = os.path.abspath("peak_boxplot.png")
+    seg_png = os.path.abspath(seg_file.replace(".nii.gz", ".png"))
 
     # Find the plot parameters
     xdata = np.flatnonzero(mni_data.any(axis=1).any(axis=1))
@@ -301,7 +317,6 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
                   alpha=.7, cmap=cmap, interpolation="nearest")
         ax.axis("off")
-    mask_png = os.path.abspath("group_mask.png")
     plt.savefig(mask_png, **pngkws)
 
     # Now plot the zstat image
@@ -316,70 +331,75 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
                   cmap=mask_cmap, alpha=.5, interpolation="nearest")
         ax.axis("off")
-    zname = os.path.basename(zstat_file).replace(".nii.gz", "")
-    zstat_png = os.path.abspath("%s.png" % zname)
     plt.savefig(zstat_png, **pngkws)
 
-    # Now plot the peak centroids
-    peak_data = np.zeros_like(z_stat)
-    disk_data = np.zeros_like(z_stat)
-    y, x = np.ogrid[-4: 4 + 1, -4:4 + 1]
-    disk = x ** 2 + y ** 2 <= 4 ** 2
-    dilator = np.dstack([disk, disk, np.zeros_like(disk)])
-    for i, peak in enumerate(peaks, 1):
-        spot = np.zeros_like(z_stat)
-        spot[tuple(peak)] = 1
-        peak_data += spot
-        disk = sp.ndimage.binary_dilation(spot, dilator)
-        disk_data[disk] = i
-    disk_data[disk_data == 0] = np.nan
+    # Everything else is dependent on there being some peak data
+    if len(peaks):
 
-    husl_colors = seaborn.husl_palette(len(peaks))
-    peak_cmap = mpl.colors.ListedColormap(husl_colors)
-    f, axes = plt.subplots(**pltkws)
-    bg = np.zeros(mni_data.shape[:2])
-    for i, ax in zip(slices, axes.ravel()):
-        ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
-        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
-                  cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
-        ax.imshow(disk_data[xmin:xmax, ymin:ymax, i].T,
-                  cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
-        ax.axis("off")
-    peaks_png = os.path.abspath("%s_peaks.png" % zname)
-    plt.savefig(peaks_png, **pngkws)
+        # Now plot the peak centroids
+        peak_data = np.zeros_like(z_stat)
+        disk_data = np.zeros_like(z_stat)
+        y, x = np.ogrid[-4: 4 + 1, -4:4 + 1]
+        disk = x ** 2 + y ** 2 <= 4 ** 2
+        dilator = np.dstack([disk, disk, np.zeros_like(disk)])
+        for i, peak in enumerate(peaks, 1):
+            spot = np.zeros_like(z_stat)
+            spot[tuple(peak)] = 1
+            peak_data += spot
+            disk = sp.ndimage.binary_dilation(spot, dilator)
+            disk_data[disk] = i
+        disk_data[disk_data == 0] = np.nan
 
-    # Now make a boxplot of the peaks
-    seaborn.set()
-    cope_data = nib.load(cope_file).get_data()
-    peak_dists = list(cope_data[tuple(peaks.T)])
-    peak_dists.reverse()
-    n_peaks = len(peak_dists)
-    f, ax = plt.subplots(figsize=(8, float(n_peaks) / 3 + 0.33))
-    colors = list(reversed(husl_colors))
-    seaborn.boxplot(np.transpose(peak_dists), color=colors, vert=False, ax=ax)
-    ax.axvline(0, c="#222222", ls="--")
-    labels = np.arange(1, n_peaks + 1)[::-1]
-    ax.set_yticklabels(labels)
-    ax.set_ylabel("Local Maximum")
-    ax.set_xlabel("COPE Value")
-    plt.tight_layout()
-    boxplot_png = os.path.abspath("peak_boxplot.png")
-    plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
+        husl_colors = seaborn.husl_palette(len(peaks))
+        peak_cmap = mpl.colors.ListedColormap(husl_colors)
+        f, axes = plt.subplots(**pltkws)
+        bg = np.zeros(mni_data.shape[:2])
+        for i, ax in zip(slices, axes.ravel()):
+            ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
+            ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
+                      cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
+            ax.imshow(disk_data[xmin:xmax, ymin:ymax, i].T,
+                      cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
+            ax.axis("off")
+        plt.savefig(peaks_png, **pngkws)
 
-    # Watershed segmentation image
-    seg_data[seg_data == 0] = np.nan
-    f, axes = plt.subplots(**pltkws)
-    for i, ax in zip(slices, axes.ravel()):
-        ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
-        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
-                  cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
-        ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
-                  cmap=mask_cmap, alpha=.5, interpolation="nearest")
-        ax.imshow(seg_data[xmin:xmax, ymin:ymax, i].T, interpolation="nearest",
-                  cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
-        ax.axis("off")
-    seg_png = seg_file.replace(".nii.gz", ".png")
-    plt.savefig(seg_png, **pngkws)
+        # Now make a boxplot of the peaks
+        seaborn.set()
+        cope_data = nib.load(cope_file).get_data()
+        peak_dists = list(cope_data[tuple(peaks.T)])
+        peak_dists.reverse()
+        n_peaks = len(peak_dists)
+        f, ax = plt.subplots(figsize=(8, float(n_peaks) / 3 + 0.33))
+        colors = list(reversed(husl_colors))
+        seaborn.boxplot(np.transpose(peak_dists),
+                        color=colors, vert=False, ax=ax)
+        ax.axvline(0, c="#222222", ls="--")
+        labels = np.arange(1, n_peaks + 1)[::-1]
+        ax.set_yticklabels(labels)
+        ax.set_ylabel("Local Maximum")
+        ax.set_xlabel("COPE Value")
+        plt.tight_layout()
+        plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
+
+        # Watershed segmentation image
+        seg_data[seg_data == 0] = np.nan
+        f, axes = plt.subplots(**pltkws)
+        for i, ax in zip(slices, axes.ravel()):
+            ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
+            ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
+                      cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
+            ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
+                      cmap=mask_cmap, alpha=.5, interpolation="nearest")
+            ax.imshow(seg_data[xmin:xmax, ymin:ymax, i].T,
+                      interpolation="nearest",
+                      cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
+            ax.axis("off")
+        plt.savefig(seg_png, **pngkws)
+
+    else:
+        for fname in [peaks_png, boxplot_png, seg_png]:
+            with open(fname, "wb"):
+                pass
 
     # Save the list of subjects in this analysis
     subj_file = op.abspath("subjects.txt")
@@ -396,12 +416,13 @@ def cluster_table(localmax_file):
     df.index.name = "Peak"
 
     # Find out where the peaks most likely are
-    coords = ["x", "y", "z"]
-    loc_df = locator.locate_peaks(np.array(df[coords]))
-    df = pd.concat([df, loc_df], axis=1)
-    mni_coords = locator.vox_to_mni(np.array(df[coords])).T
-    for i, ax in enumerate(coords):
-        df[ax] = mni_coords[i]
+    if len(df):
+        coords = df[["x", "y", "z"]].values
+        loc_df = locator.locate_peaks(coords)
+        df = pd.concat([df, loc_df], axis=1)
+        mni_coords = locator.vox_to_mni(coords).T
+        for i, ax in enumerate(coords):
+            df[ax] = mni_coords[i]
 
     out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
     df.to_csv(out_file)
