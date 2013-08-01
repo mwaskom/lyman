@@ -259,7 +259,7 @@ def watershed_segment(zstat_file, localmax_file):
     names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
     lut_data["ROI"] = np.array(names)
     lut_data["#ID"] = np.arange(n + 1)
-    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int)
+    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int).squeeze()
     lut_data.to_csv(lut_file, "\t", index=False)
 
     return seg_file, peak_file, lut_file
