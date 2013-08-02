@@ -421,7 +421,7 @@ def cluster_table(localmax_file):
         loc_df = locator.locate_peaks(coords)
         df = pd.concat([df, loc_df], axis=1)
         mni_coords = locator.vox_to_mni(coords).T
-        for i, ax in enumerate(["x", "y', "z"]):
+        for i, ax in enumerate(["x", "y", "z"]):
             df[ax] = mni_coords[i]
 
     out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
