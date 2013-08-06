@@ -1,145 +1,94 @@
-from nipype.interfaces import fsl
-from nipype.algorithms.modelgen import  SpecifyModel
-from nipype.interfaces.utility import IdentityInterface, Function, Rename
-from nipype.pipeline.engine import Node, MapNode, Workflow
+"""Timeseries model using FSL's gaussian least squares."""
+import os
+import os.path as op
+import re
+import numpy as np
+import scipy as sp
+from scipy import stats, signal
+import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import moss
+from moss import glm
+import seaborn as sns
+
+from nipype import fsl, Node, MapNode, Workflow, IdentityInterface, Function
+
+from lyman import default_experiment_parameters
+
+imports = ["import os",
+           "import os.path as op",
+           "import re",
+           "import numpy as np",
+           "import scipy as sp",
+           "from scipy import stats, signal",
+           "import pandas as pd",
+           "import matplotlib as mpl",
+           "import matplotlib.pyplot as plt",
+           "import moss",
+           "from moss import glm",
+           "import seaborn as sns"]
 
 
-def create_timeseries_model_workflow(name="model", exp_info={}):
+def create_timeseries_model_workflow(name="model", exp_info=None):
 
-    inputnode = Node(IdentityInterface(fields=["subject_id",
-                                               "outlier_files",
-                                               "mean_func",
-                                               "realign_params",
-                                               "timeseries"]),
-                     name="inputnode")
+    # Node inputs
+    inputnode = Node(IdentityInterface(["subject_id",
+                                        "design_file",
+                                        "realign_file",
+                                        "artifact_file",
+                                        "mean_file",
+                                        "timeseries"]),
+                     "inputs")
 
-    # Read in par files to determine model information
-    modelinfo = Node(Function(input_names=["subject_id",
-                                           "functional_runs",
-                                           "exp_info"],
-                              output_names=["subject_info"],
-                              function=build_model_info),
-                     name="modelinfo")
-    modelinfo.inputs.exp_info = exp_info
+    # Default experiment parameters for generating graph inamge, testing, etc.
+    if exp_info is None:
+        exp_info = default_experiment_parameters()
 
-    # Generate Nipype-style model specification
-    modelspec = Node(SpecifyModel(
-        time_repetition=exp_info["TR"],
-        input_units=exp_info["units"],
-        high_pass_filter_cutoff=exp_info["hpf_cutoff"]),
-                     name="modelspec")
-
-    # Generate FSL fsf model specifcations
-    level1design = Node(fsl.Level1Design(model_serial_correlations=True,
-                                         bases=exp_info["hrf_bases"],
-                                         interscan_interval=exp_info["TR"],
-                                         contrasts=exp_info["contrasts"]),
-                        name="level1design")
-
-    # Generate design and contrast matrix files
-    featmodel = MapNode(fsl.FEATModel(),
-                        iterfield=["fsf_file", "ev_files"],
-                        name="featmodel")
-
-    # Generate a plot of regressor correlation
-    designcorr = MapNode(Function(input_names=["in_file",
-                                               "ev_files",
-                                               "n_runs"],
-                                  output_names=["out_file"],
-                                  function=design_corr),
-                         iterfield=["in_file"],
-                         name="designcorr")
-    designcorr.inputs.n_runs = exp_info["n_runs"]
-
-    # Rename the design matrix, contrasts, and image
-    rename_design = MapNode(Rename(format_string="design",
-                                   keep_ext=True),
-                            iterfield=["in_file"],
-                            name="rename_design")
-
-    rename_x_mat = MapNode(Rename(format_string="design",
-                                  keep_ext=True),
-                           iterfield=["in_file"],
-                           name="rename_x_mat")
-
-    rename_c_mat = MapNode(Rename(format_string="design",
-                                  keep_ext=True),
-                           iterfield=["in_file"],
-                           name="rename_c_mat")
+    # Set up the experimental design
+    modeldesign = MapNode(Function(["exp_info",
+                                    "design_file",
+                                    "realign_file",
+                                    "artifact_file",
+                                    "run"],
+                                   ["design_matrix_file",
+                                    "contrast_file",
+                                    "report"],
+                                   design_model,
+                                   imports),
+                          [],
+                          "modeldesign")
 
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
                                         mask_size=5,
                                         threshold=1000),
-                            iterfield=["design_file", "in_file"],
-                            name="modelestimate")
-
-    # Plot the residual error map for quality control
-    plotresidual = MapNode(Function(input_names=["resid_file",
-                                                 "background_file"],
-                                   output_names=["out_file"],
-                                   function=plot_residual),
-                          iterfield=["resid_file", "background_file"],
-                          name="plotresidual")
+                            ["design_file", "in_file"],
+                            "modelestimate")
 
     # Run the contrast estimation routine
     contrastestimate = MapNode(fsl.ContrastMgr(),
-                               iterfield=["tcon_file",
-                                          "dof_file",
-                                          "corrections",
-                                          "param_estimates",
-                                          "sigmasquareds"],
-                               name="contrastestimate")
-
-    # Plot the zstat images
-    plotzstats = MapNode(Function(input_names=["background_file",
-                                               "zstat_files",
-                                               "contrasts"],
-                                  output_names=["out_files"],
-                                  function=plot_zstats),
-                         iterfield=["background_file", "zstat_files"],
-                         name="plotzstats")
-    plotzstats.inputs.contrasts = exp_info["contrast_names"]
-
-    # Build pdf and html reports
-    report = MapNode(Function(input_names=["subject_id",
-                                           "design_image",
-                                           "design_corr",
-                                           "residual",
-                                           "zstat_pngs",
-                                           "contrast_names"],
-                              output_names=["reports"],
-                              function=write_model_report),
-                     iterfield=["design_image",
-                                "design_corr",
-                                "residual",
-                                "zstat_pngs"],
-                     name="report")
-    report.inputs.contrast_names = exp_info["contrast_names"]
-
-    # Dump the exp_info dictionary to json
-    dumpjson = MapNode(Function(input_names=["exp_info",
-                                             "timeseries"],
-                                output_names=["json_file"],
-                                function=dump_exp_info),
-                       iterfield=["timeseries"],
-                       name="dumpjson")
-    dumpjson.inputs.exp_info = exp_info
+                               ["tcon_file",
+                                "dof_file",
+                                "corrections",
+                                "param_estimates",
+                                "sigmasquareds"],
+                               "contrastestimate")
 
     # Define the workflow outputs
-    outputnode = Node(IdentityInterface(fields=["results",
-                                                "design_image",
-                                                "design_corr",
-                                                "sigmasquareds",
-                                                "copes",
-                                                "varcopes",
-                                                "zstats",
-                                                "reports",
-                                                "design_mat",
-                                                "contrast_mat",
-                                                "json_file",
-                                                "zstat_pngs"]),
-                      name="outputnode")
+    outputnode = Node(IdentityInterface(["results",
+                                         "design_image",
+                                         "design_corr",
+                                         "sigmasquareds",
+                                         "copes",
+                                         "varcopes",
+                                         "zstats",
+                                         "reports",
+                                         "design_mat",
+                                         "contrast_mat",
+                                         "json_file",
+                                         "zstat_pngs"]),
+                      "outputs")
 
     # Define the workflow and connect the nodes
     model = Workflow(name=name)
@@ -224,6 +173,82 @@ def create_timeseries_model_workflow(name="model", exp_info={}):
         ])
 
     return model, inputnode, outputnode
+
+
+# Main Interface Functions
+# ========================
+
+
+def design_model(design_file, realign_file, artifact_file, exp_info, run):
+    """Build the model design."""
+    design = pd.read_csv(design_file)
+    design = design[design.run == run]
+
+    realign = pd.read_csv(realign_file)
+    realign = realign.filter(regex="rot|trans").apply(stats.zscore)
+
+    artifacts = pd.read_csv(artifact_file).max(axis=1)
+    ntp = len(artifacts)
+    tr = exp_info["TR"]
+
+    # Set up the HRF model
+    hrf = getattr(glm, exp_info["hrf_model"])
+    hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
+
+    # Keep tabs on the keyword arguments for the design matrix
+    design_kwargs = dict(confounds=realign,
+                         artifacts=artifacts,
+                         tr=tr,
+                         condition_names=exp_info["condition_names"],
+                         confound_pca=exp_info["confound_pca"],
+                         hpf_cutoff=exp_info["hpf_cutoff"])
+
+    # Create the main design matrix object
+    X = glm.DesignMatrix(design, hrf, ntp, **design_kwargs)
+
+    # Also create one without high pass filtering
+    design_kwargs["hpf_cutoff"] = None
+    X_unfiltered = glm.DesignMatrix(design, hrf, ntp, **design_kwargs)
+
+    # Now we build up the report, with lots of lovely images
+    sns.set()
+    design_png = op.abspath("design.png")
+    X.plot(fname=design_png)
+
+    corr_png = op.abspath("design_correlation.png")
+    X.plot_confound_correlation(fname=corr_png)
+
+    svd_png = op.abspath("design_singular_values.png")
+    X.plot_singular_values(fname=svd_png)
+
+    report = [design_png, corr_png, svd_png]
+
+    # Now plot the information loss from the filter
+    for i, (name, cols, weights) in enumerate(exp_info["contrasts"], 1):
+        C = X.contrast_vector(cols, weights)
+
+        y_filt = X.design_matrix.dot(C)
+        y_unfilt = X_unfiltered.design_matrix.dot(C)
+
+        fs, pxx_filt = signal.welch(y_filt, 1. / tr, nperseg=ntp)
+        fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
+
+        f, ax = plt.subplots(1, 1)
+        ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
+        ax.fill_between(fs, pxx_filt, color="#444444")
+        ax.set_xlabel("Frequency")
+        ax.set_ylabel("Spectral Density")
+        plt.tight_layout()
+        fname = op.abspath("cope%d_filter.png" % i)
+        f.savefig(fname)
+        report.append(fname)
+
+    # Finally, write out the design files in FSL format
+    design_matrix_file = op.abspath("design.mat")
+    contrast_file = op.abspath("design.con")
+    X.to_fsl_files("design", exp_info["contrasts"])
+        
+    return design_matrix_file, contrast_file, report
 
 
 def build_model_info(subject_id, functional_runs, exp_info):
@@ -387,3 +412,12 @@ def write_model_report(subject_id, design_image, design_corr,
                                       model_report_template,
                                       report_dict)
     return out_files
+
+
+# Smaller helper functions
+# ========================
+
+
+def run_indices(design_files):
+    """Given a list of files, return a list of 1-based integers."""
+    return range(len(design_files))
