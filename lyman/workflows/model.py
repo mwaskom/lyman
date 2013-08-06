@@ -1,12 +1,10 @@
 """Timeseries model using FSL's gaussian least squares."""
-import os
 import os.path as op
-import re
+import json
 import numpy as np
-import scipy as sp
 from scipy import stats, signal
 import pandas as pd
-import matplotlib as mpl
+import nibabel as nib
 import matplotlib.pyplot as plt
 import moss
 from moss import glm
@@ -16,14 +14,12 @@ from nipype import fsl, Node, MapNode, Workflow, IdentityInterface, Function
 
 from lyman import default_experiment_parameters
 
-imports = ["import os",
-           "import os.path as op",
-           "import re",
+imports = ["import os.path as op",
+           "import json",
            "import numpy as np",
-           "import scipy as sp",
            "from scipy import stats, signal",
            "import pandas as pd",
-           "import matplotlib as mpl",
+           "import nibabel as nib",
            "import matplotlib.pyplot as plt",
            "import moss",
            "from moss import glm",
@@ -32,12 +28,10 @@ imports = ["import os",
 
 def create_timeseries_model_workflow(name="model", exp_info=None):
 
-    # Node inputs
-    inputnode = Node(IdentityInterface(["subject_id",
-                                        "design_file",
+    # Define the workflow inputs
+    inputnode = Node(IdentityInterface(["design_file",
                                         "realign_file",
                                         "artifact_file",
-                                        "mean_file",
                                         "timeseries"]),
                      "inputs")
 
@@ -46,18 +40,21 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         exp_info = default_experiment_parameters()
 
     # Set up the experimental design
-    modeldesign = MapNode(Function(["exp_info",
-                                    "design_file",
-                                    "realign_file",
-                                    "artifact_file",
-                                    "run"],
-                                   ["design_matrix_file",
-                                    "contrast_file",
-                                    "report"],
-                                   design_model,
-                                   imports),
-                          [],
+    modelsetup = MapNode(Function(["exp_info",
+                                   "design_file",
+                                   "realign_file",
+                                   "artifact_file",
+                                   "run"],
+                                  ["design_matrix_file",
+                                   "contrast_file",
+                                   "design_matrix_pkl",
+                                   "report"],
+                                  setup_model,
+                                  imports),
+                          ["design_file", "realign_file",
+                           "artifact_file" "run"],
                           "modeldesign")
+    modelsetup.inputs.exp_info = exp_info
 
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
@@ -75,101 +72,98 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                 "sigmasquareds"],
                                "contrastestimate")
 
+    calcrsquared = MapNode(Function(["design_matrix_pkl",
+                                     "timeseries",
+                                     "pe_files"],
+                                    ["r2_files"],
+                                    compute_rsquareds,
+                                    imports),
+                           ["design_matrix_pkl",
+                            "timeseries",
+                            "pe_files"],
+                           "calcrsquared")
+
+    # Save the experiment info for this run
+    dumpjson = Node(Function(["exp_info"], ["json_file"],
+                             dump_exp_info, imports),
+                    "dumpjson")
+    dumpjson.inputs.exp_info = exp_info
+
+    # Report on the results of the model
+    modelreport = MapNode(Function(["timeseries",
+                                    "sigmasquareds_file",
+                                    "zstat_files",
+                                    "r2_files"],
+                                   ["report"],
+                                   report_model,
+                                   imports),
+                          ["timeseries", "sigmasquareds_file",
+                           "zstat_files", "r2_files"],
+                          "modelreport")
+
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(["results",
-                                         "design_image",
-                                         "design_corr",
-                                         "sigmasquareds",
                                          "copes",
                                          "varcopes",
                                          "zstats",
-                                         "reports",
+                                         "r2_files",
+                                         "report",
                                          "design_mat",
                                          "contrast_mat",
-                                         "json_file",
-                                         "zstat_pngs"]),
+                                         "design_pkl",
+                                         "design_report",
+                                         "json_file"]),
                       "outputs")
 
     # Define the workflow and connect the nodes
     model = Workflow(name=name)
     model.connect([
-        (inputnode, modelinfo,
-            [("subject_id", "subject_id"),
-             ("timeseries", "functional_runs")]),
-        (modelinfo, modelspec,
-            [("subject_info", "subject_info")]),
-        (inputnode, modelspec,
-            [("timeseries", "functional_runs"),
-             ("outlier_files", "outlier_files"),
-             ("realign_params", "realignment_parameters")]),
+        (inputnode, modelsetup,
+            [("design_file", "design_file"),
+             ("realign_file", "realign_file"),
+             ("artifact_file", "artifact_file"),
+             (("design_file", run_indices), "run")]),
         (inputnode, modelestimate,
             [("timeseries", "in_file")]),
-        (modelspec, level1design,
-            [("session_info", "session_info")]),
-        (level1design, featmodel,
-            [("fsf_files", "fsf_file"),
-             ("ev_files", "ev_files")]),
-        (featmodel, modelestimate,
-            [("design_file", "design_file")]),
-        (featmodel, contrastestimate,
-            [("con_file", "tcon_file")]),
-        (featmodel, designcorr,
-            [("design_file", "in_file")]),
-        (featmodel, rename_x_mat,
-            [("design_file", "in_file")]),
-        (featmodel, rename_c_mat,
-            [("con_file", "in_file")]),
-        (level1design, designcorr,
-            [("ev_files", "ev_files")]),
-        (featmodel, rename_design,
-            [("design_image", "in_file")]),
-        (modelestimate, plotresidual,
-            [("sigmasquareds", "resid_file")]),
-        (inputnode, plotresidual,
-            [("mean_func", "background_file")]),
+        (modelsetup, modelestimate,
+            [("design_matrix_file", "design_file")]),
         (modelestimate, contrastestimate,
             [("dof_file", "dof_file"),
              ("corrections", "corrections"),
              ("param_estimates", "param_estimates"),
              ("sigmasquareds", "sigmasquareds")]),
-        (contrastestimate, plotzstats,
-            [("zstats", "zstat_files")]),
-        (inputnode, plotzstats,
-            [("mean_func", "background_file")]),
-        (inputnode, dumpjson,
+        (modelsetup, contrastestimate,
+            [("contrast_file", "tcon_file")]),
+        (modelsetup, calcrsquared,
+            [("design_matrix_pkl", "design_matrix_pkl")]),
+        (inputnode, calcrsquared,
             [("timeseries", "timeseries")]),
-        (inputnode, report,
-            [("subject_id", "subject_id")]),
-        (rename_design, report,
-            [("out_file", "design_image")]),
-        (designcorr, report,
-            [("out_file", "design_corr")]),
-        (plotresidual, report,
-            [("out_file", "residual")]),
-        (plotzstats, report,
-            [("out_files", "zstat_pngs")]),
-        (report, outputnode,
-            [("reports", "reports")]),
+        (modelestimate, calcrsquared,
+            [("param_estimates", "pe_files")]),
+        (inputnode, modelreport,
+            [("timeseries", "timeseries")]),
+        (modelestimate, modelreport,
+            [("sigmasquareds", "sigmasquareds_file")]),
+        (contrastestimate, modelreport,
+            [("zstats", "zstat_files")]),
+        (calcrsquared, modelreport,
+            [("r2_files", "r2_files")]),
+        (modelsetup, outputnode,
+            [("design_matrix_file", "design_file"),
+             ("contrast_file", "contrast_mat"),
+             ("design_matrix_pkl", "design_pkl")]),
         (dumpjson, outputnode,
             [("json_file", "json_file")]),
-        (rename_design, outputnode,
-            [("out_file", "design_image")]),
-        (rename_x_mat, outputnode,
-            [("out_file", "design_mat")]),
-        (rename_c_mat, outputnode,
-            [("out_file", "contrast_mat")]),
-        (designcorr, outputnode,
-            [("out_file", "design_corr")]),
-        (plotresidual, outputnode,
-            [("out_file", "sigmasquareds")]),
         (modelestimate, outputnode,
             [("results_dir", "results")]),
         (contrastestimate, outputnode,
             [("copes", "copes"),
              ("varcopes", "varcopes"),
              ("zstats", "zstats")]),
-        (plotzstats, outputnode,
-            [("out_files", "zstat_pngs")]),
+        (calcrsquared, outputnode,
+            [("r2_files", "r2_files")]),
+        (modelreport, outputnode,
+            [("report", "report")]),
         ])
 
     return model, inputnode, outputnode
@@ -179,7 +173,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
 # ========================
 
 
-def design_model(design_file, realign_file, artifact_file, exp_info, run):
+def setup_model(design_file, realign_file, artifact_file, exp_info, run):
     """Build the model design."""
     design = pd.read_csv(design_file)
     design = design[design.run == run]
@@ -233,7 +227,7 @@ def design_model(design_file, realign_file, artifact_file, exp_info, run):
         fs, pxx_filt = signal.welch(y_filt, 1. / tr, nperseg=ntp)
         fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
 
-        f, ax = plt.subplots(1, 1)
+        f, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
         ax.fill_between(fs, pxx_filt, color="#444444")
         ax.set_xlabel("Frequency")
@@ -243,175 +237,165 @@ def design_model(design_file, realign_file, artifact_file, exp_info, run):
         f.savefig(fname)
         report.append(fname)
 
+    # Write out the X object as a pkl to pass to the report function
+    design_matrix_pkl = op.abspath("design.pkl")
+    X.to_pickle(design_matrix_pkl)
+
     # Finally, write out the design files in FSL format
     design_matrix_file = op.abspath("design.mat")
     contrast_file = op.abspath("design.con")
     X.to_fsl_files("design", exp_info["contrasts"])
-        
-    return design_matrix_file, contrast_file, report
+
+    return design_matrix_file, contrast_file, design_matrix_pkl, report
 
 
-def build_model_info(subject_id, functional_runs, exp_info):
-    import os.path as op
-    from copy import deepcopy
-    from numpy import loadtxt, atleast_1d, atleast_2d
-    from nipype.interfaces.base import Bunch
+def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
+    """Compute partial r2 for various parts of the design matrix."""
+    X = glm.DesignMatrix.from_pickle(design_matrix_pkl)
 
-    events = exp_info["events"]
-    regressor_names = exp_info["regressors"]
+    # Load the timeseries
+    ts_img = nib.load(timeseries)
+    ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
+    y = ts_img.get_data().reshape(-1, ts_img.shape[-1]).T
+    y -= y.mean(axis=0)
 
-    model_info = []
+    outshape = ts_img.shape[:3]
 
-    if not isinstance(functional_runs, list):
-        functional_runs = [functional_runs]
-    n_runs = len(functional_runs)
-    for run in range(1, n_runs + 1):
-        onsets, durations, amplitudes, regressors = [], [], [], []
-        for event in events:
-            event_info = dict(event=event, run=run, subject_id=subject_id)
-            parfile = op.join(exp_info["parfile_base_dir"],
-                              exp_info['parfile_template'] % event_info)
-            o, d, a = atleast_2d(loadtxt(parfile)).T
-            onsets.append(o)
-            durations.append(d)
-            amplitudes.append(a)
-        for regressor in regressor_names:
-            regress_info = dict(regressor=regressor,
-                                run=run,
-                                subject_id=subject_id)
-            regressor_file = op.join(
-                exp_info["regressor_base_dir"],
-                exp_info["regressor_template"] % regress_info)
-            regressors.append(atleast_1d(loadtxt(regressor_file)))
+    # Load the parameter estimates
+    pes = [nib.load(f).get_data()[..., np.newaxis] for f in pe_files]
+    pes = np.concatenate(pes, axis=3).reshape(-1, len(pe_files)).T
 
-        model_info.append(
-            Bunch(conditions=events,
-                  regressor_names=regressor_names,
-                  regressors=deepcopy(regressors),
-                  onsets=deepcopy(onsets),
-                  durations=deepcopy(durations),
-                  amplitudes=deepcopy(amplitudes)))
+    # Get the sum of squares of the data
+    ybar = y.mean(axis=0)
+    sstot = np.square(y - ybar).sum(axis=0)
 
-    return model_info
+    # Now get the r2 for the full model
+    yhat_full = X.design_matrix.dot(pes)
+    ssres_full = np.square(yhat_full - y).sum(axis=0)
+    r2_full = (1 - ssres_full / sstot).reshape(outshape)
 
+    full_img = nib.Nifti1Image(r2_full, ts_aff, ts_header)
+    full_file = op.abspath("r2_full.nii.gz")
+    full_img.to_filename(full_file)
 
-def design_corr(in_file, ev_files, n_runs):
-    import re
-    from os.path import abspath, basename
-    import numpy as np
-    import matplotlib.pyplot as plt
-    X = np.loadtxt(in_file, skiprows=5)
-    f = plt.figure(figsize=(5, 5))
-    ax = f.add_subplot(111)
-    ax.matshow(np.abs(np.corrcoef(X.T)), vmin=0, vmax=1, cmap="hot")
-    run = int(re.match(r"run(\d+).mat", basename(in_file)).group(1))
-    pat = "ev_(\w+)_%d_\d+.txt" % run
-    if n_runs > 1:
-        ev_files = ev_files[run]
-    ev_names = [re.match(pat, basename(f)).group(1) for f in ev_files]
-    ev_names = map(lambda x: x.lower(), ev_names)
-    ax.set_xticks(range(len(ev_names)))
-    ax.set_yticks(range(len(ev_names)))
-    ax.set_xticklabels(ev_names, fontsize=6, rotation="vertical")
-    ax.set_yticklabels(ev_names, fontsize=6)
-    out_file = abspath("design_correlation.png")
-    plt.savefig(out_file)
-    return out_file
+    # Next just the "main" submatrix(conditions and regressors)
+    yhat_main = X.design_matrix.dot(pes * X.main_vector)
+    ssres_main = np.square(yhat_main - y).sum(axis=0)
+    r2_main = (1 - ssres_main / sstot).reshape(outshape)
+
+    main_img = nib.Nifti1Image(r2_main, ts_aff, ts_header)
+    main_file = op.abspath("r2_main.nii.gz")
+    main_img.to_filename(main_file)
+
+    # Finally the confound submatrix
+    yhat_conf = X.design_matrix.dot(pes * X.confound_vector)
+    ssres_conf = np.square(yhat_conf - y).sum(axis=0)
+    r2_conf = (1 - ssres_conf / sstot).reshape(outshape)
+
+    conf_img = nib.Nifti1Image(r2_conf, ts_aff, ts_header)
+    conf_file = op.abspath("r2_confounds.nii.gz")
+    conf_img.to_filename(conf_file)
+
+    return [full_file, main_file, conf_file]
 
 
-def plot_residual(resid_file, background_file):
-    """Plot the model residual. Use FSL for now; should move to pylab."""
-    from os.path import abspath
-    from nibabel import load
-    from subprocess import call
-    from scipy.stats import scoreatpercentile
-    ov_nii = "sigmasquareds_overlay.nii.gz"
-    out_file = abspath("sigmasquareds.png")
-    err_img = load(resid_file)
-    err_data = err_img.get_data()
-    low = scoreatpercentile(err_data.ravel(), 2)
-    high = scoreatpercentile(err_data.ravel(), 98)
-    n_slice = err_img.shape[-1]
-    native = n_slice < 50  # arbitrary but should work fine
-    width = 750 if native else 872
-    sample = 1 if native else 2
-    del err_data
-    call(["overlay", "1", "0", background_file, "-a",
-          resid_file, str(low), str(high), ov_nii])
-    call(["slicer", ov_nii, "-S", str(sample), str(width), out_file])
-    return out_file
+def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
+    """Build the model report images, mostly from axial montages."""
+    sns.set()
+
+    # Load the timeseries, get a mean image
+    ts_img = nib.load(timeseries)
+    ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
+    ts_data = ts_img.get_data()
+    mean_data = ts_data.mean(axis=-1)
+    mlow, mhigh = 0, moss.percentiles(mean_data, 98)
+
+    # Get the plot params. OMG I need a general function for this
+    n_slices = mean_data.shape[-1]
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2
+    figsize = (10, 1.4 * n_row)
+    spkws = dict(nrows=n_row, ncols=n_col, figsize=figsize, facecolor="k")
+    savekws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
+
+    def add_colorbar(f, cmap, low, high, left, width, fmt):
+        cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
+        cbar_ax = f.add_axes([left, 0, width, .03])
+        cbar_ax.imshow(cbar.T, aspect="auto", cmap=cmap)
+        cbar_ax.axis("off")
+        f.text(left - .01, .018, fmt % low, ha="right", va="center",
+               color="white", size=13, weight="demibold")
+        f.text(left + width + .01, .018, fmt % high, ha="left",
+               va="center", color="white", size=13, weight="demibold")
+
+    report = []
+
+    # Plot the residual image (sigmasquareds)
+    ss = nib.load(sigmasquareds_file).get_data()
+    sslow, sshigh = moss.percentiles(ss, [2, 98])
+    ss[mean_data == 0] = np.nan
+    f, axes = plt.subplots(**spkws)
+    for i, ax in enumerate(axes.ravel(), start):
+        ax.imshow(mean_data[..., i].T, cmap="gray",
+                   vmin=mlow, vmax=mhigh, interpolation="nearest")
+        ax.imshow(ss[..., i].T, cmap="PuRd_r",
+                  vmin=sslow, vmax=sshigh, alpha=.7)
+        ax.axis("off")
+    add_colorbar(f, "PuRd_r", sslow, sshigh, .35, .3, "%d")
+    ss_png = op.abspath("sigmasquareds.png")
+    f.savefig(ss_png, **savekws)
+    report.append(ss_png)
+
+    # Now plot each zstat file
+    for z_i, zname in enumerate(zstat_files, 1):
+        zdata = nib.load(zname).get_data()
+        pos = zdata.copy()
+        pos[pos < 2.3] = np.nan
+        neg = zdata.copy()
+        neg[neg > -2.3] = np.nan
+        zlow = 2.3
+        zhigh = np.abs(zdata).max()
+        f, axes = plt.subplots(**spkws)
+        for i, ax in enumerate(axes.ravel()):
+            ax.imshow(mean_data[..., i].T, cmap="gray",
+                      vmin=mlow, vmax=mhigh)
+            ax.imshow(pos[..., i].T, cmap="Reds_r",
+                      vmin=zlow, vmax=zhigh)
+            ax.imshow(neg[..., i].T, cmap="Blues",
+                      vmin=-zhigh, vmax=-zlow)
+            ax.axis("off")
+        add_colorbar(f, "Blues", -zhigh, -zlow, .15, .3, "%.1f")
+        add_colorbar(f, "Reds_r", zlow, zhigh, .55, .3, "%.1f")
+
+        fname = op.abspath("zstat%d.png" % z_i)
+        f.savefig(fname, **savekws)
+        report.append(fname)
+
+    # Now the r_2 files
+    for rname, cmap in zip(r2_files, ["GnBu_r", "YlGn_r", "OrRd_r"]):
+        data = nib.load(rname).get_data()
+        rhigh = moss.percentiles(np.nan_to_num(data), 99)
+        f, axes = plt.subplots(**spkws)
+        for i, ax in enumerate(axes.ravel(), start):
+            ax.imshow(mean_data[..., i].T, cmap="gray",
+                      vmin=mlow, vmax=mhigh, interpolation="nearest")
+            ax.imshow(data[..., i].T, cmap=cmap, vmin=0, vmax=rhigh, alpha=.7)
+            ax.axis("off")
+        add_colorbar(f, cmap, 0, rhigh, .35, .3, "%.2f")
+
+        fname = op.abspath(op.basename(rname).replace(".nii.gz", ".png"))
+        f.savefig(fname, **savekws)
+        report.append(fname)
+
+    return report
 
 
-def plot_zstats(background_file, zstat_files, contrasts):
-    """Plot the zstats and return a directory of pngs."""
-    from os.path import abspath
-    from nibabel import load
-    from subprocess import call
-    bg_img = load(background_file)
-    n_slice = bg_img.shape[-1]
-    native = n_slice < 50
-    width = 750 if native else 872
-    sample = 1 if native else 2
-    out_files = []
-    if not isinstance(zstat_files, list):
-        zstat_files = [zstat_files]
-    for i, contrast in enumerate(contrasts):
-        zstat_file = zstat_files[i]
-        zstat_png = "zstat%d.png" % (i + 1)
-        ov_nii = "zstat%d_overlay.nii.gz" % (i + 1)
-        call(["overlay", "1", "0", background_file, "-a",
-              zstat_file, "2.3", "10",
-              zstat_file, "-2.3", "-10", ov_nii])
-        call(["slicer", ov_nii, "-S", str(sample), str(width), zstat_png])
-        out_files.append(abspath(zstat_png))
-    return out_files
-
-
-def dump_exp_info(exp_info, timeseries):
+def dump_exp_info(exp_info):
     """Dump the exp_info dict into a json file."""
-    from copy import deepcopy
-    from os.path import abspath
-    import json
-    json_file = abspath("experiment_info.json")
-    json_info = deepcopy(exp_info)
-    del json_info["contrasts"]
+    json_file = op.abspath("experiment_info.json")
     with open(json_file, "w") as fp:
-        json.dump(json_info, fp, sort_keys=True, indent=4)
+        json.dump(exp_info, fp, sort_keys=True, indent=2)
     return json_file
-
-
-def write_model_report(subject_id, design_image, design_corr,
-                       residual, zstat_pngs, contrast_names):
-    """Write model report info to rst and convert to pdf/html."""
-    import time
-    from lyman.tools import write_workflow_report
-    from lyman.workflows.reporting import model_report_template
-
-    # Fill in the initial report template dict
-    report_dict = dict(now=time.asctime(),
-                       subject_id=subject_id,
-                       design_image=design_image,
-                       design_corr=design_corr,
-                       residual=residual)
-
-    # Add the zstat image templates and update the dict
-    for i, con in enumerate(contrast_names, 1):
-        report_dict["con%d_name" % i] = con
-        report_dict["zstat%d_png" % i] = zstat_pngs[i - 1]
-        header = "Zstat %d: %s" % (i, con)
-        model_report_template = "\n".join(
-            [model_report_template,
-             header,
-             "".join(["^" for l in header]),
-             "",
-             "".join([".. image:: %(zstat", str(i), "_png)s"]),
-             "    :width: 6.5in",
-             ""])
-
-    out_files = write_workflow_report("model",
-                                      model_report_template,
-                                      report_dict)
-    return out_files
 
 
 # Smaller helper functions
