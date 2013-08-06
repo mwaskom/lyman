@@ -43,8 +43,10 @@ def gather_experiment_info(exp_name=None, altmodel=None):
         exp_file = op.join(lyman_dir, exp_name + ".py")
         exp = imp.load_source(exp_name, exp_file)
 
+    exp_dict = default_experiment_parameters()
+
     keep = lambda k: not re.match("__.*__", k)
-    exp_dict = {k: v for k, v in exp.__dict__.items() if keep(k)}
+    exp_dict.update({k: v for k, v in exp.__dict__.items() if keep(k)})
 
     # Possibly import the alternate model details
     if altmodel is not None:
@@ -59,22 +61,18 @@ def gather_experiment_info(exp_name=None, altmodel=None):
         # Update the base information with the altmodel info
         exp_dict.update(alt_dict)
 
-    # Verify some experiment dict attributes
-    verify_experiment_info(exp_dict)
-
     # Save the __doc__ attribute to the dict
     exp_dict["comments"] = exp.__doc__
     if altmodel is not None:
         exp_dict["comments"] += alt.__doc__
 
     # Check if it looks like this is a partial FOV acquisition
-    exp_dict["partial_brain"] = bool(exp_dict.get("whole_brain_epi"))
+    exp_dict["partial_brain"] = bool(exp_dict.get("whole_brain_template"))
 
     # Temporal resolution. Mandatory.
     exp_dict["TR"] = float(exp_dict["TR"])
 
     # Convert HPF cutoff to sigma for fslmaths
-    exp_dict["hpf_cutoff"] = float(exp_dict.get("hpf_cutoff", np.inf))
     exp_dict["hpf_sigma"] = (exp_dict["hpf_cutoff"] / 2.35) / exp_dict["TR"]
 
     # Setup the hrf_bases dictionary
@@ -82,9 +80,6 @@ def gather_experiment_info(exp_name=None, altmodel=None):
                              {"derivs": exp_dict.get("hrf_derivs")}}
 
     # Build contrasts list if neccesary
-    if "contrasts" not in exp_dict:
-        conkeys = sorted([k for k in exp_dict if re.match("cont\d+", k)])
-        exp_dict["contrasts"] = [exp_dict[key] for key in conkeys]
     exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
 
     if "regressors" not in exp_dict:
@@ -93,14 +88,35 @@ def gather_experiment_info(exp_name=None, altmodel=None):
     return exp_dict
 
 
-def verify_experiment_info(exp_dict):
-    """Catch setup errors that might lead to confusing workflow crashes."""
-    if exp_dict["units"] not in ["secs", "scans"]:
-        raise ValueError("units must be 'secs' or 'scans'")
+def default_experiment_parameters():
+    """Return default values for experiments."""
+    exp = dict(
 
-    if (exp_dict["temporal_interp"]
-            and exp_dict["slice_order"] not in ["up", "down"]):
-        raise ValueError("slice_order must be 'up' or 'down'")
+        source_template="",
+        whole_brain_template="",
+        n_runs=0,
+
+        TR=2,
+        frames_to_toss=0,
+        temporal_interp=False,
+        interleaved=True,
+        slice_order="up",
+        intensity_threshold=3,
+        motion_threshold=1,
+        smooth_fwhm=6,
+        hpf_cutoff=128,
+
+        design_name=None,
+        condition_names=None,
+        hrf_model="GammaDifferenceHRF",
+        temporal_deriv=False,
+        regressors=None,
+        confound_pca=False,
+        hrf_params={},
+        contrasts=[],
+
+               )
+    return exp
 
 
 def determine_subjects(subject_arg=None):
