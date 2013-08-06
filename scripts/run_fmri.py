@@ -72,7 +72,7 @@ def main(arglist):
     # Collect raw nifti data
     outfields = ["timeseries"]
     if exp["partial_brain"]:
-        outfields.append("whole_brain_epi")
+        outfields.append("whole_brain_template")
     preproc_source = Node(DataGrabber(infields=["subject_id"],
                                       outfields=outfields,
                                       base_directory=project["data_dir"],
