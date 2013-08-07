@@ -82,7 +82,7 @@ def create_preprocessing_workflow(name="preproc",
     in_fields = ["timeseries", "subject_id"]
 
     if partial_brain:
-        in_fields.append("whole_brain_epi")
+        in_fields.append("whole_brain_template")
 
     inputnode = Node(IdentityInterface(in_fields), "inputs")
 

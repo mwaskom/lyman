@@ -259,7 +259,7 @@ def watershed_segment(zstat_file, localmax_file):
     names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
     lut_data["ROI"] = np.array(names)
     lut_data["#ID"] = np.arange(n + 1)
-    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int).squeeze()
+    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int).squeeze().T
     lut_data.to_csv(lut_file, "\t", index=False)
 
     return seg_file, peak_file, lut_file
@@ -421,7 +421,7 @@ def cluster_table(localmax_file):
         loc_df = locator.locate_peaks(coords)
         df = pd.concat([df, loc_df], axis=1)
         mni_coords = locator.vox_to_mni(coords).T
-        for i, ax in enumerate(coords):
+        for i, ax in enumerate(["x", "y", "z"]):
             df[ax] = mni_coords[i]
 
     out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
