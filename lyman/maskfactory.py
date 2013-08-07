@@ -201,14 +201,14 @@ class MaskFactory(object):
         for subj in self.subject_list:
             args = dict(subj=subj)
             xfm_cmds.append(
-                      ["mri_vol2vol",
-                       "--mov", self.epi_template % args,
-                       "--targ", hires_mask_template % args,
-                       "--inv",
-                       "--o", self.out_template % args,
-                       "--reg", self.reg_template % args,
-                       "--no-save-reg",
-                       "--nearest"])
+                ["mri_vol2vol",
+                 "--mov", self.epi_template % args,
+                 "--targ", hires_mask_template % args,
+                 "--inv",
+                 "--o", self.out_template % args,
+                 "--reg", self.reg_template % args,
+                 "--no-save-reg",
+                 "--nearest"])
         self.execute(xfm_cmds, self.out_template)
 
     def from_statistical_file(self, stat_file_temp, thresh):
@@ -252,8 +252,7 @@ class MaskFactory(object):
             for i, ax in enumerate(axes.ravel(), start):
                 ax.imshow(epi[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
                 ax.imshow(mask[..., i].T, cmap=cmap, interpolation="nearest")
-                ax.set_xticks([])
-                ax.set_yticks([])
+                ax.axis("off")
             f.subplots_adjust(hspace=1e-5, wspace=1e-5)
             plt.savefig(slices_temp % args, dpi=100, bbox_inches="tight",
                         facecolor="k", edgecolor="k")
@@ -269,19 +268,3 @@ class MaskFactory(object):
         if self.parallel:
             if not res.successful():
                 raise RuntimeError(res.pyerr)
-        else:
-            self.check_exists(out_temp)
-
-    def check_exists(self, fpath_temp):
-        """Ensure that output files exist on disk."""
-        fail_list = []
-        for hemi in ["lh", "rh"]:
-            for subj in self.subject_list:
-                args = dict(hemi=hemi, subj=subj)
-                f_want = fpath_temp % args
-                if not op.exists(f_want):
-                    fail_list.append(f_want)
-        if fail_list:
-            print "Failed to write files:"
-            print "\n".join(fail_list)
-            raise RuntimeError
