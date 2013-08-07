@@ -37,7 +37,7 @@ def main(arglist):
 
     # Get the full correct name for the experiment
     if args.experiment is None:
-        exp_name = project["default_experiment"]
+        exp_name = project["default_exp"]
     else:
         exp_name = args.experiment
 
