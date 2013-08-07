@@ -1,9 +1,6 @@
 from nipype.interfaces import fsl
-from nipype.interfaces import freesurfer as surf
 from nipype.interfaces.utility import IdentityInterface, Function
 from nipype.pipeline.engine import Workflow, Node
-
-from .model import plot_zstats
 
 
 def create_volume_ffx_workflow(name="volume_ffx",
@@ -54,15 +51,7 @@ def create_volume_ffx_workflow(name="volume_ffx",
     flameo = Node(fsl.FLAMEO(run_mode="fe"),
                   name="flameo")
 
-    # Plot the zstat images
-    plotzstats = Node(Function(input_names=["background_file",
-                                            "zstat_files",
-                                            "contrasts"],
-                               output_names=["out_files"],
-                               function=plot_zstats),
-                         name="plotzstats")
-    plotzstats.inputs.contrasts = ["main_effect"]
-
+    # Plot the zstat image
     # Build pdf and html reports
     report = Node(Function(input_names=["subject_id",
                                         "mask_png",
@@ -104,23 +93,15 @@ def create_volume_ffx_workflow(name="volume_ffx",
             [("design_mat", "design_file"),
              ("design_con", "t_con_file"),
              ("design_grp", "cov_split_file")]),
-        (flameo, plotzstats,
-            [("zstats", "zstat_files")]),
-        (inputnode, plotzstats,
-            [("background_file", "background_file")]),
         (inputnode, report,
             [("subject_id", "subject_id"),
              ("contrast", "contrast")]),
-        (plotzstats, report,
-            [("out_files", "zstat_pngs")]),
         (getmask, report,
             [("mask_png", "mask_png")]),
         (flameo, outputnode,
             [("stats_dir", "stats")]),
         (getmask, outputnode,
             [("mask_png", "mask_png")]),
-        (plotzstats, outputnode,
-            [("out_files", "zstat_png")]),
         (report, outputnode,
             [("reports", "report")]),
         ])

@@ -51,9 +51,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                    "report"],
                                   setup_model,
                                   imports),
-                          ["design_file", "realign_file",
-                           "artifact_file" "run"],
-                          "modeldesign")
+                          ["realign_file", "artifact_file", "run"],
+                          "modelsetup")
     modelsetup.inputs.exp_info = exp_info
 
     # Use film_gls to estimate the timeseries model
@@ -84,8 +83,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                            "calcrsquared")
 
     # Save the experiment info for this run
-    dumpjson = Node(Function(["exp_info"], ["json_file"],
-                             dump_exp_info, imports),
+    dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
+                                dump_exp_info, imports),
+                    "timeseries",
                     "dumpjson")
     dumpjson.inputs.exp_info = exp_info
 
@@ -122,9 +122,11 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
             [("design_file", "design_file"),
              ("realign_file", "realign_file"),
              ("artifact_file", "artifact_file"),
-             (("design_file", run_indices), "run")]),
+             (("timeseries", run_indices), "run")]),
         (inputnode, modelestimate,
             [("timeseries", "in_file")]),
+        (inputnode, dumpjson,
+            [("timeseries", "timeseries")]),
         (modelsetup, modelestimate,
             [("design_matrix_file", "design_file")]),
         (modelestimate, contrastestimate,
@@ -149,9 +151,10 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         (calcrsquared, modelreport,
             [("r2_files", "r2_files")]),
         (modelsetup, outputnode,
-            [("design_matrix_file", "design_file"),
+            [("design_matrix_file", "design_mat"),
              ("contrast_file", "contrast_mat"),
-             ("design_matrix_pkl", "design_pkl")]),
+             ("design_matrix_pkl", "design_pkl"),
+             ("report", "design_report")]),
         (dumpjson, outputnode,
             [("json_file", "json_file")]),
         (modelestimate, outputnode,
@@ -215,6 +218,7 @@ def setup_model(design_file, realign_file, artifact_file, exp_info, run):
     svd_png = op.abspath("design_singular_values.png")
     X.plot_singular_values(fname=svd_png)
 
+    # Build a list of images sumarrizing the model
     report = [design_png, corr_png, svd_png]
 
     # Now plot the information loss from the filter
@@ -229,12 +233,14 @@ def setup_model(design_file, realign_file, artifact_file, exp_info, run):
 
         f, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
+        ax.axvline(1.0 / exp_info["hpf_cutoff"], c="#222222", ls=":", lw=1.5)
         ax.fill_between(fs, pxx_filt, color="#444444")
         ax.set_xlabel("Frequency")
         ax.set_ylabel("Spectral Density")
+        ax.set_xlim(0, .15)
         plt.tight_layout()
         fname = op.abspath("cope%d_filter.png" % i)
-        f.savefig(fname)
+        f.savefig(fname, dpi=100)
         report.append(fname)
 
     # Write out the X object as a pkl to pass to the report function
@@ -293,7 +299,7 @@ def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
     r2_conf = (1 - ssres_conf / sstot).reshape(outshape)
 
     conf_img = nib.Nifti1Image(r2_conf, ts_aff, ts_header)
-    conf_file = op.abspath("r2_confounds.nii.gz")
+    conf_file = op.abspath("r2_confound.nii.gz")
     conf_img.to_filename(conf_file)
 
     return [full_file, main_file, conf_file]
@@ -337,7 +343,7 @@ def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
     f, axes = plt.subplots(**spkws)
     for i, ax in enumerate(axes.ravel(), start):
         ax.imshow(mean_data[..., i].T, cmap="gray",
-                   vmin=mlow, vmax=mhigh, interpolation="nearest")
+                  vmin=mlow, vmax=mhigh, interpolation="nearest")
         ax.imshow(ss[..., i].T, cmap="PuRd_r",
                   vmin=sslow, vmax=sshigh, alpha=.7)
         ax.axis("off")
@@ -354,7 +360,7 @@ def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
         neg = zdata.copy()
         neg[neg > -2.3] = np.nan
         zlow = 2.3
-        zhigh = np.abs(zdata).max()
+        zhigh = max(np.abs(zdata).max(), 2.3)
         f, axes = plt.subplots(**spkws)
         for i, ax in enumerate(axes.ravel()):
             ax.imshow(mean_data[..., i].T, cmap="gray",
@@ -390,7 +396,7 @@ def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
     return report
 
 
-def dump_exp_info(exp_info):
+def dump_exp_info(exp_info, timeseries):
     """Dump the exp_info dict into a json file."""
     json_file = op.abspath("experiment_info.json")
     with open(json_file, "w") as fp:
@@ -404,4 +410,4 @@ def dump_exp_info(exp_info):
 
 def run_indices(design_files):
     """Given a list of files, return a list of 1-based integers."""
-    return range(len(design_files))
+    return range(1, len(design_files) + 1)

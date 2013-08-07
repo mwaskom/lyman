@@ -42,6 +42,7 @@ def main(arglist):
         exp_name = args.experiment
 
     # Set roots of output storage
+    data_dir = project["data_dir"]
     anal_dir_base = op.join(project["analysis_dir"], exp_name)
     work_dir_base = op.join(project["working_dir"], exp_name)
     preproc_dir = op.join(project["analysis_dir"], args.experiment)
@@ -119,20 +120,22 @@ def main(arglist):
     model, model_input, model_output = wf.create_timeseries_model_workflow(
         name=model_smooth + "_model", exp_info=exp)
 
-    model_source = Node(DataGrabber(infields=["subject_id"],
-                                    outfields=["outlier_files",
-                                               "mean_func",
-                                               "realign_params",
-                                               "timeseries"],
+    model_source = Node(DataGrabber(["subject_id"],
+                                    ["design_file",
+                                     "realign_file",
+                                     "artifact_file",
+                                     "timeseries"],
                                     base_directory=preproc_dir,
                                     template="%s/preproc/run_*/%s",
                                     sort_filelist=True),
                         name="model_source")
     model_source.inputs.template_args = dict(
-        outlier_files=[["subject_id", "outlier_volumes.txt"]],
-        mean_func=[["subject_id", "mean_func.nii.gz"]],
-        realign_params=[["subject_id", "realignment_parameters.par"]],
+        design_file=[["subject_id"]],
+        realign_file=[["subject_id", "realignment_params.csv"]],
+        artifact_file=[["subject_id", "artifacts.csv"]],
         timeseries=[["subject_id", model_smooth + "_timeseries.nii.gz"]])
+    model_source.inputs.field_template = dict(
+        design_file=op.join(data_dir, "%s/design", exp["design_name"] + ".csv"))
 
     model_inwrap = tools.InputWrapper(model, subj_source,
                                       model_source, model_input)
