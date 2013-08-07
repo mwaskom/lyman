@@ -35,7 +35,12 @@ def main(arglist):
     subject_list = lyman.determine_subjects(args.subjects)
     subj_source = tools.make_subject_source(subject_list)
 
-    # Can run model+ processing several times on preprocessed data
+    # Get the full correct name for the experiment
+    if args.experiment is None:
+        exp_name = project["default_experiment"]
+    else:
+        exp_name = args.experiment
+
     if args.altmodel:
         exp_name = "-".join([args.experiment, args.altmodel])
     else:
