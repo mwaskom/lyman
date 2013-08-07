@@ -41,23 +41,22 @@ def main(arglist):
     else:
         exp_name = args.experiment
 
-    if args.altmodel:
-        exp_name = "-".join([args.experiment, args.altmodel])
-    else:
-        exp_name = args.experiment
+    exp_base = exp_name
+    if args.altmodel is not None:
+        exp_name = "-".join([exp_base, args.altmodel])
 
     # Set roots of output storage
     data_dir = project["data_dir"]
-    anal_dir_base = op.join(project["analysis_dir"], exp_name)
-    work_dir_base = op.join(project["working_dir"], exp_name)
-    preproc_dir = op.join(project["analysis_dir"], args.experiment)
+    analysis_dir = op.join(project["analysis_dir"], exp_name)
+    working_dir = op.join(project["working_dir"], exp_name)
+    preproc_dir = op.join(project["analysis_dir"], exp_base)
 
     nipype.config.set("execution", "crashdump_dir", "/tmp/%s-%d" % (os.getlogin(),
                                                                     time.time()))
 
     # This might not exist if we're running an altmodel
-    if not os.path.exists(anal_dir_base):
-        os.makedirs(anal_dir_base)
+    if not os.path.exists(analysis_dir):
+        os.makedirs(analysis_dir)
 
     # Preprocessing Workflow
     # ======================
@@ -98,7 +97,7 @@ def main(arglist):
     preproc_inwrap.connect_inputs()
 
     # Store workflow outputs to persistant location
-    preproc_sink = Node(DataSink(base_directory=anal_dir_base),
+    preproc_sink = Node(DataSink(base_directory=analysis_dir),
                         name="preproc_sink")
 
     # Similar to above, class to handle sterotyped output connections
@@ -109,7 +108,7 @@ def main(arglist):
     preproc_outwrap.sink_outputs("preproc")
 
     # Set the base for the possibly temporary working directory
-    preproc.base_dir = work_dir_base
+    preproc.base_dir = working_dir
 
     # Possibly execute the workflow, depending on the command line
     lyman.run_workflow(preproc, "preproc", args)
@@ -146,7 +145,7 @@ def main(arglist):
                                       model_source, model_input)
     model_inwrap.connect_inputs()
 
-    model_sink = Node(DataSink(base_directory=anal_dir_base),
+    model_sink = Node(DataSink(base_directory=analysis_dir),
                                name="model_sink")
 
     model_outwrap = tools.OutputWrapper(model, subj_source,
@@ -156,7 +155,7 @@ def main(arglist):
     model_outwrap.sink_outputs("model." + model_smooth)
 
     # Set temporary output locations
-    model.base_dir = work_dir_base
+    model.base_dir = working_dir
 
     # Possibly execute the workflow
     lyman.run_workflow(model, "model", args)
@@ -211,7 +210,7 @@ def main(arglist):
         reg_template_args = {"source_image":
             [["subject_id", "source_image", "nii.gz"]]}
     else:
-        base_directory = anal_dir_base
+        base_directory = analysis_dir
         reg_infields.append("contrast_number")
         reg_template = "%s/model/%s/run_*/%s%d.%s"
         reg_template_args = {"source_image":
@@ -279,7 +278,7 @@ def main(arglist):
         reg.connect(smooth_source, "smooth", reg_source, "smooth")
 
     # Reg output and datasink
-    reg_sink = Node(DataSink(base_directory=anal_dir_base),
+    reg_sink = Node(DataSink(base_directory=analysis_dir),
                              name="reg_sink")
 
     reg_outwrap = tools.OutputWrapper(reg, subj_source,
@@ -297,7 +296,7 @@ def main(arglist):
         (r"(un)*(smoothed_time)", "time"),
         (r"_run_", "run_")])  # This one's wired to interal function
 
-    reg.base_dir = work_dir_base
+    reg.base_dir = working_dir
 
     # Possibly run registration workflow and clean up
     lyman.run_workflow(reg, "reg", args)
@@ -344,7 +343,7 @@ def main(arglist):
     # Define the ffxistration data source node
     ffx_source = Node(DataGrabber(infields=ffx_infields,
                                   outfields=ffx_outfields,
-                                  base_directory=anal_dir_base,
+                                  base_directory=analysis_dir,
                                   template=ffx_template,
                                   sort_filelist=True),
                       name="ffx_source")
@@ -368,7 +367,7 @@ def main(arglist):
         ffx.connect(smooth_source, "smooth", ffx_source, "smooth")
 
     # Fixed effects output and datasink
-    ffx_sink = Node(DataSink(base_directory=anal_dir_base),
+    ffx_sink = Node(DataSink(base_directory=analysis_dir),
                              name="ffx_sink")
 
     ffx_outwrap = tools.OutputWrapper(ffx, subj_source,
@@ -384,7 +383,7 @@ def main(arglist):
         (r"/_smooth_[^/]*/", "/"),
         (r"/_contrast_", "/")])
 
-    ffx.base_dir = work_dir_base
+    ffx.base_dir = working_dir
 
     # Possibly run fixed effects workflow
     lyman.run_workflow(ffx, "ffx", args)
