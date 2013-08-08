@@ -184,7 +184,8 @@ def main(arglist):
     if regtype == "model":
         reg_templates = dict(
             copes="{subject_id}/model/{smoothing}/run_*/cope*.nii.gz",
-            varcopes="{subject_id}/model/{smoothing}/run_*/varcope*.nii.gz"
+            varcopes="{subject_id}/model/{smoothing}/run_*/varcope*.nii.gz",
+            r2s="{subject_id}/model/{smoothing}/run_*/r2_*.nii.gz",
                              )
     else:
         reg_templates = dict(

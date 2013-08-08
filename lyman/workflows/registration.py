@@ -29,9 +29,11 @@ spaces = ["epi", "mni"]
 def create_reg_workflow(name="reg", space="mni", regtype="model"):
     """Flexibly register files into one of several common spaces."""
     if regtype == "model":
-        fields = ["copes", "varcopes", "masks", "affines"]
+        fields = ["copes", "varcopes", "r2s"]
     elif regtype == "timeseries":
-        fields = ["timeseries", "masks", "affines"]
+        fields = ["timeseries"]
+    fields.extend(["masks", "affines"])
+
     if space == "mni":
         fields.append("warpfield")
 
@@ -56,13 +58,14 @@ def create_reg_workflow(name="reg", space="mni", regtype="model"):
 # Interface functions
 # ===================
 
-def epi_model_transform(copes, varcopes, masks, affines):
+def epi_model_transform(copes, varcopes, r2s, masks, affines):
     """Take model outputs into the 'epi' space in a workflow context."""
     n_runs = len(affines)
 
     ref_file = copes[0]
     copes = map(list, np.split(np.array(copes), n_runs))
     varcopes = map(list, np.split(np.array(varcopes), n_runs))
+    r2s = map(list, np.split(np.array(r2s), n_runs))
 
     # Iterate through the runs
     for n in range(n_runs):
@@ -73,10 +76,11 @@ def epi_model_transform(copes, varcopes, masks, affines):
 
         run_copes = copes[n]
         run_varcopes = varcopes[n]
+        run_r2s = r2s[n]
         run_mask = masks[n]
         run_affine = affines[n]
 
-        files = [run_mask] + run_copes + run_varcopes
+        files = [run_mask] + run_copes + run_varcopes + run_r2s
 
         if not n:
             # Just copy the first run files over
@@ -147,13 +151,14 @@ def epi_timeseries_transform(timeseries, masks, affines):
     return out_files
 
 
-def mni_model_transform(copes, varcopes, masks, affines, warpfield):
+def mni_model_transform(copes, varcopes, r2s, masks, affines, warpfield):
     """Take model outputs into the FSL MNI space."""
     n_runs = len(affines)
 
     ref_file = fsl.Info.standard_image("avg152T1_brain.nii.gz")
     copes = map(list, np.split(np.array(copes), n_runs))
     varcopes = map(list, np.split(np.array(varcopes), n_runs))
+    r2s = map(list, np.split(np.array(r2s), n_runs))
 
     # Iterate through the runs
     for n in range(n_runs):
@@ -164,10 +169,11 @@ def mni_model_transform(copes, varcopes, masks, affines, warpfield):
 
         run_copes = copes[n]
         run_varcopes = varcopes[n]
+        run_r2s = r2s[n]
         run_mask = masks[n]
         run_affine = affines[n]
 
-        files = [run_mask] + run_copes + run_varcopes
+        files = [run_mask] + run_copes + run_varcopes + run_r2s
 
         # Otherwise apply the transformation
         interps = ["nn"] + (["trilinear"] * (len(files) - 1))
