@@ -125,7 +125,7 @@ def main(arglist):
     timeseries_file = model_smooth + "_timeseries.nii.gz"
     model_templates = dict(
         design_file=op.join(data_dir, "{subject_id}/design", design_file),
-        realign_file=op.join(preproc_template,"realignment_params.csv"),
+        realign_file=op.join(preproc_template, "realignment_params.csv"),
         artifact_file=op.join(preproc_template, "artifacts.csv"),
         timeseries=op.join(preproc_template, timeseries_file),
                            )
@@ -188,7 +188,8 @@ def main(arglist):
                              )
     else:
         reg_templates = dict(
-            timeseries="{subject_id}/preproc/run_*/{smoothing}_timeseries.nii.gz",
+            timeseries=op.join("{subject_id}/preproc/run_*/",
+                               "{smoothing}_timeseries.nii.gz"),
                              )
     reg_templates.update(dict(
         masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
@@ -226,7 +227,10 @@ def main(arglist):
     reg_outwrap.sink_outputs("reg.%s" % space)
 
     # Reg has some additional substitutions to strip out interables
-    reg_outwrap.add_regexp_substitutions([(r"_smoothing_", "")])
+    reg_outwrap.add_regexp_substitutions([
+        (r"_smoothing_", ""),
+        (r"(un)*(smoothed_time)", "time"),
+                                          ])
 
     reg.base_dir = working_dir
 

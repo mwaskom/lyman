@@ -54,8 +54,8 @@ def create_epi_reg_workflow(name="epi_reg", regtype="model"):
     return regflow, inputnode, outputnode
 
 
-def create_mni_reg_workflow(name="mni_reg", interp="spline"):
-    """Set up a workflow to register an epi into FSL's MNI space."""
+def create_mni_reg_workflow(name="mni_reg", regtype="model"):
+    """Set up a workflow to register files into FSL's MNI space."""
     inputnode = Node(IdentityInterface(fields=["source_image",
                                                "warpfield",
                                                "fsl_affine"]),
@@ -165,8 +165,9 @@ def register_to_epi(source_images, fsl_affines, interp="spline"):
 
     return out_files
 
-# Interface functions
 
+# Interface functions
+# ===================
 
 def epi_model_transform(copes, varcopes, masks, affines):
     """Take model outputs into the 'epi' space in a workflow context."""
@@ -196,6 +197,7 @@ def epi_model_transform(copes, varcopes, masks, affines):
                 to = op.join(out_dir, op.basename(f).replace(".nii.gz",
                                                              "_xfm.nii.gz"))
                 shutil.copyfile(f, to)
+
         else:
             # Otherwise apply the transformation
             inv_affine = op.basename(run_affine).replace(".mat", "_inv.mat")
@@ -217,4 +219,42 @@ def epi_model_transform(copes, varcopes, masks, affines):
 
 def epi_timeseries_transform(timeseries, masks, affines):
     """Take a set of timeseries files into the 'epi' space."""
-    pass
+    n_runs = len(affines)
+    ref_file = timeseries[0]
+
+    for n in range(n_runs):
+
+        # Make the output directory
+        out_dir = "run_%d" % (n + 1)
+        os.mkdir(out_dir)
+
+        run_timeseries = timeseries[n]
+        run_mask = masks[n]
+        run_affine = affines[n]
+
+        if not n:
+            # Just copy the first run files over
+            to_timeseries = op.join(out_dir, "timeseries_xfm.nii.gz")
+            shutil.copyfile(run_timeseries, to_timeseries)
+            to_mask = op.join(out_dir, "functional_mask_xfm.nii.gz")
+            shutil.copyfile(run_mask, to_mask)
+
+        else:
+
+            # Otherwise apply the transformation
+            inv_affine = op.basename(run_affine).replace(".mat", "_inv.mat")
+            sub.check_output(["convert_xfm", "-omat", inv_affine,
+                              "-inverse", run_affine])
+
+            files = [run_mask, run_timeseries]
+            interps = ["nn", "spline"]
+            for f, interp in zip(files, interps):
+                out_file = op.join(out_dir,
+                                   op.basename(f).replace(".nii.gz",
+                                                          "_xfm.nii.gz"))
+                cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
+                       "--interp=%s" % interp, "--premat=%s" % inv_affine]
+                sub.check_output(cmd)
+
+    out_files = [op.abspath(f) for f in glob("run_*/*.nii.gz")]
+    return out_files
