@@ -124,23 +124,3 @@ def make_subject_source(subject_list):
                 iterables=("subject_id", subject_list),
                 overwrite=True,
                 name="subj_source")
-
-def find_contrast_number(contrast_name, contrast_names):
-    """Find index in contrast list for given contrast name.
-
-    Contains a hack to handle mask registration.
-
-    """
-    if contrast_name == "_mask":
-        return 0
-    return contrast_names.index(contrast_name) + 1
-
-
-def reg_template(contrast, mask_template, model_template):
-    """Implement a hack to grab mask files for registration."""
-    return mask_template if contrast == "_mask" else model_template
-
-
-def reg_template_args(contrast, mask_args, model_args):
-    """Implement a hack to grab mask files for registration."""
-    return mask_args if contrast == "_mask" else model_args
