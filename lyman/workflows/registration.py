@@ -53,95 +53,6 @@ def create_reg_workflow(name="reg", space="mni", regtype="model"):
     return regflow, inputnode, outputnode
 
 
-def create_epi_reg_workflow(name="epi_reg", regtype="model"):
-    """Register model outputs into the first run's native space."""
-
-    if regtype == "model":
-        fields = ["copes", "varcopes", "masks", "affines"]
-    elif regtype == "timeseries":
-        fields = ["timeseries", "masks", "affines"]
-    else:
-        raise ValueError("regtype must be in {'model', 'timeseries'}")
-
-    inputnode = Node(IdentityInterface(fields), "inputnode")
-
-    func = dict(model=epi_model_transform,
-                timeseries=epi_timeseries_transform)[regtype]
-
-    transform = Node(Function(fields, ["out_files"],
-                              func, imports),
-                     "transform")
-
-    regflow = Workflow(name=name)
-
-    outputnode = Node(IdentityInterface(["out_files"]), "outputnode")
-    for field in fields:
-        regflow.connect(inputnode, field, transform, field)
-    regflow.connect(transform, "out_files", outputnode, "out_files")
-
-    return regflow, inputnode, outputnode
-
-
-def create_mni_reg_workflow(name="mni_reg", regtype="model"):
-    """Set up a workflow to register files into FSL's MNI space."""
-
-    if regtype == "model":
-        fields = ["copes", "varcopes", "masks", "affines", "warpfield"]
-    elif regtype == "timeseries":
-        fields = ["timeseries", "masks", "affines", "warpfield"]
-    else:
-        raise ValueError("regtype must be in {'model', 'timeseries'}")
-
-    inputnode = Node(IdentityInterface(fields), "inputnode")
-
-    func = dict(model=mni_model_transform,
-                timeseries=mni_timeseries_transform)[regtype]
-
-    transform = Node(Function(fields, ["out_files"],
-                              func, imports),
-                     "transform")
-
-    regflow = Workflow(name=name)
-
-    outputnode = Node(IdentityInterface(["out_files"]), "outputnode")
-    for field in fields:
-        regflow.connect(inputnode, field, transform, field)
-    regflow.connect(transform, "out_files", outputnode, "out_files")
-
-    return regflow, inputnode, outputnode
-
-    getinterp = MapNode(Function(input_names=["source_file",
-                                              "default_interp"],
-                                 output_names="interp",
-                                 function=get_interp),
-                        iterfield=["source_file"],
-                        name="getinterp")
-    getinterp.inputs.default_interp = interp
-
-    applywarp = MapNode(fsl.ApplyWarp(ref_file=target),
-                        iterfield=["in_file", "premat", "interp"],
-                        name="applywarp")
-
-    outputnode = Node(IdentityInterface(fields=["out_file"]),
-                      name="outputnode")
-
-    warpflow = Workflow(name=name)
-    warpflow.connect([
-        (inputnode, applywarp,
-            [("source_image", "in_file"),
-             ("warpfield", "field_file"),
-             ("fsl_affine", "premat")]),
-        (inputnode, getinterp,
-            [("source_image", "source_file")]),
-        (getinterp, applywarp,
-            [("interp", "interp")]),
-        (applywarp, outputnode,
-            [("out_file", "out_file")])
-        ])
-
-    return warpflow, inputnode, outputnode
-
-
 def get_interp(source_file, default_interp="spline"):
     """Determine what interpolation to use for volume resampling."""
     from nibabel import load
@@ -346,4 +257,31 @@ def mni_model_transform(copes, varcopes, masks, affines, warpfield):
 
 def mni_timeseries_transform(timeseries, masks, affines, warpfield):
     """Take timeseries files into the FSL MNI space."""
-    pass
+    n_runs = len(affines)
+    ref_file = fsl.Info.standard_image("avg152T1_brain.nii.gz")
+
+    # Iterate through the runs
+    for n in range(n_runs):
+
+        # Make the output directory
+        out_dir = "run_%d" % (n + 1)
+        os.mkdir(out_dir)
+
+        run_timeseries = timeseries[n]
+        run_mask = masks[n]
+        run_affine = affines[n]
+
+        files = [run_mask, run_timeseries]
+        interps = ["nn", "spline"]
+
+        for f, interp in zip(files, interps):
+            out_file = op.join(out_dir,
+                               op.basename(f).replace(".nii.gz",
+                                                      "_warp.nii.gz"))
+            cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
+                   "--interp=%s" % interp, "--premat=%s" % run_affine,
+                   "-w", warpfield]
+            sub.check_output(cmd)
+
+    out_files = [op.abspath(f) for f in glob("run_*/*.nii.gz")]
+    return out_files

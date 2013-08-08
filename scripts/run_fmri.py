@@ -165,10 +165,10 @@ def main(arglist):
 
     # Retrieve the right workflow function for registration
     # Get the workflow function dynamically based on the space
-    func_name = "create_%s_reg_workflow" % space
-    workflow_function = getattr(wf, func_name)
     flow_name = "%s_%s_reg" % (space, regtype)
-    reg, reg_input, reg_output = workflow_function(flow_name, regtype)
+    reg, reg_input, reg_output = wf.create_reg_workflow(flow_name,
+                                                        space,
+                                                        regtype)
 
     # Define a smooth variable here. Use iterables so that running
     # with/without smoothing doesn't clobber working directory files
