@@ -93,8 +93,7 @@ def main(arglist):
     preproc_inwrap.connect_inputs()
 
     # Store workflow outputs to persistant location
-    preproc_sink = Node(DataSink(base_directory=analysis_dir),
-                        name="preproc_sink")
+    preproc_sink = Node(DataSink(base_directory=analysis_dir), "preproc_sink")
 
     # Similar to above, class to handle sterotyped output connections
     preproc_outwrap = tools.OutputWrapper(preproc, subj_source,
@@ -139,8 +138,7 @@ def main(arglist):
                                       model_source, model_input)
     model_inwrap.connect_inputs()
 
-    model_sink = Node(DataSink(base_directory=analysis_dir),
-                               name="model_sink")
+    model_sink = Node(DataSink(base_directory=analysis_dir), "model_sink")
 
     model_outwrap = tools.OutputWrapper(model, subj_source,
                                         model_sink, model_output)
@@ -180,27 +178,25 @@ def main(arglist):
 
     # Set up the registration inputs and templates
     reg_infields = ["subject_id", "smoothing"]
-
-    if regtype == "model":
-        reg_templates = dict(
-            copes="{subject_id}/model/{smoothing}/run_*/cope*.nii.gz",
-            varcopes="{subject_id}/model/{smoothing}/run_*/varcope*.nii.gz"
-                             )
-    else:
-        reg_templates = dict(
-            timeseries=op.join("{subject_id}/preproc/run_*/",
-                               "{smoothing}_timeseries.nii.gz"),
-                             )
-    reg_templates.update(dict(
+    reg_templates = dict(
         masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
         affines="{subject_id}/preproc/run_*/func2anat_flirt.mat"
-                              ))
+                          )
+
+    if regtype == "model":
+        reg_templates.update(dict(
+            copes="{subject_id}/model/{smoothing}/run_*/cope*.nii.gz",
+            varcopes="{subject_id}/model/{smoothing}/run_*/varcope*.nii.gz"
+                                  ))
+    else:
+        reg_templates.update(dict(
+            timeseries=op.join("{subject_id}/preproc/run_*/",
+                               "{smoothing}_timeseries.nii.gz"),
+                                  ))
 
     if space == "mni":
-        reg_templates.update(dict(
-            warpfield=op.join(data_dir,
-                              "{subject_id}/normalization/warpfield.nii.gz")
-                                  ))
+        reg_templates["warpfield"] = op.join(data_dir, "{subject_id}",
+                                             "normalization/warpfield.nii.gz")
 
     # Define the registration data source node
     reg_source = Node(SelectFiles(reg_infields,
@@ -218,8 +214,7 @@ def main(arglist):
     reg.connect(smooth_source, "smoothing", reg_source, "smoothing")
 
     # Reg output and datasink
-    reg_sink = Node(DataSink(base_directory=analysis_dir),
-                             name="reg_sink")
+    reg_sink = Node(DataSink(base_directory=analysis_dir), "reg_sink")
 
     reg_outwrap = tools.OutputWrapper(reg, subj_source,
                                     reg_sink, reg_output)
@@ -299,8 +294,7 @@ def main(arglist):
     ffx.connect(smooth_source, "smooth", ffx_source, "smooth")
 
     # Fixed effects output and datasink
-    ffx_sink = Node(DataSink(base_directory=analysis_dir),
-                             name="ffx_sink")
+    ffx_sink = Node(DataSink(base_directory=analysis_dir), "ffx_sink")
 
     ffx_outwrap = tools.OutputWrapper(ffx, subj_source,
                                       ffx_sink, ffx_output)
