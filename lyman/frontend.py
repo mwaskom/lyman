@@ -45,7 +45,7 @@ def gather_experiment_info(exp_name=None, altmodel=None):
 
     exp_dict = default_experiment_parameters()
 
-    keep = lambda k: not re.match("__.*__", k)
+    def keep(k): return not re.match("__.*__", k)
     exp_dict.update({k: v for k, v in exp.__dict__.items() if keep(k)})
 
     # Possibly import the alternate model details
@@ -75,9 +75,10 @@ def gather_experiment_info(exp_name=None, altmodel=None):
     # Convert HPF cutoff to sigma for fslmaths
     exp_dict["hpf_sigma"] = (exp_dict["hpf_cutoff"] / 2.35) / exp_dict["TR"]
 
-    # Setup the hrf_bases dictionary
-    exp_dict["hrf_bases"] = {exp_dict.get("hrf_model"):
-                             {"derivs": exp_dict.get("hrf_derivs")}}
+    # Set up the default contrasts
+    if exp_dict["condition_names"] is not None:
+        cs = [[name, [name], [1]] for name in exp_dict["condition_names"]]
+        exp_dict["contrasts"] = cs + exp_dict["contrasts"]
 
     # Build contrasts list if neccesary
     exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
