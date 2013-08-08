@@ -170,7 +170,7 @@ def main(arglist):
                                                         space,
                                                         regtype)
 
-    # Define a smooth variable here. Use iterables so that running
+    # Define a smooth variable here. Use an iterable so that running
     # with/without smoothing doesn't clobber working directory files
     # for the other kind of execution
     reg_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
