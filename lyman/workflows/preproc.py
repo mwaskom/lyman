@@ -82,7 +82,7 @@ def create_preprocessing_workflow(name="preproc",
     in_fields = ["timeseries", "subject_id"]
 
     if partial_brain:
-        in_fields.append("whole_brain_template")
+        in_fields.append("whole_brain_epi")
 
     inputnode = Node(IdentityInterface(in_fields), "inputs")
 
@@ -102,7 +102,7 @@ def create_preprocessing_workflow(name="preproc",
     skullstrip = create_skullstrip_workflow()
 
     # Estimate a registration from funtional to anatomical space
-    coregister = create_bbregister_workflow()
+    coregister = create_bbregister_workflow(partial_brain=partial_brain)
 
     # Smooth intelligently in the volume
     susan = create_susan_smooth()
@@ -160,6 +160,12 @@ def create_preprocessing_workflow(name="preproc",
         (filter_rough, artifacts,
             [("outputs.timeseries", "timeseries")]),
         ])
+
+    if partial_brain:
+        preproc.connect([
+            (inputnode, coregister,
+                [("whole_brain_epi", "whole_brain_epi")])
+                        ])
 
     # Define the outputs of the top-level workflow
     output_fields = ["smoothed_timeseries",
