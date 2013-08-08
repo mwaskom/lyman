@@ -1,49 +1,57 @@
 """Registration module contains workflows to move all runs into a common space.
 
-There are four possible spaces:
+There are two possible spaces:
 - epi: linear transform of several runs into the first run's space
 - mni: nonlinear warp to FSL's MNI152 space
-- cortex: transformation to native cortical surface representation
-- fsaverage: transformation into Freesurfer's common surface space
 
 """
-from nipype.interfaces import fsl
-from nipype.interfaces import freesurfer as surf
-from nipype.interfaces.utility import Function, IdentityInterface
-from nipype.pipeline.engine import Workflow, Node, MapNode
+import os
+import os.path as op
+import shutil
+import subprocess as sub
+from glob import glob
+import numpy as np
+
+from nipype import fsl, Workflow, Node, MapNode, Function, IdentityInterface
+
+imports = ["import os",
+           "import os.path as op",
+           "import shutil",
+           "import subprocess as sub",
+           "from glob import glob",
+           "import numpy as np",
+           ]
 
 spaces = ["epi", "mni"]
 
-def create_epi_reg_workflow(name="epi_reg", interp="spline"):
-    """Set up a workflow to register several runs into the first run space."""
-    inputnode = Node(IdentityInterface(fields=["source_image",
-                                               "fsl_affine"]),
-                     name="inputnode")
 
-    # Register runs 2+ into the space of the first
-    # This combines the transfrom from each run to the anatomical
-    # with  the inverse of the transform from run 1 to the anatomical
-    applyreg = Node(Function(input_names=["source_images",
-                                          "fsl_affines",
-                                          "interp"],
-                             output_names=["out_files"],
-                             function=register_to_epi),
-                    name="applyreg")
-    applyreg.inputs.interp = interp
+def create_epi_reg_workflow(name="epi_reg", regtype="model"):
+    """Register model outputs into the first run's native space."""
 
-    outputnode = Node(IdentityInterface(fields=["out_file"]),
-                      name="outputnode")
+    if regtype == "model":
+        fields = ["copes", "varcopes", "masks", "affines"]
+    elif regtype == "timeseries":
+        fields = ["timeseries", "masks", "affines"]
+    else:
+        raise ValueError("regtype must be in {'model', 'timeseries'}")
 
-    xfmflow = Workflow(name=name)
-    xfmflow.connect([
-        (inputnode, applyreg,
-            [("source_image", "source_images"),
-             ("fsl_affine", "fsl_affines")]),
-        (applyreg, outputnode,
-            [("out_files", "out_file")])
-        ])
+    inputnode = Node(IdentityInterface(fields), "inputnode")
 
-    return xfmflow, inputnode, outputnode
+    func = dict(model=epi_model_transform,
+                timeseries=epi_timeseries_transform)[regtype]
+
+    transform = Node(Function(fields, ["out_files"],
+                              func, imports),
+                     "transform")
+
+    regflow = Workflow(name=name)
+
+    outputnode = Node(IdentityInterface(["out_files"]), "outputnode")
+    for field in fields:
+        regflow.connect(inputnode, field, transform, field)
+    regflow.connect(transform, "out_files", outputnode, "out_files")
+
+    return regflow, inputnode, outputnode
 
 
 def create_mni_reg_workflow(name="mni_reg", interp="spline"):
@@ -61,7 +69,7 @@ def create_mni_reg_workflow(name="mni_reg", interp="spline"):
                                  function=get_interp),
                         iterfield=["source_file"],
                         name="getinterp")
-    getinterp.inputs.default_interp=interp
+    getinterp.inputs.default_interp = interp
 
     applywarp = MapNode(fsl.ApplyWarp(ref_file=target),
                         iterfield=["in_file", "premat", "interp"],
@@ -85,16 +93,6 @@ def create_mni_reg_workflow(name="mni_reg", interp="spline"):
         ])
 
     return warpflow, inputnode, outputnode
-
-
-def create_cortex_reg_workflow():
-
-    pass
-
-
-def create_fsaverage_reg_workflow():
-
-    pass
 
 
 def get_interp(source_file, default_interp="spline"):
@@ -166,3 +164,57 @@ def register_to_epi(source_images, fsl_affines, interp="spline"):
     symlink(target_img, out_img)
 
     return out_files
+
+# Interface functions
+
+
+def epi_model_transform(copes, varcopes, masks, affines):
+    """Take model outputs into the 'epi' space in a workflow context."""
+    n_runs = len(affines)
+
+    ref_file = copes[0]
+    copes = map(list, np.split(np.array(copes), n_runs))
+    varcopes = map(list, np.split(np.array(varcopes), n_runs))
+
+    # Iterate through the runs
+    for n in range(n_runs):
+
+        # Make the output directories
+        out_dir = "run_%d" % (n + 1)
+        os.mkdir(out_dir)
+
+        run_copes = copes[n]
+        run_varcopes = varcopes[n]
+        run_mask = masks[n]
+        run_affine = affines[n]
+
+        files = [run_mask] + run_copes + run_varcopes
+
+        if not n:
+            # Just copy the first run files over
+            for f in files:
+                to = op.join(out_dir, op.basename(f).replace(".nii.gz",
+                                                             "_xfm.nii.gz"))
+                shutil.copyfile(f, to)
+        else:
+            # Otherwise apply the transformation
+            inv_affine = op.basename(run_affine).replace(".mat", "_inv.mat")
+            sub.check_output(["convert_xfm", "-omat", inv_affine,
+                              "-inverse", run_affine])
+
+            interps = ["nn"] + (["trilinear"] * (len(files) - 1))
+            for f, interp in zip(files, interps):
+                out_file = op.join(out_dir,
+                                   op.basename(f).replace(".nii.gz",
+                                                          "_xfm.nii.gz"))
+                cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
+                       "--interp=%s" % interp, "--premat=%s" % inv_affine]
+                sub.check_output(cmd)
+
+    out_files = [op.abspath(f) for f in glob("run_*/*.nii.gz")]
+    return out_files
+
+
+def epi_timeseries_transform(timeseries, masks, affines):
+    """Take a set of timeseries files into the 'epi' space."""
+    pass
