@@ -286,7 +286,9 @@ def main(arglist):
     ffx_outwrap.sink_outputs("ffx.%s.%s" % (space, smoothing))
 
     # Fixed effects has some additional substitutions to strip out interables
-    ffx_outwrap.add_regexp_substitutions([("_smoothing_", "")])
+    ffx_outwrap.add_regexp_substitutions([
+        ("_smoothing_", ""), ("flamestats", "")
+                                          ])
 
     ffx.base_dir = working_dir
 
