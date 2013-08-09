@@ -104,7 +104,7 @@ def epi_model_transform(copes, varcopes, r2s, masks, affines):
                        "--interp=%s" % interp, "--premat=%s" % inv_affine]
                 sub.check_output(cmd)
 
-    out_files = [op.abspath(f) for f in glob("run_*/*.nii.gz")]
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
 
 
@@ -140,14 +140,12 @@ def epi_timeseries_transform(timeseries, masks, affines):
             files = [run_mask, run_timeseries]
             interps = ["nn", "spline"]
             for f, interp in zip(files, interps):
-                out_file = op.join(out_dir,
-                                   op.basename(f).replace(".nii.gz",
-                                                          "_xfm.nii.gz"))
+                out_file = op.join(out_dir, "timeseries_xfm.nii.gz")
                 cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
                        "--interp=%s" % interp, "--premat=%s" % inv_affine]
                 sub.check_output(cmd)
 
-    out_files = [op.abspath(f) for f in glob("run_*/*.nii.gz")]
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
 
 
@@ -186,7 +184,7 @@ def mni_model_transform(copes, varcopes, r2s, masks, affines, warpfield):
                    "-w", warpfield]
             sub.check_output(cmd)
 
-    out_files = [op.abspath(f) for f in glob("run_*/*.nii.gz")]
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
 
 
@@ -210,13 +208,11 @@ def mni_timeseries_transform(timeseries, masks, affines, warpfield):
         interps = ["nn", "spline"]
 
         for f, interp in zip(files, interps):
-            out_file = op.join(out_dir,
-                               op.basename(f).replace(".nii.gz",
-                                                      "_warp.nii.gz"))
+            out_file = op.join(out_dir, "timeseries_warp.nii.gz")
             cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
                    "--interp=%s" % interp, "--premat=%s" % run_affine,
                    "-w", warpfield]
             sub.check_output(cmd)
 
-    out_files = [op.abspath(f) for f in glob("run_*/*.nii.gz")]
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
