@@ -74,7 +74,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     calcrsquared = MapNode(Function(["design_matrix_pkl",
                                      "timeseries",
                                      "pe_files"],
-                                    ["r2_files"],
+                                    ["r2_files",
+                                     "ss_files"],
                                     compute_rsquareds,
                                     imports),
                            ["design_matrix_pkl",
@@ -107,6 +108,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                          "varcopes",
                                          "zstats",
                                          "r2_files",
+                                         "ss_files",
                                          "report",
                                          "design_mat",
                                          "contrast_mat",
@@ -164,7 +166,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
              ("varcopes", "varcopes"),
              ("zstats", "zstats")]),
         (calcrsquared, outputnode,
-            [("r2_files", "r2_files")]),
+            [("r2_files", "r2_files"),
+             ("ss_files", "ss_files")]),
         (modelreport, outputnode,
             [("report", "report")]),
         ])
@@ -275,6 +278,12 @@ def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
     ybar = y.mean(axis=0)
     sstot = np.square(y - ybar).sum(axis=0)
 
+    # Store the sum of squares
+    sstot_img = nib.Nifti1Image(sstot.reshape(outshape),
+                                ts_aff, ts_header)
+    sstot_file = op.abspath("sstot.nii.gz")
+    sstot_img.to_filename(sstot_file)
+
     # Now get the r2 for the full model
     yhat_full = X.design_matrix.dot(pes)
     ssres_full = np.square(yhat_full - y).sum(axis=0)
@@ -283,6 +292,11 @@ def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
     full_img = nib.Nifti1Image(r2_full, ts_aff, ts_header)
     full_file = op.abspath("r2_full.nii.gz")
     full_img.to_filename(full_file)
+
+    ssres_full_img = nib.Nifti1Image(ssres_full.reshape(outshape),
+                                     ts_aff, ts_header)
+    ssres_full_file = op.abspath("ssres_full.nii.gz")
+    ssres_full_img.to_filename(ssres_full_file)
 
     # Next just the "main" submatrix(conditions and regressors)
     yhat_main = X.design_matrix.dot(pes * X.main_vector)
@@ -293,6 +307,11 @@ def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
     main_file = op.abspath("r2_main.nii.gz")
     main_img.to_filename(main_file)
 
+    ssres_main_img = nib.Nifti1Image(ssres_main.reshape(outshape),
+                                     ts_aff, ts_header)
+    ssres_main_file = op.abspath("ssres_main.nii.gz")
+    ssres_main_img.to_filename(ssres_main_file)
+
     # Finally the confound submatrix
     yhat_conf = X.design_matrix.dot(pes * X.confound_vector)
     ssres_conf = np.square(yhat_conf - y).sum(axis=0)
@@ -302,7 +321,8 @@ def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
     conf_file = op.abspath("r2_confound.nii.gz")
     conf_img.to_filename(conf_file)
 
-    return [full_file, main_file, conf_file]
+    return ([full_file, main_file, conf_file],
+            [sstot_file, ssres_full_file, ssres_main_file])
 
 
 def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
