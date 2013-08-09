@@ -1,71 +1,72 @@
-from nipype.interfaces import fsl
-from nipype.interfaces.utility import IdentityInterface, Function
-from nipype.pipeline.engine import Workflow, Node
+"""Fixed effects model to combine across runs for a single subject."""
+import os
+import os.path as op
+import numpy as np
+from scipy import stats
+import pandas as pd
+import nibabel as nib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from nipype import fsl, Workflow, Node, IdentityInterface, Function
+
+imports = ["import os",
+           "import os.path as op",
+           "import json",
+           "import numpy as np",
+           "from scipy import stats",
+           "import pandas as pd",
+           "import nibabel as nib",
+           "import matplotlib.pyplot as plt",
+           "import seaborn as sns"]
 
 
-def create_volume_ffx_workflow(name="volume_ffx",
-                               regressors=None,
-                               contrasts=None):
+def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
+    """Return a workflow object to execute a fixed-effects mode."""
+    if contrasts is None:
+        contrasts = []
 
-    inputnode = Node(IdentityInterface(fields=["subject_id",
-                                               "contrast",
-                                               "copes",
-                                               "varcopes",
-                                               "masks",
-                                               "dof_files",
-                                               "background_file"]),
+    inputnode = Node(IdentityInterface(["copes",
+                                        "varcopes",
+                                        "masks",
+                                        "dofs",
+                                        "ss_files",
+                                        "anatomy"]),
                         name="inputnode")
 
-    # Concatenate the inputs for each run
-    copemerge = Node(fsl.Merge(dimension="t"),
-                     name="copemerge")
-
-    varcopemerge = Node(fsl.Merge(dimension="t"),
-                        name="varcopemerge")
-
-    # Create suitable DOF images to use in FLAME
-    createdof = Node(Function(input_names=["copes",
-                                           "dof_files"],
-                              output_names=["out_file"],
-                              function=create_dof_image),
-                     name="createdof")
-
-    # Determine a mask by area of overlap of nonzero varcopes
-    getmask = Node(Function(input_names=["masks",
-                                         "background_file"],
-                            output_names=["mask_file",
-                                          "mask_png"],
-                            function=create_ffx_mask),
-                   name="getmask")
-
     # Set up a fixed effects FLAMEO model
-    if regressors is None:
-        ffxmodel = Node(fsl.L2Model(),
-                        name="ffxmodel")
-    else:
-        ffxmodel = Node(fsl.MultipleRegressDesign(regressors=regressors,
-                                                  contrasts=contrasts),
-                        name="ffxmodel")
+    ffxdesign = Node(fsl.L2Model(), "ffxdesign")
 
-    # Run a fixed effects analysis in FLAMEO
-    flameo = Node(fsl.FLAMEO(run_mode="fe"),
-                  name="flameo")
+    # Fit the fixedfx model for each contrast
+    ffxmodel = Node(Function(["contrasts",
+                              "copes",
+                              "varcopes",
+                              "dofs",
+                              "masks",
+                              "design_mat",
+                              "design_con",
+                              "design_grp"],
+                             ["flameo_results",
+                              "zstat_files"],
+                             fixedfx_model,
+                             imports),
+                    "ffxmodel")
 
-    # Plot the zstat image
-    # Build pdf and html reports
-    report = Node(Function(input_names=["subject_id",
-                                        "mask_png",
-                                        "zstat_pngs",
-                                        "contrast"],
-                           output_names=["reports"],
-                           function=write_ffx_report),
-                  name="report")
+    # Calculate the fixed effects Rsquared maps
+    ffxr2 = Node(Function(["ss_files"], ["r2_files"],
+                          fixedfx_r2, imports),
+                 "ffxr2")
 
-    outputnode = Node(IdentityInterface(fields=["stats",
-                                                "zstat_png",
-                                                "mask_png",
-                                                "report"]),
-                      name="outputnode")
+    # Plot the fixedfx results
+    report = Node(Function(["contrasts",
+                            "anatomy",
+                            "zstat_files",
+                            "r2_files",
+                            "masks"],
+                           ["report"],
+                           fixedfx_report,
+                           imports),
+                  "report")
 
     ffx = Workflow(name=name)
     ffx.connect([
@@ -107,11 +108,6 @@ def create_volume_ffx_workflow(name="volume_ffx",
         ])
 
     return ffx, inputnode, outputnode
-
-
-def create_surface_ffx_workflow(name="surface_ffx"):
-
-    raise NotImplementedError
 
 
 def create_dof_image(copes, dof_files):
@@ -203,12 +199,60 @@ def write_ffx_report(subject_id, mask_png, zstat_pngs, contrast):
                                       report_dict)
     return out_files
 
+
 def force_list(f):
     if not isinstance(f, list):
         return [f]
     return f
 
+
 def length(x):
     if isinstance(x, list):
         return len(x)
     return 1
+
+
+# Main interface functions
+# ------------------------
+
+
+def fixedfx_model(contrasts, copes, varcopes, dofs, masks,
+                  design_mat, design_con, design_grp):
+    """Fit the fixed effects model for each contrast."""
+    pass
+
+
+def fixedfx_r2(ss_files):
+    """Find the R2 for the full fixedfx model."""
+    ss_tot = [f for f in ss_files if "sstot" in f]
+    ss_res_full = [f for f in ss_files if "ssres_full" in f]
+    ss_res_main = [f for f in ss_files if "ssres_main" in f]
+
+    tot_data = [nib.load(f).get_data() for f in ss_tot]
+    main_data = [nib.load(f).get_data() for f in ss_res_full]
+    full_data = [nib.load(f).get_data() for f in ss_res_main]
+
+    tot_data = np.sum(tot_data, axis=0)
+    main_data = np.sum(main_data, axis=0)
+    full_data = np.sum(full_data, axis=0)
+
+    r2_full = 1 - full_data / tot_data
+    r2_main = 1 - main_data / tot_data
+
+    img = nib.load(ss_tot[0])
+    aff, header = img.get_affine(), img.get_header()
+
+    r2_full_img = nib.Nifti1Image(r2_full, aff, header)
+    r2_full_file = op.abspath("r2_full.nii.gz")
+    r2_full_img.to_filename(r2_full_file)
+
+    r2_main_img = nib.Nifti1Image(r2_main, aff, header)
+    r2_main_file = op.abspath("r2_main.nii.gz")
+    r2_main_img.to_filename(r2_main_file)
+
+    return [r2_full_file, r2_main_file]
+
+
+def fixedfx_report(contrasts, anatomy, zstat_files, r2_files, masks):
+    """Plot the resulting data."""
+    pass

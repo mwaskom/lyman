@@ -58,8 +58,15 @@ def main(arglist):
     if not os.path.exists(analysis_dir):
         os.makedirs(analysis_dir)
 
+    # For later processing steps, are we using smoothed inputs?
+    smoothing = "unsmoothed" if args.unsmoothed else "smoothed"
+
+    # Also define the regspace variable here
+    space = args.regspace
+
+    # ----------------------------------------------------------------------- #
     # Preprocessing Workflow
-    # ======================
+    # ----------------------------------------------------------------------- #
 
     # Create workflow in function defined elsewhere in this package
     preproc, preproc_input, preproc_output = wf.create_preprocessing_workflow(
@@ -93,8 +100,7 @@ def main(arglist):
     preproc_inwrap.connect_inputs()
 
     # Store workflow outputs to persistant location
-    preproc_sink = Node(DataSink(base_directory=analysis_dir),
-                        name="preproc_sink")
+    preproc_sink = Node(DataSink(base_directory=analysis_dir), "preproc_sink")
 
     # Similar to above, class to handle sterotyped output connections
     preproc_outwrap = tools.OutputWrapper(preproc, subj_source,
@@ -109,20 +115,17 @@ def main(arglist):
     # Possibly execute the workflow, depending on the command line
     lyman.run_workflow(preproc, "preproc", args)
 
+    # ----------------------------------------------------------------------- #
     # Timeseries Model
-    # ================
-
-    # Variable to control whether volume processing inputs are smoothed
-    # Surface inputs are always unsmoothed, but that's not relevant till below
-    model_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
+    # ----------------------------------------------------------------------- #
 
     # Create a modelfitting workflow and specific nodes as above
     model, model_input, model_output = wf.create_timeseries_model_workflow(
-        name=model_smooth + "_model", exp_info=exp)
+        name=smoothing + "_model", exp_info=exp)
 
     preproc_template = op.join(analysis_dir, "{subject_id}/preproc/run_*/")
     design_file = exp["design_name"] + ".csv"
-    timeseries_file = model_smooth + "_timeseries.nii.gz"
+    timeseries_file = smoothing + "_timeseries.nii.gz"
     model_templates = dict(
         design_file=op.join(data_dir, "{subject_id}/design", design_file),
         realign_file=op.join(preproc_template, "realignment_params.csv"),
@@ -139,14 +142,13 @@ def main(arglist):
                                       model_source, model_input)
     model_inwrap.connect_inputs()
 
-    model_sink = Node(DataSink(base_directory=analysis_dir),
-                               name="model_sink")
+    model_sink = Node(DataSink(base_directory=analysis_dir), "model_sink")
 
     model_outwrap = tools.OutputWrapper(model, subj_source,
                                         model_sink, model_output)
     model_outwrap.set_subject_container()
     model_outwrap.set_mapnode_substitutions(exp["n_runs"])
-    model_outwrap.sink_outputs("model." + model_smooth)
+    model_outwrap.sink_outputs("model." + smoothing)
 
     # Set temporary output locations
     model.base_dir = working_dir
@@ -154,11 +156,9 @@ def main(arglist):
     # Possibly execute the workflow
     lyman.run_workflow(model, "model", args)
 
+    # ----------------------------------------------------------------------- #
     # Across-Run Registration
-    # =======================
-
-    # Short ref to the common space we're using on this execution
-    space = args.regspace
+    # ----------------------------------------------------------------------- #
 
     # Is this a model or timeseries registration?
     regtype = "timeseries" if args.timeseries else "model"
@@ -170,22 +170,22 @@ def main(arglist):
                                                         space,
                                                         regtype)
 
-    # Define a smooth variable here. Use an iterable so that running
+    # Define a smoothing info node here. Use an iterable so that running
     # with/without smoothing doesn't clobber working directory files
     # for the other kind of execution
-    reg_smooth = "unsmoothed" if args.unsmoothed else "smoothed"
     smooth_source = Node(IdentityInterface(fields=["smoothing"]),
-                         iterables=("smoothing", [reg_smooth]),
+                         iterables=("smoothing", [smoothing]),
                          name="smooth_source")
 
     # Set up the registration inputs and templates
     reg_infields = ["subject_id", "smoothing"]
 
     if regtype == "model":
+        reg_base = "{subject_id}/model/{smoothing}/run_*/"
         reg_templates = dict(
-            copes="{subject_id}/model/{smoothing}/run_*/cope*.nii.gz",
-            varcopes="{subject_id}/model/{smoothing}/run_*/varcope*.nii.gz",
-            r2s="{subject_id}/model/{smoothing}/run_*/r2_*.nii.gz",
+            copes=op.join(reg_base, "cope*.nii.gz"),
+            varcopes=op.join(reg_base, "varcope*.nii.gz"),
+            ss_files=op.join(reg_base, "ss*.nii.gz"),
                              )
     else:
         reg_templates = dict(
@@ -215,114 +215,89 @@ def main(arglist):
                                     reg_source, reg_input)
     reg_inwrap.connect_inputs()
 
-    # This source node also needs to know about the smoothing on this run
+    # The source node also needs to know about the smoothing on this run
     reg.connect(smooth_source, "smoothing", reg_source, "smoothing")
 
-    # Reg output and datasink
-    reg_sink = Node(DataSink(base_directory=analysis_dir),
-                             name="reg_sink")
+    # Set upthe registration output and datasink
+    reg_sink = Node(DataSink(base_directory=analysis_dir), "reg_sink")
 
     reg_outwrap = tools.OutputWrapper(reg, subj_source,
                                     reg_sink, reg_output)
     reg_outwrap.set_subject_container()
     reg_outwrap.sink_outputs("reg.%s" % space)
 
-    # Reg has some additional substitutions to strip out interables
-    reg_outwrap.add_regexp_substitutions([
-        (r"_smoothing_", ""),
-        (r"(un)*(smoothed_time)", "time"),
-                                          ])
+    # Reg has some additional substitutions to strip out iterables
+    # and rename the timeseries file
+    reg_outwrap.add_regexp_substitutions([("_smoothing_", "")])
 
     reg.base_dir = working_dir
 
     # Possibly run registration workflow and clean up
     lyman.run_workflow(reg, "reg", args)
 
-    # Cross-Run Fixed Effects Model
-    # =============================
-
-    space_source = Node(IdentityInterface(fields=["space"]),
-                        iterables=("space", [space]),
-                        name="space_source")
-    contrast_source.iterables = ("contrast", exp["contrast_names"])
+    # ----------------------------------------------------------------------- #
+    # Across-Run Fixed Effects Model
+    # ----------------------------------------------------------------------- #
 
     # Dynamically get the workflow
-    manifold = "volume"
-    workflow_function = getattr(wf, "create_%s_ffx_workflow" % manifold)
-    ffx, ffx_input, ffx_output = workflow_function()
+    wf_name = space + "_ffx"
+    ffx, ffx_input, ffx_output = wf.create_ffx_workflow(wf_name,
+                                                        space,
+                                                        exp["contrast_names"])
 
-    ffx_infields = ["subject_id", "contrast_number", "space"]
-    ffx_outfields = ["copes", "varcopes", "dof_files",
-                     "masks", "background_file"]
+    ffx_infields = ["subject_id", "smoothing"]
 
-    ffx_template = "%s/reg/%s/%s/run_*/%s%d_*.nii.gz"
+    ext = "_warp.nii.gz" if space == "mni" else "_xfm.nii.gz"
+    ffx_base = op.join("{subject_id}/reg", space, "{smoothing}/run_*")
+    ffx_templates = dict(
+        copes=op.join(ffx_base, "cope*_" + ext),
+        varcopes=op.join(ffx_base, "varcope*_" + ext),
+        masks=op.join(ffx_base, "functional_mask_" + ext),
+        dofs="{subject_id)/model/{smoothing}/run_*/results/dof",
+        ss_res=op.join(ffx_base, "ssres_" + ext),
+        ss_tot=op.join(ffx_base, "sstot_" + ext),
+                         )
 
-    ffx_template_args = dict(
-        copes=[["subject_id", "space", "smooth", "cope", "contrast_number"]],
-        varcopes=[["subject_id", "space", "smooth",
-                   "varcope", "contrast_number"]],
-        masks=[["subject_id", "space", "smooth"]],
-        dof_files=[["subject_id", "smooth"]])
-
-    ffx_field_template = {"dof_files": "%s/model/%s/run_*/results/dof",
-        "masks": "%s/reg/%s/%s/run_*/functional_mask_*.nii.gz"}
-    if space == "epi":
-        ffx_field_template["background_file"] = op.join(
-            preproc_dir, "%s/preproc//run_1/mean_func.nii.gz")
-    elif space == "mni":
-        ffx_field_template["background_file"] = op.join(
-            project["data_dir"], "%s/normalization/brain_warp.nii.gz")
-    ffx_template_args["background_file"] = [["subject_id"]]
+    if space == "mni":
+        bg = op.join(data_dir, "{subject_id}/normalization/brain_warp.nii.gz")
+    else:
+        bg = "{subject_id}/preproc/run_1/mean_func.nii.gz"
+    ffx_templates["anatomy"] = bg
 
     # Define the ffxistration data source node
-    ffx_source = Node(DataGrabber(infields=ffx_infields,
-                                  outfields=ffx_outfields,
+    ffx_source = Node(SelectFiles(ffx_infields,
+                                  templates=ffx_templates,
                                   base_directory=analysis_dir,
-                                  template=ffx_template,
                                   sort_filelist=True),
-                      name="ffx_source")
-    ffx_source.inputs.field_template = ffx_field_template
-    ffx_source.inputs.template_args = ffx_template_args
+                      "ffx_source")
 
     # Fixed effects inutnode
     ffx_inwrap = tools.InputWrapper(ffx, subj_source,
                                     ffx_source, ffx_input)
     ffx_inwrap.connect_inputs()
 
-    # There are some additional connections to this input
-    ffx.connect(space_source, "space", ffx_source, "space")
-    ffx.connect(contrast_source, "contrast", ffx_input, "contrast")
-    if not args.timeseries:
-        names = exp["contrast_names"]
-        ffx.connect(
-             contrast_source, ("contrast", tools.find_contrast_number, names),
-             ffx_source, "contrast_number")
-    ffx.connect(smooth_source, "smooth", ffx_source, "smooth")
+    # Connect the smoothing information
+    ffx.connect(smooth_source, "smoothing", ffx_source, "smoothing")
 
     # Fixed effects output and datasink
-    ffx_sink = Node(DataSink(base_directory=analysis_dir),
-                             name="ffx_sink")
+    ffx_sink = Node(DataSink(base_directory=analysis_dir), "ffx_sink")
 
     ffx_outwrap = tools.OutputWrapper(ffx, subj_source,
                                       ffx_sink, ffx_output)
-    ffx_outwrap.set_mapnode_substitutions(exp["n_runs"])
     ffx_outwrap.set_subject_container()
-    ffx_outwrap.sink_outputs("ffx.%s.%s" % (space, model_smooth))
+    ffx_outwrap.sink_outputs("ffx.%s.%s" % (space, smoothing))
 
     # Fixed effects has some additional substitutions to strip out interables
-    ffx_outwrap.add_regexp_substitutions([
-        (r"/_source_image_[^/]*/", ""),
-        (r"/_space_[^/]*/", "/"),
-        (r"/_smooth_[^/]*/", "/"),
-        (r"/_contrast_", "/")])
+    ffx_outwrap.add_regexp_substitutions([("_smoothing_", "")])
 
     ffx.base_dir = working_dir
 
     # Possibly run fixed effects workflow
     lyman.run_workflow(ffx, "ffx", args)
 
+    # -------- #
     # Clean-up
-    # --------
+    # -------- #
 
     if project["rm_working_dir"]:
         shutil.rmtree(project["working_dir"])
