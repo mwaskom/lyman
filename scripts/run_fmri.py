@@ -179,6 +179,10 @@ def main(arglist):
 
     # Set up the registration inputs and templates
     reg_infields = ["subject_id", "smoothing"]
+    reg_templates = dict(
+        masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
+        affines="{subject_id}/preproc/run_*/func2anat_flirt.mat"
+                          )
 
     if regtype == "model":
         reg_base = "{subject_id}/model/{smoothing}/run_*/"
@@ -188,20 +192,14 @@ def main(arglist):
             ss_files=op.join(reg_base, "ss*.nii.gz"),
                              )
     else:
-        reg_templates = dict(
+        reg_templates.update(dict(
             timeseries=op.join("{subject_id}/preproc/run_*/",
                                "{smoothing}_timeseries.nii.gz"),
-                             )
-    reg_templates.update(dict(
-        masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
-        affines="{subject_id}/preproc/run_*/func2anat_flirt.mat"
-                              ))
+                                  ))
 
     if space == "mni":
-        reg_templates.update(dict(
-            warpfield=op.join(data_dir,
-                              "{subject_id}/normalization/warpfield.nii.gz")
-                                  ))
+        reg_templates["warpfield"] = op.join(data_dir, "{subject_id}",
+                                             "normalization/warpfield.nii.gz")
 
     # Define the registration data source node
     reg_source = Node(SelectFiles(reg_infields,
@@ -218,7 +216,7 @@ def main(arglist):
     # The source node also needs to know about the smoothing on this run
     reg.connect(smooth_source, "smoothing", reg_source, "smoothing")
 
-    # Set upthe registration output and datasink
+    # Set up the registration output and datasink
     reg_sink = Node(DataSink(base_directory=analysis_dir), "reg_sink")
 
     reg_outwrap = tools.OutputWrapper(reg, subj_source,
