@@ -86,11 +86,9 @@ def main(arglist):
     if exp["partial_brain"]:
         preproc_templates["whole_brain_epi"] = exp["whole_brain_template"]
 
-    preproc_source = Node(SelectFiles(infields=["subject_id"],
-                                      templates=preproc_templates,
-                                      base_directory=project["data_dir"],
-                                      sort_filelist=True),
-                          name="preproc_source")
+    preproc_source = Node(SelectFiles(preproc_templates,
+                                      base_directory=project["data_dir"]),
+                          "preproc_source")
 
     # Convenience class to handle some sterotyped connections
     # between run-specific nodes (defined here) and the inputs
@@ -123,20 +121,16 @@ def main(arglist):
     model, model_input, model_output = wf.create_timeseries_model_workflow(
         name=smoothing + "_model", exp_info=exp)
 
-    preproc_template = op.join(analysis_dir, "{subject_id}/preproc/run_*/")
+    model_base = op.join(analysis_dir, "{subject_id}/preproc/run_*/")
     design_file = exp["design_name"] + ".csv"
-    timeseries_file = smoothing + "_timeseries.nii.gz"
     model_templates = dict(
         design_file=op.join(data_dir, "{subject_id}/design", design_file),
-        realign_file=op.join(preproc_template, "realignment_params.csv"),
-        artifact_file=op.join(preproc_template, "artifacts.csv"),
-        timeseries=op.join(preproc_template, timeseries_file),
+        realign_file=op.join(model_base, "realignment_params.csv"),
+        artifact_file=op.join(model_base, "artifacts.csv"),
+        timeseries=op.join(model_base, smoothing + "_timeseries.nii.gz"),
                            )
 
-    model_source = Node(SelectFiles(["subject_id"],
-                                    templates=model_templates,
-                                    sort_filelist=True),
-                        name="model_source")
+    model_source = Node(SelectFiles(model_templates), "model_source")
 
     model_inwrap = tools.InputWrapper(model, subj_source,
                                       model_source, model_input)
@@ -178,7 +172,6 @@ def main(arglist):
                          name="smooth_source")
 
     # Set up the registration inputs and templates
-    reg_infields = ["subject_id", "smoothing"]
     reg_templates = dict(
         masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
         affines="{subject_id}/preproc/run_*/func2anat_flirt.mat"
@@ -202,10 +195,8 @@ def main(arglist):
                                              "normalization/warpfield.nii.gz")
 
     # Define the registration data source node
-    reg_source = Node(SelectFiles(reg_infields,
-                                  templates=reg_templates,
-                                  base_directory=analysis_dir,
-                                  sort_filelist=True),
+    reg_source = Node(SelectFiles(reg_templates,
+                                  base_directory=analysis_dir),
                       "reg_source")
 
     # Registration inutnode
@@ -243,17 +234,14 @@ def main(arglist):
                                                         space,
                                                         exp["contrast_names"])
 
-    ffx_infields = ["subject_id", "smoothing"]
-
     ext = "_warp.nii.gz" if space == "mni" else "_xfm.nii.gz"
     ffx_base = op.join("{subject_id}/reg", space, "{smoothing}/run_*")
     ffx_templates = dict(
-        copes=op.join(ffx_base, "cope*_" + ext),
-        varcopes=op.join(ffx_base, "varcope*_" + ext),
-        masks=op.join(ffx_base, "functional_mask_" + ext),
-        dofs="{subject_id)/model/{smoothing}/run_*/results/dof",
-        ss_res=op.join(ffx_base, "ssres_" + ext),
-        ss_tot=op.join(ffx_base, "sstot_" + ext),
+        copes=op.join(ffx_base, "cope*" + ext),
+        varcopes=op.join(ffx_base, "varcope*" + ext),
+        masks=op.join(ffx_base, "functional_mask" + ext),
+        dofs="{subject_id}/model/{smoothing}/run_*/results/dof",
+        ss_files=op.join(ffx_base, "ss*" + ext),
                          )
 
     if space == "mni":
@@ -263,10 +251,8 @@ def main(arglist):
     ffx_templates["anatomy"] = bg
 
     # Define the ffxistration data source node
-    ffx_source = Node(SelectFiles(ffx_infields,
-                                  templates=ffx_templates,
-                                  base_directory=analysis_dir,
-                                  sort_filelist=True),
+    ffx_source = Node(SelectFiles(ffx_templates,
+                                  base_directory=analysis_dir),
                       "ffx_source")
 
     # Fixed effects inutnode
