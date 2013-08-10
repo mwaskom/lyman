@@ -179,11 +179,11 @@ def main(arglist):
 
     if regtype == "model":
         reg_base = "{subject_id}/model/{smoothing}/run_*/"
-        reg_templates = dict(
+        reg_templates.update(dict(
             copes=op.join(reg_base, "cope*.nii.gz"),
             varcopes=op.join(reg_base, "varcope*.nii.gz"),
             ss_files=op.join(reg_base, "ss*.nii.gz"),
-                             )
+                                  ))
     else:
         reg_templates.update(dict(
             timeseries=op.join("{subject_id}/preproc/run_*/",
@@ -269,7 +269,7 @@ def main(arglist):
     ffx_outwrap = tools.OutputWrapper(ffx, subj_source,
                                       ffx_sink, ffx_output)
     ffx_outwrap.set_subject_container()
-    ffx_outwrap.sink_outputs("ffx.%s.%s" % (space, smoothing))
+    ffx_outwrap.sink_outputs("ffx.%s" % space)
 
     # Fixed effects has some additional substitutions to strip out interables
     ffx_outwrap.add_regexp_substitutions([

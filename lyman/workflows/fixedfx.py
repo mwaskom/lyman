@@ -19,7 +19,8 @@ imports = ["import os",
            "import matplotlib as mpl",
            "import matplotlib.pyplot as plt",
            "import seaborn as sns",
-           "import moss"]
+           "import moss",
+           "from nipype import fsl"]
 
 
 def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
@@ -35,18 +36,12 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
                                         "anatomy"]),
                      name="inputnode")
 
-    # Set up a fixed effects FLAMEO model
-    ffxdesign = Node(fsl.L2Model(num_copes=len(contrasts)), "ffxdesign")
-
     # Fit the fixedfx model for each contrast
     ffxmodel = Node(Function(["contrasts",
                               "copes",
                               "varcopes",
                               "dofs",
-                              "masks",
-                              "design_mat",
-                              "design_con",
-                              "design_grp"],
+                              "masks"],
                              ["flame_results",
                               "zstat_files"],
                              fixedfx_model,
@@ -83,10 +78,6 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
              ("varcopes", "varcopes"),
              ("dofs", "dofs"),
              ("masks", "masks")]),
-        (ffxdesign, ffxmodel,
-            [("design_mat", "design_mat"),
-             ("design_con", "design_con"),
-             ("design_grp", "design_grp")]),
         (inputnode, ffxr2,
             [("ss_files", "ss_files")]),
         (inputnode, report,
@@ -111,22 +102,23 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
 # ------------------------
 
 
-def fixedfx_model(contrasts, copes, varcopes, dofs, masks,
-                  design_mat, design_con, design_grp):
+def fixedfx_model(contrasts, copes, varcopes, dofs, masks):
     """Fit the fixed effects model for each contrast."""
-    n_runs = len(copes) / len(contrasts)
+    n_con = len(contrasts)
 
     # Find the basic geometry of the image
-    img = nib.load(copes[0]).shape
+    img = nib.load(copes[0])
     x, y, z = img.shape
     aff, hdr = img.get_affine(), img.get_header()
 
     # Get lists of files for each contrast
-    copes = zip(*map(list, np.split(copes, n_runs)))
-    varcopes = zip(*map(list, np.split(varcopes, n_runs)))
+    copes = [[f for f in copes if "cope%d_" % (i + 1) in f]
+             for i in range(n_con)]
+    varcopes = [[f for f in varcopes if "varcope%d_" % (i + 1) in f]
+                for i in range(n_con)]
 
     # Make an image with the DOF for each run
-    dofs = np.concatenate(map(np.loadtxt, dofs))
+    dofs = np.array([np.loadtxt(f) for f in dofs])
     dof_data = np.ones((x, y, z, len(dofs))) * dofs
     nib.Nifti1Image(dof_data, aff, hdr).to_filename("dof.nii.gz")
 
@@ -135,36 +127,40 @@ def fixedfx_model(contrasts, copes, varcopes, dofs, masks,
     common_mask = np.all(mask_data, axis=0)
     nib.Nifti1Image(common_mask, aff, hdr).to_filename("mask.nii.gz")
 
+    # Write out the design information
+    fsl.L2Model(num_copes=len(masks)).run()
+
     # Run the flame models
     flame_results = []
     zstat_files = []
     for i, contrast in enumerate(contrasts):
-        os.mkdir(contrast)
-        os.chdir(contrast)
 
         # Concatenate the copes and varcopes
         for kind, files in zip(["cope", "varcope"],
-                               [copes, varcopes]):
+                               [copes[i], varcopes[i]]):
             data = [nib.load(f).get_data()[..., np.newaxis] for f in files]
             data = np.concatenate(data, axis=-1)
-            nib.Nifti1Image(data, aff, hdr).to_filename(kind + ".nii.gz")
-
+            outname = kind + "_4d.nii.gz"
+            nib.Nifti1Image(data, aff, hdr).to_filename(outname)
 
         flamecmd = ["flameo",
-                    "--cope=cope.nii.gz",
-                    "--varcope=varcope.nii.gz",
-                    "--mask=../mask.nii.gz",
-                    "--dvc=../dof.nii.gz",
+                    "--cope=cope_4d.nii.gz",
+                    "--varcope=varcope_4d.nii.gz",
+                    "--mask=mask.nii.gz",
+                    "--dvc=dof.nii.gz",
                     "--runmode=fe",
-                    "--dm=" + design_mat,
-                    "--tc=" + design_con,
-                    "--cs=" + design_grp,
-                    "--ld=flamestats",
+                    "--dm=design.mat",
+                    "--tc=design.con",
+                    "--cs=design.grp",
+                    "--ld=" + contrast,
                     "--npo"]
         sub.check_output(flamecmd)
-        os.chdir("..")
-        flame_results.append(contrast + "/flamestats/")
-        zstat_files.append(op.abspath(contrast + "/zstat1.nii.gz"))
+
+        for kind in ["cope", "varcope"]:
+            os.rename(kind + "_4d.nii.gz", "%s/%s_4d.nii.gz" % (contrast, kind))
+
+        flame_results.append(op.abspath(contrast))
+        zstat_files.append(op.abspath("%s/zstat1.nii.gz" % contrast))
 
     return flame_results, zstat_files
 
@@ -207,7 +203,6 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
 
     mask_data = [nib.load(f).get_data() for f in masks]
     mask = np.where(np.all(mask_data, axis=0), np.nan, 1)
-    mask_count = np.sum(mask, axis=0)
 
     # Find the plot parameters
     xdata = np.flatnonzero(bg.any(axis=1).any(axis=1))
@@ -215,13 +210,14 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
     ydata = np.flatnonzero(bg.any(axis=0).any(axis=1))
     yslice = slice(ydata.min(), ydata.max() + 1)
     zdata = np.flatnonzero(bg.any(axis=0).any(axis=0))
-    zmin, zmax = zdata.min(), zdata.max() + 1
+    zmin, zmax = zdata.min(), zdata.max()
 
     step = 2 if space == "mni" else 1
+    offset = 4 if space == "mni" else 0
 
     n_slices = (zmax - zmin) // step
     n_row, n_col = n_slices // 8, 8
-    start = n_slices % n_col // step + zmin + 4
+    start = n_slices % n_col // step + zmin + offset
     figsize = (10, 1.375 * n_row)
     slices = (start + np.arange(zmax - zmin))[::step][:n_slices]
     pltkws = dict(nrows=n_row, ncols=n_col, figsize=figsize, facecolor="k")
@@ -234,12 +230,13 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
 
     # Plot the mask counts
     f, axes = plt.subplots(**pltkws)
-    mask_count[bg == 0] = np.nan
+    cmaps = [mpl.colors.ListedColormap([c]) for c in
+             reversed(sns.husl_palette(len(masks)))]
     for i, ax in zip(slices, axes.ravel()):
         ax.imshow(bg[xslice, yslice, i].T,
                   cmap="gray", vmin=vmin, vmax=vmax)
-        ax.imshow(mask_count[xslice, yslice, i].T, alpha=.7,
-                  cmap="gist_heat", interpolation="nearest")
+        for j, m in enumerate(mask_data):
+            ax.contour(m[xslice, yslice, i].T, cmap=cmaps[j], linewidths=.2)
         ax.axis("off")
     mask_png = op.abspath("mask_overlap.png")
     plt.savefig(mask_png, **pngkws)
@@ -259,16 +256,17 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
     for fname, cmap in zip(r2_files, ["GnBu_r", "YlGn_r"]):
         f, axes = plt.subplots(**pltkws)
         r2data = nib.load(fname).get_data()
+        rmax = r2data[~np.isnan(r2data)].max()
         r2data[bg == 0] = np.nan
         for i, ax in zip(slices, axes.ravel()):
             ax.imshow(bg[xslice, yslice, i].T,
                       cmap="gray", vmin=vmin, vmax=vmax)
             ax.imshow(r2data[xslice, yslice, i].T, cmap=cmap,
-                      vmin=0, vmax=r2data.max())
+                      vmin=0, vmax=rmax, alpha=.8)
             ax.imshow(mask[xslice, yslice, i].T, alpha=.5,
                       cmap=mask_cmap, interpolation="nearest")
             ax.axis("off")
-        add_colorbar(f, cmap, 0, r2data.max(), .35, .3, "%.2f")
+        #add_colorbar(f, cmap, 0, rmax, .35, .3, "%.2f")
         savename = op.abspath(op.basename(fname).replace(".nii.gz", ".png"))
         plt.savefig(savename, **pngkws)
         report.append(savename)
@@ -281,23 +279,25 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
         zpos[zdata < 2.3] = np.nan
         zneg[zdata > -2.3] = np.nan
         zlow = 2.3
-        zhigh = max(np.abs(zdata).max(), 2.3)
+        zhigh = max(np.abs(zdata).max(), 3.71)
         f, axes = plt.subplots(**pltkws)
         for i, ax in zip(slices, axes.ravel()):
             ax.imshow(bg[xslice, yslice, i].T, cmap="gray",
                       vmin=vmin, vmax=vmax)
-            ax.imshow(zpos[..., i].T, cmap="Reds_r",
+            ax.imshow(zpos[xslice, yslice, i].T, cmap="Reds_r",
                       vmin=zlow, vmax=zhigh)
-            ax.imshow(zneg[..., i].T, cmap="Blues",
+            ax.imshow(zneg[xslice, yslice, i].T, cmap="Blues",
                       vmin=-zhigh, vmax=-zlow)
             ax.imshow(mask[xslice, yslice, i].T, alpha=.5,
                       cmap=mask_cmap, interpolation="nearest")
             ax.axis("off")
-        add_colorbar(f, "Blues", -zhigh, -zlow, .15, .3, "%.1f")
-        add_colorbar(f, "Reds_r", zlow, zhigh, .55, .3, "%.1f")
+        #add_colorbar(f, "Blues", -zhigh, -zlow, .15, .3, "%.1f")
+        #add_colorbar(f, "Reds_r", zlow, zhigh, .55, .3, "%.1f")
 
-        savename = op.abspath(op.basename(fname).replace(".nii.gz", ".png"))
+        contrast = fname.split("/")[-2]
+        os.mkdir(contrast)
+        savename = op.join(contrast, "zstat1.png")
         f.savefig(savename, **pngkws)
-        report.append(fname)
+        report.append(op.abspath(contrast))
 
     return report
