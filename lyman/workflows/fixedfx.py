@@ -220,27 +220,14 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
     start = n_slices % n_col // step + zmin + offset
     figsize = (10, 1.375 * n_row)
     slices = (start + np.arange(zmax - zmin))[::step][:n_slices]
-    pltkws = dict(nrows=n_row, ncols=n_col, figsize=figsize, facecolor="k")
+    pltkws = dict(nrows=int(n_row), ncols=int(n_col),
+                  figsize=figsize, facecolor="k")
     pngkws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
 
     vmin, vmax = 0, moss.percentiles(bg, 95)
     mask_cmap = mpl.colors.ListedColormap(["#160016"])
 
     report = []
-
-    # Plot the mask counts
-    f, axes = plt.subplots(**pltkws)
-    cmaps = [mpl.colors.ListedColormap([c]) for c in
-             reversed(sns.husl_palette(len(masks)))]
-    for i, ax in zip(slices, axes.ravel()):
-        ax.imshow(bg[xslice, yslice, i].T,
-                  cmap="gray", vmin=vmin, vmax=vmax)
-        for j, m in enumerate(mask_data):
-            ax.contour(m[xslice, yslice, i].T, cmap=cmaps[j], linewidths=.2)
-        ax.axis("off")
-    mask_png = op.abspath("mask_overlap.png")
-    plt.savefig(mask_png, **pngkws)
-    report.append(mask_png)
 
     def add_colorbar(f, cmap, low, high, left, width, fmt):
         cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
@@ -251,6 +238,29 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
                color="white", size=13, weight="demibold")
         f.text(left + width + .01, .018, fmt % high, ha="left",
                va="center", color="white", size=13, weight="demibold")
+
+    # Plot the mask edges
+    f, axes = plt.subplots(**pltkws)
+    mask_colors = sns.husl_palette(len(mask_data))
+    mask_colors.reverse()
+    cmaps = [mpl.colors.ListedColormap([c]) for c in mask_colors]
+    for i, ax in zip(slices, axes.ravel()):
+        ax.imshow(bg[xslice, yslice, i].T,
+                  cmap="gray", vmin=vmin, vmax=vmax)
+        for j, m in enumerate(mask_data):
+            if m[xslice, yslice, i].any():
+                ax.contour(m[xslice, yslice, i].T,
+                           cmap=cmaps[j], linewidths=.75)
+        ax.axis("off")
+    text_min = max(.15, .5 - len(mask_data) * .05)
+    text_max = min(.85, .5 + len(mask_data) * .05)
+    text_pos = np.linspace(text_min, text_max, len(mask_data))
+    for i, color in enumerate(mask_colors):
+        f.text(text_pos[i], .03, "Run %d" % (i + 1), color=color,
+               size=11, weight="demibold", ha="center", va="center")
+    mask_png = op.abspath("mask_overlap.png")
+    plt.savefig(mask_png, **pngkws)
+    report.append(mask_png)
 
     # Now plot the R2 images
     for fname, cmap in zip(r2_files, ["GnBu_r", "YlGn_r"]):
@@ -266,8 +276,8 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
             ax.imshow(mask[xslice, yslice, i].T, alpha=.5,
                       cmap=mask_cmap, interpolation="nearest")
             ax.axis("off")
-        #add_colorbar(f, cmap, 0, rmax, .35, .3, "%.2f")
         savename = op.abspath(op.basename(fname).replace(".nii.gz", ".png"))
+        add_colorbar(f, cmap, 0, rmax, .35, .3, "%.2f")
         plt.savefig(savename, **pngkws)
         report.append(savename)
 
@@ -291,8 +301,8 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
             ax.imshow(mask[xslice, yslice, i].T, alpha=.5,
                       cmap=mask_cmap, interpolation="nearest")
             ax.axis("off")
-        #add_colorbar(f, "Blues", -zhigh, -zlow, .15, .3, "%.1f")
-        #add_colorbar(f, "Reds_r", zlow, zhigh, .55, .3, "%.1f")
+        add_colorbar(f, "Blues", -zhigh, -zlow, .18, .23, "%.1f")
+        add_colorbar(f, "Reds_r", zlow, zhigh, .59, .23, "%.1f")
 
         contrast = fname.split("/")[-2]
         os.mkdir(contrast)
