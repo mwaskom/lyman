@@ -66,6 +66,11 @@ def epi_model_transform(copes, varcopes, ss_files, masks, affines):
     varcopes = map(list, np.split(np.array(varcopes), n_runs))
     ss_files = map(list, np.split(np.array(ss_files), n_runs))
 
+    # Invert the first run's affine
+    run_1_inv_mat = op.basename(affines[0]).replace(".mat", "_inv.mat")
+    sub.check_output(["convert_xfm", "-omat", run_1_inv_mat,
+                      "-inverse", affines[0]])
+
     # Iterate through the runs
     for n in range(n_runs):
 
@@ -90,9 +95,9 @@ def epi_model_transform(copes, varcopes, ss_files, masks, affines):
 
         else:
             # Otherwise apply the transformation
-            inv_affine = op.basename(run_affine).replace(".mat", "_inv.mat")
-            sub.check_output(["convert_xfm", "-omat", inv_affine,
-                              "-inverse", run_affine])
+            full_affine = op.basename(run_affine).replace(".mat", "_to_epi.mat")
+            sub.check_output(["convert_xfm", "-omat", full_affine,
+                              "-concat", run_1_inv_mat, run_affine])
 
             interps = ["nn"] + (["trilinear"] * (len(files) - 1))
             for f, interp in zip(files, interps):
@@ -100,7 +105,7 @@ def epi_model_transform(copes, varcopes, ss_files, masks, affines):
                                    op.basename(f).replace(".nii.gz",
                                                           "_xfm.nii.gz"))
                 cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
-                       "--interp=%s" % interp, "--premat=%s" % inv_affine]
+                       "--interp=%s" % interp, "--premat=%s" % full_affine]
                 sub.check_output(cmd)
 
     out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
@@ -111,6 +116,11 @@ def epi_timeseries_transform(timeseries, masks, affines):
     """Take a set of timeseries files into the 'epi' space."""
     n_runs = len(affines)
     ref_file = timeseries[0]
+
+    # Invert the first run's affine
+    run_1_inv_mat = op.basename(affines[0]).replace(".mat", "_inv.mat")
+    sub.check_output(["convert_xfm", "-omat", run_1_inv_mat,
+                      "-inverse", affines[0]])
 
     for n in range(n_runs):
 
@@ -130,18 +140,17 @@ def epi_timeseries_transform(timeseries, masks, affines):
             shutil.copyfile(run_mask, to_mask)
 
         else:
-
             # Otherwise apply the transformation
-            inv_affine = op.basename(run_affine).replace(".mat", "_inv.mat")
-            sub.check_output(["convert_xfm", "-omat", inv_affine,
-                              "-inverse", run_affine])
+            full_affine = op.basename(run_affine).replace(".mat", "_to_epi.mat")
+            sub.check_output(["convert_xfm", "-omat", full_affine,
+                              "-concat", run_1_inv_mat, run_affine])
 
             files = [run_mask, run_timeseries]
             interps = ["nn", "spline"]
             for f, interp in zip(files, interps):
                 out_file = op.join(out_dir, "timeseries_xfm.nii.gz")
                 cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
-                       "--interp=%s" % interp, "--premat=%s" % inv_affine]
+                       "--interp=%s" % interp, "--premat=%s" % full_affine]
                 sub.check_output(cmd)
 
     out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
