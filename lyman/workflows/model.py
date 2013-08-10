@@ -380,7 +380,7 @@ def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
         neg = zdata.copy()
         neg[neg > -2.3] = np.nan
         zlow = 2.3
-        zhigh = max(np.abs(zdata).max(), 2.3)
+        zhigh = max(np.abs(zdata).max(), 3.71)
         f, axes = plt.subplots(**spkws)
         for i, ax in enumerate(axes.ravel()):
             ax.imshow(mean_data[..., i].T, cmap="gray",
