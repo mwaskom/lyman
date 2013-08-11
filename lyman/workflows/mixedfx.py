@@ -303,7 +303,8 @@ def mfx_report(mask_file, zstat_file, localmax_file,
     start = n_slices % n_col // 2 + zmin + 4
     figsize = (10, 1.375 * n_row)
     slices = (start + np.arange(zmax - zmin))[::2][:n_slices]
-    pltkws = dict(nrows=n_row, ncols=n_col, figsize=figsize, facecolor="k")
+    pltkws = dict(nrows=int(n_row), ncols=int(n_col),
+                  figsize=figsize, facecolor="k")
     pngkws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
 
     vmin, vmax = 0, mni_data.max()
@@ -319,18 +320,32 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         ax.axis("off")
     plt.savefig(mask_png, **pngkws)
 
+    def add_colorbar(f, cmap, low, high, left, width, fmt):
+        cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
+        cbar_ax = f.add_axes([left, 0, width, .03])
+        cbar_ax.imshow(cbar.T, aspect="auto", cmap=cmap)
+        cbar_ax.axis("off")
+        f.text(left - .01, .018, fmt % low, ha="right", va="center",
+               color="white", size=13, weight="demibold")
+        f.text(left + width + .01, .018, fmt % high, ha="left",
+               va="center", color="white", size=13, weight="demibold")
+
+
     # Now plot the zstat image
     mask = np.where(mask_data, np.nan, 1)
     mask_cmap = mpl.colors.ListedColormap(["#160016"])
+    zlow = 2.3
+    zhigh = max(3.71, z_stat.max())
     f, axes = plt.subplots(**pltkws)
     for i, ax in zip(slices, axes.ravel()):
         ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
                   cmap="gray", vmin=vmin, vmax=vmax)
         ax.imshow(z_plot[xmin:xmax, ymin:ymax, i].T,
-                  cmap="YlOrRd_r", vmin=2.3, vmax=4.26)
+                  cmap="Reds_r", vmin=zlow, vmax=zhigh)
         ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
                   cmap=mask_cmap, alpha=.5, interpolation="nearest")
         ax.axis("off")
+    add_colorbar(f, "Reds_r", zlow, zhigh, .35, .3, "%.1f")
     plt.savefig(zstat_png, **pngkws)
 
     # Everything else is dependent on there being some peak data
