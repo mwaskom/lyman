@@ -1,5 +1,6 @@
 """Preprocessing workflow definition."""
 import os
+import os.path as op
 import json
 import numpy as np
 import scipy as sp
@@ -21,6 +22,7 @@ import lyman
 
 # For nipype Function interfaces
 imports = ["import os",
+           "import os.path as op",
            "import json",
            "import numpy as np",
            "import scipy as sp",

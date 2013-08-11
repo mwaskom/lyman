@@ -70,16 +70,7 @@ def main(arglist):
 
     # Create workflow in function defined elsewhere in this package
     preproc, preproc_input, preproc_output = wf.create_preprocessing_workflow(
-                              temporal_interp=exp["temporal_interp"],
-                              frames_to_toss=exp["frames_to_toss"],
-                              interleaved=exp["interleaved"],
-                              slice_order=exp["slice_order"],
-                              TR=exp["TR"],
-                              intensity_threshold=3,
-                              motion_threshold=1,
-                              smooth_fwhm=exp["smooth_fwhm"],
-                              highpass_sigma=exp["hpf_sigma"],
-                              partial_brain=exp["partial_brain"])
+                                                exp_info=exp)
 
     # Collect raw nifti data
     preproc_templates = dict(timeseries=exp["source_template"])
@@ -295,10 +286,9 @@ def parse_args(arglist):
     parser.add_argument("-experiment", help="experimental paradigm")
     parser.add_argument("-altmodel", help="alternate model to fit")
     parser.add_argument("-workflows", nargs="*",
-                        choices=["all", "preproc", "model", "reg", "ffx"],
+                        choices=["preproc", "model", "reg", "ffx"],
                         help="which workflows to run")
-    parser.add_argument("-regspace", default="mni",
-                        choices=wf.spaces,
+    parser.add_argument("-regspace", default="mni", choices=wf.spaces,
                         help="common space for registration and fixed effects")
     parser.add_argument("-timeseries", action="store_true",
                         help="perform registration on preprocessed timeseries")
