@@ -40,9 +40,9 @@ def create_volume_mixedfx_workflow(name="volume_group",
     if subject_list is None:
         subject_list = []
     if regressors is None:
-        regressors = []
+        regressors = dict(group_mean=[])
     if contrasts is None:
-        contrasts = []
+        contrasts = [["group_mean", "T", ["group_mean"], [1]]]
 
     inputnode = Node(IdentityInterface(["l1_contrast",
                                         "copes",
