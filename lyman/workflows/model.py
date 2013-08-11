@@ -428,6 +428,8 @@ def dump_exp_info(exp_info, timeseries):
 # ========================
 
 
-def run_indices(design_files):
-    """Given a list of files, return a list of 1-based integers."""
-    return range(1, len(design_files) + 1)
+def run_indices(ts_files):
+    """Find the run numbers associated with timeseries files."""
+    import re
+    runs = [re.search("run_(\d+)", f).group(1) for f in ts_files]
+    return map(int, runs)
