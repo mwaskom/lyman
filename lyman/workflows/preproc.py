@@ -1,11 +1,6 @@
-"""Preprocessing workflow definition.
-
-See the docstring of create_preprocessing_workflow() for information
-about the workflow itself. This module contains the main setup
-function and assorted supporting functions for preprocessing.
-
-"""
+"""Preprocessing workflow definition."""
 import os
+import json
 import numpy as np
 import scipy as sp
 import pandas as pd
@@ -22,8 +17,11 @@ from nipype import (Node, MapNode, Workflow,
                     IdentityInterface, Function)
 from nipype.workflows.fmri.fsl import create_susan_smooth
 
+import lyman
+
 # For nipype Function interfaces
 imports = ["import os",
+           "import json",
            "import numpy as np",
            "import scipy as sp",
            "import pandas as pd",
@@ -34,17 +32,7 @@ imports = ["import os",
            "import seaborn"]
 
 
-def create_preprocessing_workflow(name="preproc",
-                                  temporal_interp=True,
-                                  frames_to_toss=6,
-                                  interleaved=True,
-                                  slice_order="up",
-                                  TR=2,
-                                  intensity_threshold=3,
-                                  motion_threshold=1,
-                                  smooth_fwhm=6,
-                                  highpass_sigma=32,
-                                  partial_brain=False):
+def create_preprocessing_workflow(name="preproc", exp_info=None):
     """Return a Nipype workflow for fMRI preprocessing.
 
     This mostly follows the preprocessing in FSL, although some
@@ -54,34 +42,19 @@ def create_preprocessing_workflow(name="preproc",
     ----------
     name : string
         workflow object name
-    temporal_interp : bool
-        whether to perform slice-time correction
-    frames_to_toss : int
-        number of initial frames to remove
-    interleaved : bool
-        whether slice acquisition is interleaved/alternating
-    slice_order : "up" | "down"
-        direction of slice acquisition
-    TR : float
-        repetition time of the sequence
-    intensity_threshold : float
-        z-score threshold for whole-brain intensity artifacts
-    motion_thresold : float
-        mm threshold for scan-to-scan motion artifacts
-    smooth_fwhm : float
-        mm smoothing kernel for spatial smoothing
-    highpass_sigma : float
-        sigma (in s) of high-pass smoothing kernal
-    partial_brain : bool
-        protocol is partial brain/hi-res
+    exp_info : dict
+        dictionary with experimental information
 
     """
     preproc = Workflow(name)
 
+    if exp_info is  None:
+        exp_info = lyman.default_experimental_parameters()
+
     # Define the inputs for the preprocessing workflow
     in_fields = ["timeseries", "subject_id"]
 
-    if partial_brain:
+    if exp_info["partial_brain"]:
         in_fields.append("whole_brain_epi")
 
     inputnode = Node(IdentityInterface(in_fields), "inputs")
@@ -93,7 +66,7 @@ def create_preprocessing_workflow(name="preproc",
                                imports),
                       "in_file",
                       "prep_timeseries")
-    prepare.inputs.frames_to_toss = frames_to_toss
+    prepare.inputs.frames_to_toss = exp_info["frames_to_toss"]
 
     # Motion and slice time correct
     realign = create_realignment_workflow()
@@ -102,19 +75,20 @@ def create_preprocessing_workflow(name="preproc",
     skullstrip = create_skullstrip_workflow()
 
     # Estimate a registration from funtional to anatomical space
-    coregister = create_bbregister_workflow(partial_brain=partial_brain)
+    coregister = create_bbregister_workflow(
+        partial_brain=exp_info["partial_brain"])
 
     # Smooth intelligently in the volume
     susan = create_susan_smooth()
-    susan.inputs.inputnode.fwhm = smooth_fwhm
+    susan.inputs.inputnode.fwhm = exp_info["smooth_fwhm"]
 
     # Scale and filter the timeseries
     filter_smooth = create_filtering_workflow("filter_smooth",
-                                              highpass_sigma,
+                                              exp_info["highpass_sigma"],
                                               "smoothed_timeseries")
 
     filter_rough = create_filtering_workflow("filter_rough",
-                                              highpass_sigma,
+                                              exp_info["highpass_sigma"],
                                               "unsmoothed_timeseries")
 
     # Automatically detect motion and intensity outliers
@@ -128,8 +102,16 @@ def create_preprocessing_workflow(name="preproc",
                                  imports),
                         ["timeseries", "mask_file", "motion_file"],
                         "artifacts")
-    artifacts.inputs.intensity_thresh = intensity_threshold
-    artifacts.inputs.motion_thresh = motion_threshold
+    artifacts.inputs.intensity_thresh = exp_info["intensity_threshold"]
+    artifacts.inputs.motion_thresh = exp_info["motion_threshold"]
+
+    # Save the experiment info for this run
+    dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
+                                 dump_exp_info, imports),
+                                "timeseries",
+                                "dumpjson")
+    dumpjson.inputs.exp_info = exp_info
+
 
     preproc.connect([
         (inputnode, prepare,
@@ -159,6 +141,8 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.mask_file", "inputs.mask_file")]),
         (filter_rough, artifacts,
             [("outputs.timeseries", "timeseries")]),
+        (inputnode, dumpjson,
+            [("timeseries", "timeseries")]),
         ])
 
     if partial_brain:
@@ -178,7 +162,8 @@ def create_preprocessing_workflow(name="preproc",
                      "artifact_report",
                      "flirt_affine",
                      "tkreg_affine",
-                     "coreg_report"]
+                     "coreg_report",
+                     "json_file"]
 
     outputnode = Node(IdentityInterface(output_fields), "outputs")
 
@@ -200,6 +185,8 @@ def create_preprocessing_workflow(name="preproc",
             [("outputs.timeseries", "smoothed_timeseries")]),
         (filter_rough, outputnode,
             [("outputs.timeseries", "unsmoothed_timeseries")]),
+        (dumpjson, outputnode,
+            [("json_file", "json_file")]),
         ])
 
     return preproc, inputnode, outputnode
@@ -229,16 +216,16 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
 
     # Optionally emoporally interpolate to correct for slice time differences
     if temporal_interp:
-        slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
+        slicetime = MapNode(fsl.SliceTimer(time_repetition=exp_info["TR"]),
                             "in_file",
                             "slicetime")
 
-        if slice_order == "down":
+        if exp_info["slice_order"] == "down":
             slicetime.inputs.index_dir = True
-        elif slice_order != "up":
+        elif exp_infp["slice_order"] != "up":
             raise ValueError("slice_order must be 'up' or 'down'")
 
-        if interleaved:
+        if exp_info["interleaved"]:
             slicetime.inputs.interleaved = True
 
     # Generate a report on the motion correction
@@ -281,7 +268,7 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
              ("motion_file", "motion_file")]),
         ])
 
-    if temporal_interp:
+    if exp_info["temporal_interp"]:
         realignment.connect([
             (mcflirt, slicetime,
                 [("out_file", "in_file")]),
@@ -773,3 +760,10 @@ def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
     scaled_img.to_filename(out_file)
 
     return out_file
+
+def dump_exp_info(exp_info, timeseries):
+    """Dump the exp_info dict into a json file."""
+    json_file = op.abspath("experiment_info.json")
+    with open(json_file, "w") as fp:
+        json.dump(exp_info, fp, sort_keys=True, indent=2)
+        return json_file
