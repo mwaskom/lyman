@@ -74,17 +74,3 @@ def test_make_subject_source():
     iterable_name, iterable_val = node.iterables
     yield assert_equal, iterable_name, "subject_id"
     yield assert_equal, iterable_val, subj_list
-
-
-def test_find_contrast_number():
-
-    contrasts = ["foo", "bar", "buz"]
-
-    for i, contrast in enumerate(contrasts, 1):
-        yield assert_equal, gu.find_contrast_number(contrast, contrasts), i
-
-
-def test_reg_template():
-
-    yield assert_equal, "foo", gu.reg_template("_mask", "foo", "bar")
-    yield assert_equal, "qux", gu.reg_template("whatever", "buz", "qux")
