@@ -203,7 +203,7 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
 
     mask_data = [nib.load(f).get_data() for f in masks]
     mask = np.where(np.all(mask_data, axis=0), np.nan, 1)
-    mask[bg == 0] = np.nan
+    mask[bg < moss.percentiles(bg, 5)] = np.nan
 
     # Find the plot parameters
     xdata = np.flatnonzero(bg.any(axis=1).any(axis=1))
