@@ -49,12 +49,12 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     preproc = Workflow(name)
 
     if exp_info is  None:
-        exp_info = lyman.default_experimental_parameters()
+        exp_info = lyman.default_experiment_parameters()
 
     # Define the inputs for the preprocessing workflow
     in_fields = ["timeseries", "subject_id"]
 
-    if exp_info["partial_brain"]:
+    if exp_info["whole_brain_template"]:
         in_fields.append("whole_brain_epi")
 
     inputnode = Node(IdentityInterface(in_fields), "inputs")
@@ -69,14 +69,18 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     prepare.inputs.frames_to_toss = exp_info["frames_to_toss"]
 
     # Motion and slice time correct
-    realign = create_realignment_workflow()
+    realign = create_realignment_workflow(
+        temporal_interp=exp_info["temporal_interp"],
+        TR=exp_info["TR"],
+        slice_order=exp_info["slice_order"],
+        interleaved=exp_info["interleaved"])
 
     # Run a conservative skull strip and get a brain mask
     skullstrip = create_skullstrip_workflow()
 
     # Estimate a registration from funtional to anatomical space
     coregister = create_bbregister_workflow(
-        partial_brain=exp_info["partial_brain"])
+        partial_brain=bool(exp_info["whole_brain_template"]))
 
     # Smooth intelligently in the volume
     susan = create_susan_smooth()
@@ -84,11 +88,13 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
 
     # Scale and filter the timeseries
     filter_smooth = create_filtering_workflow("filter_smooth",
-                                              exp_info["highpass_sigma"],
+                                              exp_info["hpf_cutoff"],
+                                              exp_info["TR"],
                                               "smoothed_timeseries")
 
     filter_rough = create_filtering_workflow("filter_rough",
-                                              exp_info["highpass_sigma"],
+                                              exp_info["hpf_cutoff"],
+                                              exp_info["TR"],
                                               "unsmoothed_timeseries")
 
     # Automatically detect motion and intensity outliers
@@ -145,7 +151,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("timeseries", "timeseries")]),
         ])
 
-    if partial_brain:
+    if bool(exp_info["whole_brain_template"]):
         preproc.connect([
             (inputnode, coregister,
                 [("whole_brain_epi", "whole_brain_epi")])
@@ -216,16 +222,16 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
 
     # Optionally emoporally interpolate to correct for slice time differences
     if temporal_interp:
-        slicetime = MapNode(fsl.SliceTimer(time_repetition=exp_info["TR"]),
+        slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
                             "in_file",
                             "slicetime")
 
-        if exp_info["slice_order"] == "down":
+        if slice_order == "down":
             slicetime.inputs.index_dir = True
-        elif exp_infp["slice_order"] != "up":
+        elif slice_order != "up":
             raise ValueError("slice_order must be 'up' or 'down'")
 
-        if exp_info["interleaved"]:
+        if interleaved:
             slicetime.inputs.interleaved = True
 
     # Generate a report on the motion correction
@@ -268,7 +274,7 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
              ("motion_file", "motion_file")]),
         ])
 
-    if exp_info["temporal_interp"]:
+    if temporal_interp:
         realignment.connect([
             (mcflirt, slicetime,
                 [("out_file", "in_file")]),
@@ -422,7 +428,8 @@ def create_bbregister_workflow(name="bbregister",
 
 
 def create_filtering_workflow(name="filter",
-                              highpass_sigma=32,
+                              hpf_cutoff=128,
+                              TR=2,
                               output_name="timeseries"):
     """Scale and high-pass filter the timeseries."""
     inputnode = Node(IdentityInterface(["timeseries", "mask_file"]),
@@ -438,7 +445,8 @@ def create_filtering_workflow(name="filter",
                     "scale")
 
     # Gaussian running-line filter
-    filter = MapNode(fsl.TemporalFilter(highpass_sigma=highpass_sigma,
+    hpf_sigma = (hpf_cutoff / 2.35) / TR
+    filter = MapNode(fsl.TemporalFilter(highpass_sigma=hpf_sigma,
                                         out_file=output_name + ".nii.gz"),
                      "in_file",
                      "filter")

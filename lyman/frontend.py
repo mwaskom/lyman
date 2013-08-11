@@ -72,9 +72,6 @@ def gather_experiment_info(exp_name=None, altmodel=None):
     # Temporal resolution. Mandatory.
     exp_dict["TR"] = float(exp_dict["TR"])
 
-    # Convert HPF cutoff to sigma for fslmaths
-    exp_dict["hpf_sigma"] = (exp_dict["hpf_cutoff"] / 2.35) / exp_dict["TR"]
-
     # Set up the default contrasts
     if exp_dict["condition_names"] is not None:
         cs = [[name, [name], [1]] for name in exp_dict["condition_names"]]
