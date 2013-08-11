@@ -38,7 +38,8 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
         filter cutoff in seconds or None to skip filter
     filter_data : bool
         if False data is assumed to have been filtered
-    copy_data : if False data is filtered in place
+    copy_data : bool
+        if False data is filtered in place
     split_confounds : boolean
         if true, confound regressors are separated by event type
     hrf_model : string
@@ -55,7 +56,7 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
     # Possibly filter the data
     ntp = data.shape[0]
     if hpf_cutoff is not None:
-        F = moss.fsl_highpass_matrix(ntp, hpf_cutoff, tr)
+        F = moss.glm.fsl_highpass_matrix(ntp, hpf_cutoff, tr)
         if filter_data:
             if copy_data:
                 data = data.copy()
@@ -207,11 +208,12 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
         raise ValueError("Mask must be boolean array")
 
     # Initialize the outputs
-    X = np.zeros((len(frames), sched.shape[0], mask.sum()))
     if event_names is None:
         event_names = sorted(sched.condition.unique())
     else:
+        sched = sched[sched.condition.isin(event_names)]
         event_names = list(event_names)
+    X = np.zeros((len(frames), sched.shape[0], mask.sum()))
     y = sched.condition.map(lambda x: event_names.index(x))
 
     # Extract the ROI into a 2D n_tr x n_feat
@@ -256,7 +258,7 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     subj : string
         subject id
     problem : string
-        problem name corresponding to set of event types
+        problem name corresponding to design file name
     roi_name : string
         ROI name associated with data
     mask_name : string, optional
@@ -311,24 +313,25 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     # Get paths to the relevant files
     mask_file = op.join(project["data_dir"], subj, "masks",
                         "%s.nii.gz" % mask_name)
-    problem_file = op.join(project["data_dir"], subj, "events",
-                           "%s.csv" % problem)
+    design_file = op.join(project["data_dir"], subj, "design",
+                          "%s.csv" % problem)
     ts_dir = op.join(project["analysis_dir"], exp_name, subj,
                      "reg", "epi", "unsmoothed")
     n_runs = len(glob(op.join(ts_dir, "run_*")))
-    ts_files = [op.join(ts_dir, "run_%d" % (r_i + 1),
-                        "timeseries_xfm.nii.gz") for r_i in range(n_runs)]
+    ts_files = [op.join(ts_dir, "run_%d/timeseries_xfm.nii.gz" % r_i)
+                for r_i in range(1, n_runs + 1)]
 
     # Get the hash value for this dataset
     ds_hash = hashlib.sha1()
     ds_hash.update(mask_name)
     ds_hash.update(str(op.getmtime(mask_file)))
-    ds_hash.update(str(op.getmtime(problem_file)))
+    ds_hash.update(str(op.getmtime(design_file)))
     for ts_file in ts_files:
         ds_hash.update(str(op.getmtime(ts_file)))
     ds_hash.update(np.asarray(frames).data)
     ds_hash.update(str(confounds))
     ds_hash.update(str(upsample))
+    ds_hash.update(str(event_names))
     ds_hash = ds_hash.hexdigest()
 
     # If the file exists and the hash matches, convert to a dict and return
@@ -350,15 +353,17 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     mask_data = nib.load(mask_file).get_data().astype(bool)
 
     # Load the event information
-    sched = pd.read_csv(problem_file)
+    sched = pd.read_csv(design_file)
 
     # Get a list of event names
     if event_names is None:
         event_names = sorted(sched.condition.unique())
+    else:
+        sched = sched[sched.condition.isin(event_names)]
 
     # Make each runs' dataset
     for r_i, sched_r in sched.groupby("run"):
-        ts_data = nib.load(ts_files[int(r_i)]).get_data()
+        ts_data = nib.load(ts_files[int(r_i - 1)]).get_data()
 
         # Use the basic extractor function
         X_i, y_i = extract_dataset(sched_r, ts_data,
