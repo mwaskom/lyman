@@ -11,13 +11,9 @@ here.
 The Experiment File
 -------------------
 
-In lyman terminology, an *experiment* corresponds to a set of raw data and
-preprocessing parameters. It is thus more specific than a *project*, as one
-project can have multiple experiments, but more general than a *design* or
-*model*, as you can define and analyze several different models corresponding
-to the same experiment. Experiments are defined by creating a Python file in
-your lyman directory called ``<experiment>.py``. This is just a regular
-Python file that gets imported as a module.
+Experiments are defined by creating a Python file in your lyman directory
+called ``<experiment>.py``.  This is just a regular Python file that gets
+imported as a module at runtime.
 
 There is a default set of parameters that will be overridden by the fields in
 this file; to see these defaults, run the following code::
