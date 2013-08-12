@@ -431,5 +431,7 @@ def dump_exp_info(exp_info, timeseries):
 def run_indices(ts_files):
     """Find the run numbers associated with timeseries files."""
     import re
+    if not isinstance(ts_files, list):
+        ts_files = [ts_files]
     runs = [re.search("run_(\d+)", f).group(1) for f in ts_files]
     return map(int, runs)

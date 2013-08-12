@@ -447,7 +447,7 @@ def create_filtering_workflow(name="filter",
                     "scale")
 
     # Gaussian running-line filter
-    hpf_sigma = (hpf_cutoff / 2.35) / TR
+    hpf_sigma = (hpf_cutoff / 2.0) / TR
     filter = MapNode(fsl.TemporalFilter(highpass_sigma=hpf_sigma,
                                         out_file=output_name + ".nii.gz"),
                      "in_file",
