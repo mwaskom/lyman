@@ -62,9 +62,9 @@ def gather_experiment_info(exp_name=None, altmodel=None):
         exp_dict.update(alt_dict)
 
     # Save the __doc__ attribute to the dict
-    exp_dict["comments"] = exp.__doc__
+    exp_dict["comments"] = "" if exp.__doc__ is None else exp.__doc__
     if altmodel is not None:
-        exp_dict["comments"] += alt.__doc__
+        exp_dict["comments"] += "" if alt.__doc__ is None else alt.__doc__
 
     # Check if it looks like this is a partial FOV acquisition
     exp_dict["partial_brain"] = bool(exp_dict.get("whole_brain_template"))

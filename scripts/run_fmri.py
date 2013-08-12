@@ -54,9 +54,17 @@ def main(arglist):
     nipype.config.set("execution", "crashdump_dir",
                       "/tmp/%s-%d" % (os.getlogin(), time.time()))
 
-    # This might not exist if we're running an altmodel
-    if not os.path.exists(analysis_dir):
+    # Create symlinks to the preproc directory for altmodels
+    if not op.exists(analysis_dir):
         os.makedirs(analysis_dir)
+    if exp_base != exp_name:
+        for subj in args.subjects:
+            subj_dir = op.join(analysis_dir, subj)
+            if not op.exists(subj_dir):
+                os.mkdir(subj_dir)
+            link_dir = op.join(analysis_dir, subj, "preproc")
+            if not op.exists(link_dir):
+                os.symlink(op.join(preproc_dir, subj, "preproc"), link_dir)
 
     # For later processing steps, are we using smoothed inputs?
     smoothing = "unsmoothed" if args.unsmoothed else "smoothed"
