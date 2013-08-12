@@ -14,6 +14,8 @@ from nipype import fsl, IdentityInterface, Function, Node, MapNode, Workflow
 import seaborn
 from moss import locator
 
+import lyman
+
 imports = ["import os",
            "import os.path as op",
            "import numpy as np",
@@ -32,10 +34,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                    subject_list=None,
                                    regressors=None,
                                    contrasts=None,
-                                   flame_mode="flame1",
-                                   cluster_zthresh=2.3,
-                                   grf_pthresh=0.05,
-                                   peak_distance=30):
+                                   exp_info=None):
 
     if subject_list is None:
         subject_list = []
@@ -43,6 +42,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
         regressors = dict(group_mean=[])
     if contrasts is None:
         contrasts = [["group_mean", "T", ["group_mean"], [1]]]
+    if exp_info is None:
+        exp_info = lyman.default_experiment_parameters()
 
     inputnode = Node(IdentityInterface(["l1_contrast",
                                         "copes",
@@ -66,16 +67,16 @@ def create_volume_mixedfx_workflow(name="volume_group",
                              imports),
                     "makemask")
 
-    flameo = Node(fsl.FLAMEO(run_mode=flame_mode), "flameo")
+    flameo = Node(fsl.FLAMEO(run_mode=exp_info["flame_mode"]), "flameo")
 
     smoothest = MapNode(fsl.SmoothEstimate(), "zstat_file", "smoothest")
 
-    cluster = MapNode(fsl.Cluster(threshold=cluster_zthresh,
-                                  pthreshold=grf_pthresh,
+    cluster = MapNode(fsl.Cluster(threshold=exp_info["cluster_zthresh"],
+                                  pthreshold=exp_info["grf_pthresh"],
                                   out_threshold_file=True,
                                   out_index_file=True,
                                   out_localmax_txt_file=True,
-                                  peak_distance=peak_distance,
+                                  peak_distance=exp_info["peak_distance"],
                                   use_mm=True),
                       ["in_file", "dlh", "volume"],
                       "cluster")

@@ -113,6 +113,11 @@ def default_experiment_parameters():
         hrf_params={},
         contrasts=[],
 
+        flame_mode="flame1",
+        cluster_zthresh=2.3,
+        grf_pthresh=0.05,
+        peak_distance=30,
+
                )
     return exp
 

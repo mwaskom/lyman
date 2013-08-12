@@ -59,8 +59,7 @@ def main(arglist):
 
     # Mixed effects group workflow
     mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
-        name=args.output, subject_list=subject_list,
-        regressors=regressors, contrasts=contrasts)
+        args.output, subject_list, regressors, contrasts, exp)
 
     # Mixed effects inputs
     mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/stats/%s1.nii.gz"

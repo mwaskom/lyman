@@ -66,8 +66,9 @@ Preprocessing Parameters
     protocol. Only relevant if ``temporal_interp`` is True.
 
    slice_order
-    A string that is either ``"up"`` or ``"down"``. This corresponds to the slice
-    acquisition order, and is only relevant if ``temporal_interp`` is True.
+    A string that is either ``"up"`` or ``"down"``. This corresponds to the
+    slice acquisition order, and is only relevant if ``temporal_interp`` is
+    True.
 
    intensity_threshold
     A float specifying the threshold for intensity artifacts. Frames where the
@@ -131,10 +132,35 @@ Model Parameters
     condition names, baseline contrasts are automatically generated for each of
     these conditions and prepended to this list.
 
-The parameters that were actually used at runtime will be saved with the other
-processing outputs in the analysis directory (in the file
-``experiment_info.json``). Any comments in the docstring to this module will be
-included in this archive.
+Group Analysis Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. glossary::
+
+   flame_mode
+    A string indicating the type of inference that should be performed in the
+    group model. Options are ``ols``, ``flame1``, and ``flame2``, for ordinary
+    least squares, MAP mixed effects, and full MCMC mixed effects,
+    respectively.
+
+   cluster_zthresh
+    A float indicating the threshold used to initially define clusters in the
+    Z-stat maps during multiple comparisons correction.
+
+   grf_pthresh
+    A float indicating the *p* value threshold for thresholding the corrected
+    Z-stat images.
+
+   peak_distance
+    A float specifying the minimum distance (in mm) between local
+    minima when finding activation peaks.
+
+The parameters that were present in this file at runtime will be saved with the
+other processing outputs in the preproc and model analysis directories (in a
+file called ``experiment_info.json``). Any comments in the docstring to this
+module will be included in this archive. Note that if you preprocess your data,
+change the experiment definition, and then run the model without rerunning
+preproc, the preprocessing parameters in this archived file will be inaccurate.
 
 The Design File
 ---------------
