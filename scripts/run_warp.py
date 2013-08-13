@@ -23,7 +23,7 @@ def main(arglist):
     normalize.config["execution"]["crashdump_dir"] = "/tmp"
 
     # Execute the workflow
-    normalize.run(plugin=plugin, plugin_args=plugin_args)
+    lyman.run_workflow(normalize, args=args)
 
     # Clean up
     if project["rm_working_dir"]:

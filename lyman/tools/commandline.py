@@ -11,3 +11,5 @@ parser.add_argument("-plugin", default="multiproc",
 parser.add_argument("-nprocs", default=4, type=int,
                     help="number of MultiProc processes to use")
 parser.add_argument("-queue", help="which queue for PBS/SGE execution")
+parser.add_argument("-dontrun", action="store_true",
+                    help="don't actually execute the workflows")
