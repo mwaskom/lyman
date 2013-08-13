@@ -11,8 +11,7 @@ def main():
     config.set('logging', 'workflow_level', 'CRITICAL')
 
     # Find the functions that create workflows
-    wf_funcs = [k for k in wf.__dict__ if
-                    re.match("create_.*_workflow", k)]
+    wf_funcs = [k for k in dir(wf) if re.match("create_.*_workflow", k)]
 
     for func in wf_funcs:
         try:
