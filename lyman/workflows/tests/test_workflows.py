@@ -1,5 +1,6 @@
 """Very basic tests the workflow factories are importable and callable."""
 import re
+from nose.tools import assert_is_instance
 from nipype import Workflow, Node, IdentityInterface
 
 from lyman import workflows as wf
@@ -18,14 +19,14 @@ def test_workflow_functions():
             try:
                 w, i, o = ret
             except TypeError:
-                assert isinstance(ret, Workflow)
+                assert_is_instance(ret, Workflow)
                 return 
                 
-            assert isinstance(w, Workflow)
-            assert isinstance(i, Node)
-            assert isinstance(o, Node)
-            assert isinstance(i.interface, IdentityInterface)
-            assert isinstance(o.interface, IdentityInterface)
+            assert_is_instance(w, Workflow)
+            assert_is_instance(i, Node)
+            assert_is_instance(o, Node)
+            assert_is_instance(i.interface, IdentityInterface)
+            assert_is_instance(o.interface, IdentityInterface)
 
         name = pat.match(f.__name__).group(1)
         case.description = "Test %s workflow function" % name
