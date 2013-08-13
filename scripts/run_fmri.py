@@ -49,10 +49,11 @@ def main(arglist):
     data_dir = project["data_dir"]
     analysis_dir = op.join(project["analysis_dir"], exp_name)
     working_dir = op.join(project["working_dir"], exp_name)
-    preproc_dir = op.join(project["analysis_dir"], exp_base)
 
+    # Just stick crashdumps in a unique /tmp directory
     nipype.config.set("execution", "crashdump_dir",
-                      "/tmp/%s-%d" % (os.getlogin(), time.time()))
+                      "/tmp/%s-nipype_crashes-%d" % (os.getlogin(),
+                                                     time.time()))
 
     # Create symlinks to the preproc directory for altmodels
     if not op.exists(analysis_dir):
@@ -64,6 +65,7 @@ def main(arglist):
                 os.mkdir(subj_dir)
             link_dir = op.join(analysis_dir, subj, "preproc")
             if not op.exists(link_dir):
+                preproc_dir = op.join(project["analysis_dir"], exp_base)
                 os.symlink(op.join(preproc_dir, subj, "preproc"), link_dir)
 
     # For later processing steps, are we using smoothed inputs?
