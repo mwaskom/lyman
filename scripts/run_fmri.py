@@ -190,6 +190,7 @@ def main(arglist):
             timeseries=op.join("{subject_id}/preproc/run_*/",
                                "{smoothing}_timeseries.nii.gz"),
                                   ))
+    reg_lists = reg_templates.keys()
 
     if space == "mni":
         reg_templates["warpfield"] = op.join(data_dir, "{subject_id}",
@@ -197,6 +198,7 @@ def main(arglist):
 
     # Define the registration data source node
     reg_source = Node(SelectFiles(reg_templates,
+                                  force_lists=reg_lists,
                                   base_directory=analysis_dir),
                       "reg_source")
 
@@ -244,6 +246,7 @@ def main(arglist):
         dofs="{subject_id}/model/{smoothing}/run_*/results/dof",
         ss_files=op.join(ffx_base, "ss*" + ext),
                          )
+    ffx_lists = ffx_templates.keys()
 
     if space == "mni":
         bg = op.join(data_dir, "{subject_id}/normalization/brain_warp.nii.gz")
@@ -253,6 +256,7 @@ def main(arglist):
 
     # Define the ffxistration data source node
     ffx_source = Node(SelectFiles(ffx_templates,
+                                  force_lists=ffx_lists,
                                   base_directory=analysis_dir),
                       "ffx_source")
 
