@@ -10,10 +10,16 @@ Install Lyman
 -------------
 
 If you haven't already done this, clone the lyman repository from Github and
-install it (``python setup.py install``). If you're starting a new analysis and
-already have an older version of lyman, it's probably a good idea to check the
-commit log on Github and then update (``git pull origin master``) and
-re-install.
+install it (``python setup.py install``). You'll also need to install the lyman
+dependencies. If you're starting a new analysis and already have an older
+version of lyman, it's probably a good idea to check the commit log on Github
+and then update (``git pull origin master``) and re-install. 
+
+Lyman's unit-test suite can be run by executing the command ``nosetests`` in
+the source directory. Because it is difficult to unit-test high-level scripting
+code, the coverage is lighter than would be ideal (benchmarking the workflows
+on real data is an active area of development). However, the test suite will
+catch basic things like missing dependencies.
 
 Setup the Lyman Project
 -----------------------
@@ -26,11 +32,12 @@ of basic information. The output of this script is a file called
 again unless you move things around.
 
 Next, set up one or more *experiment* files describing the processing parameters
-for each set of data
+for each of your experiments.
 
 If you want to have a list of default subjects to perform processing over, put
 their subject ids in a plain text file called ``subjects.txt`` within this
-directory. You can define different groups of subjects too in files called ``<groupname>.txt``.
+directory. You can define different groups of subjects too in files called
+``<groupname>.txt``.
 
 Prepare the Data
 ----------------

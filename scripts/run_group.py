@@ -12,7 +12,8 @@ import os.path as op
 import matplotlib as mpl
 mpl.use("Agg")
 
-from nipype import Node, MapNode, DataGrabber, DataSink, IdentityInterface
+import nipype
+from nipype import Node, MapNode, SelectFiles, DataSink, IdentityInterface
 
 import lyman
 import lyman.workflows as wf
@@ -25,9 +26,10 @@ def main(arglist):
 
     # Get and process specific information
     project = lyman.gather_project_info()
-    if project["default_exp"] is not None and args.experiment is None:
-        args.experiment = project["default_exp"]
     exp = lyman.gather_experiment_info(args.experiment, args.altmodel)
+
+    if args.experiment is None:
+        args.experiment = project["default_exp"]
 
     if args.altmodel:
         exp_name = "-".join([args.experiment, args.altmodel])
@@ -40,7 +42,9 @@ def main(arglist):
     # Set roots of output storage
     anal_dir_base = op.join(project["analysis_dir"], exp_name)
     work_dir_base = op.join(project["working_dir"], exp_name)
-    crashdump_dir = "/tmp/%d" % time.time()
+    nipype.config.set("execution", "crashdump_dir",
+                      "/tmp/%s-nipype_crashes-%d" % (os.getlogin(),
+                                                     time.time()))
 
     # Subject source (no iterables here)
     subject_list = lyman.determine_subjects(args.subjects)
@@ -62,19 +66,15 @@ def main(arglist):
         args.output, subject_list, regressors, contrasts, exp)
 
     # Mixed effects inputs
-    mfx_template = "%s/ffx/" + args.regspace + "/smoothed/%s/stats/%s1.nii.gz"
-    mfx_source = MapNode(DataGrabber(infields=["subject_id",
-                                               "l1_contrast"],
-                                     outfields=["copes", "varcopes", "dofs"],
+    mfx_base = op.join("{subject_id}/ffx/mni/smoothed/{contrast}")
+    templates = dict(copes=op.join(mfx_base, "cope1.nii.gz"),
+                     varcopes=op.join(mfx_base, "varcope1.nii.gz"),
+                     dofs=op.join(mfx_base, "tdof_t1.nii.gz"))
+    mfx_source = MapNode(SelectFiles(templates,
                                      base_directory=anal_dir_base,
-                                     template=mfx_template,
                                      sort_filelist=True),
-                      iterfield=["subject_id"],
-                      name="mfx_source")
-    mfx_source.inputs.template_args = dict(
-        copes=[["subject_id", "l1_contrast", "cope"]],
-        varcopes=[["subject_id", "l1_contrast", "varcope"]],
-        dofs=[["subject_id", "l1_contrast", "tdof_t"]])
+                         "subject_id",
+                         "mfx_source")
 
     mfx.connect([
         (contrast_source, mfx_source,
@@ -87,12 +87,11 @@ def main(arglist):
             [("copes", "copes"),
              ("varcopes", "varcopes"),
              ("dofs", "dofs")]),
-             ])
+                 ])
 
     # Mixed effects outputs
-    mfx_sink = Node(DataSink(base_directory="%s/%s/%s/" % (anal_dir_base,
-                                                           args.output,
-                                                           args.regspace),
+    mfx_sink = Node(DataSink(base_directory="%s/mni/%s/" % (anal_dir_base,
+                                                            args.regspace),
                              substitutions=[("/stats", "/")],
                              parameterization=False),
                     name="mfx_sink")
@@ -105,7 +104,6 @@ def main(arglist):
 
     # Set a few last things
     mfx.base_dir = work_dir_base
-    mfx.config["execution"]["crashdump_dir"] = crashdump_dir
 
     # Execute
     lyman.run_workflow(mfx, args=args)
@@ -120,9 +118,6 @@ def parse_args(arglist):
     parser = tools.parser
     parser.add_argument("-experiment", help="experimental paradigm")
     parser.add_argument("-altmodel", help="alternate model to fit")
-    parser.add_argument("-regspace", default="mni",
-                        choices=wf.spaces,
-                        help="common space for registration and fixed effects")
     parser.add_argument("-output", default="group",
                         help="output directory name")
     return parser.parse_args(arglist)
