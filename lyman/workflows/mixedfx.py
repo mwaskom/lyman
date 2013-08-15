@@ -394,7 +394,6 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         ax.set_yticklabels(labels)
         ax.set_ylabel("Local Maximum")
         ax.set_xlabel("COPE Value")
-        plt.tight_layout()
         plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
 
         # Watershed segmentation image
