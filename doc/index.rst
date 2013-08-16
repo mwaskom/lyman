@@ -48,4 +48,5 @@ Contents:
    glossary
    workflow
    experiments
+   procstream
 
