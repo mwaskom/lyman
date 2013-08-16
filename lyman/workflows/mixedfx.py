@@ -260,7 +260,7 @@ def watershed_segment(zstat_file, localmax_file):
     names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
     lut_data["ROI"] = np.array(names)
     lut_data["#ID"] = np.arange(n + 1)
-    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int).squeeze().T
+    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int)
     lut_data.to_csv(lut_file, "\t", index=False)
 
     return seg_file, peak_file, lut_file
@@ -394,7 +394,6 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         ax.set_yticklabels(labels)
         ax.set_ylabel("Local Maximum")
         ax.set_xlabel("COPE Value")
-        plt.tight_layout()
         plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
 
         # Watershed segmentation image

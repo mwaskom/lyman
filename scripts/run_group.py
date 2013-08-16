@@ -66,7 +66,7 @@ def main(arglist):
         args.output, subject_list, regressors, contrasts, exp)
 
     # Mixed effects inputs
-    mfx_base = op.join("{subject_id}/ffx/mni/smoothed/{contrast}")
+    mfx_base = op.join("{subject_id}/ffx/mni/smoothed/{l1_contrast}")
     templates = dict(copes=op.join(mfx_base, "cope1.nii.gz"),
                      varcopes=op.join(mfx_base, "varcope1.nii.gz"),
                      dofs=op.join(mfx_base, "tdof_t1.nii.gz"))
@@ -90,8 +90,8 @@ def main(arglist):
                  ])
 
     # Mixed effects outputs
-    mfx_sink = Node(DataSink(base_directory="%s/mni/%s/" % (anal_dir_base,
-                                                            args.regspace),
+    mfx_sink = Node(DataSink(base_directory="%s/%s/mni" % (anal_dir_base,
+                                                           args.output),
                              substitutions=[("/stats", "/")],
                              parameterization=False),
                     name="mfx_sink")
