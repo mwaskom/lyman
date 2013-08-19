@@ -9,7 +9,6 @@ import os
 import os.path as op
 import shutil
 import subprocess as sub
-from glob import glob
 import numpy as np
 
 from nipype import fsl, Workflow, Node, Function, IdentityInterface
@@ -18,7 +17,6 @@ imports = ["import os",
            "import os.path as op",
            "import shutil",
            "import subprocess as sub",
-           "from glob import glob",
            "import numpy as np",
            "from nipype import fsl",
            ]
@@ -109,9 +107,7 @@ def epi_model_transform(copes, varcopes, ss_files, masks, affines):
                        "--interp=%s" % interp, "--premat=%s" % full_affine]
                 sub.check_output(cmd)
 
-    out_files = []
-    for i in range(n_runs):
-        out_files.extend(glob(op.abspath("run_%d/*.nii.gz" % (i + 1))))
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
 
 
@@ -156,9 +152,7 @@ def epi_timeseries_transform(timeseries, masks, affines):
                        "--interp=%s" % interp, "--premat=%s" % full_affine]
                 sub.check_output(cmd)
 
-    out_files = []
-    for i in range(n_runs):
-        out_files.extend(glob(op.abspath("run_%d/*.nii.gz" % (i + 1))))
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
 
 
@@ -197,9 +191,7 @@ def mni_model_transform(copes, varcopes, ss_files, masks, affines, warpfield):
                    "-w", warpfield]
             sub.check_output(cmd)
 
-    out_files = []
-    for i in range(n_runs):
-        out_files.extend(glob(op.abspath("run_%d/*.nii.gz" % (i + 1))))
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
 
 
@@ -229,7 +221,5 @@ def mni_timeseries_transform(timeseries, masks, affines, warpfield):
                    "-w", warpfield]
             sub.check_output(cmd)
 
-    out_files = []
-    for i in range(n_runs):
-        out_files.extend(glob(op.abspath("run_%d/*.nii.gz" % (i + 1))))
+    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
     return out_files
