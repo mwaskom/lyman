@@ -244,6 +244,7 @@ def setup_model(design_file, realign_file, artifact_file, exp_info, run):
         plt.tight_layout()
         fname = op.abspath("cope%d_filter.png" % i)
         f.savefig(fname, dpi=100)
+        plt.close(f)
         report.append(fname)
 
     # Write out the X object as a pkl to pass to the report function
@@ -370,6 +371,7 @@ def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
     add_colorbar(f, "PuRd_r", sslow, sshigh, .35, .3, "%d")
     ss_png = op.abspath("sigmasquareds.png")
     f.savefig(ss_png, **savekws)
+    plt.close(f)
     report.append(ss_png)
 
     # Now plot each zstat file
@@ -395,6 +397,7 @@ def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
 
         fname = op.abspath("zstat%d.png" % z_i)
         f.savefig(fname, **savekws)
+        plt.close(f)
         report.append(fname)
 
     # Now the r_2 files
@@ -411,6 +414,7 @@ def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
 
         fname = op.abspath(op.basename(rname).replace(".nii.gz", ".png"))
         f.savefig(fname, **savekws)
+        plt.close(f)
         report.append(fname)
 
     return report

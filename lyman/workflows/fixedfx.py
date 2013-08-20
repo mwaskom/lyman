@@ -262,6 +262,7 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
     mask_png = op.abspath("mask_overlap.png")
     plt.savefig(mask_png, **pngkws)
     report.append(mask_png)
+    plt.close(f)
 
     # Now plot the R2 images
     for fname, cmap in zip(r2_files, ["GnBu_r", "YlGn_r"]):
@@ -281,6 +282,7 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
         add_colorbar(f, cmap, 0, rmax, .35, .3, "%.2f")
         plt.savefig(savename, **pngkws)
         report.append(savename)
+        plt.close(f)
 
     # Finally plot each zstat image
     for fname in zstat_files:
@@ -310,5 +312,6 @@ def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
         savename = op.join(contrast, "zstat1.png")
         f.savefig(savename, **pngkws)
         report.append(op.abspath(contrast))
+        plt.close(f)
 
     return report

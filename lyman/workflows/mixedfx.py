@@ -320,6 +320,7 @@ def mfx_report(mask_file, zstat_file, localmax_file,
                   alpha=.7, cmap=cmap, interpolation="nearest")
         ax.axis("off")
     plt.savefig(mask_png, **pngkws)
+    plt.close(f)
 
     def add_colorbar(f, cmap, low, high, left, width, fmt):
         cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
@@ -348,6 +349,7 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         ax.axis("off")
     add_colorbar(f, "Reds_r", zlow, zhigh, .35, .3, "%.1f")
     plt.savefig(zstat_png, **pngkws)
+    plt.close(f)
 
     # Everything else is dependent on there being some peak data
     if len(peaks):
@@ -378,6 +380,7 @@ def mfx_report(mask_file, zstat_file, localmax_file,
                       cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
             ax.axis("off")
         plt.savefig(peaks_png, **pngkws)
+        plt.close(f)
 
         # Now make a boxplot of the peaks
         seaborn.set()
@@ -395,6 +398,7 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         ax.set_ylabel("Local Maximum")
         ax.set_xlabel("COPE Value")
         plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
+        plt.close(f)
 
         # Watershed segmentation image
         seg_data[seg_data == 0] = np.nan
@@ -410,6 +414,7 @@ def mfx_report(mask_file, zstat_file, localmax_file,
                       cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
             ax.axis("off")
         plt.savefig(seg_png, **pngkws)
+        plt.close(f)
 
     else:
         for fname in [peaks_png, boxplot_png, seg_png]:

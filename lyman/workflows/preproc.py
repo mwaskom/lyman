@@ -746,6 +746,7 @@ def write_coreg_plot(subject_id, in_file):
     out_file = os.path.abspath("func2anat.png")
     plt.savefig(out_file, dpi=100, bbox_inches="tight",
                 facecolor="k", edgecolor="k")
+    plt.close(f)
     return out_file
 
 
