@@ -190,7 +190,7 @@ For example, an extremely basic design might look like this::
 
     run,condition,onset
     1,easy,0
-    1,hard,12,
+    1,hard,12
     2,easy,0
     2,hard,12
 

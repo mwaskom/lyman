@@ -17,7 +17,6 @@ imports = ["import os",
            "import os.path as op",
            "import shutil",
            "import subprocess as sub",
-           "from glob import glob",
            "import numpy as np",
            "from nipype import fsl",
            ]
