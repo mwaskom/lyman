@@ -222,6 +222,13 @@ def main(arglist):
     # and rename the timeseries file
     reg_outwrap.add_regexp_substitutions([("_smoothing_", "")])
 
+    # Add dummy substitutions for the contasts to make sure the DataSink
+    # reruns when the deisgn has changed. This accounts for the problem where
+    # directory inputs are treated as strings and the contents/timestamps are
+    # not hashed, which should be fixed upstream soon.
+    contrast_subs = [(c, c) for c in exp["contrast_names"]]
+    reg_outwrap.add_regexp_substitutions(contrast_subs)
+
     reg.base_dir = working_dir
 
     # Possibly run registration workflow and clean up
