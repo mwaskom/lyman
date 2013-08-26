@@ -241,7 +241,7 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
 
 def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
                     collapse=None, confounds=None, upsample=None,
-                    exp_name=None, event_names=None):
+                    smoothed=False, exp_name=None, event_names=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -278,6 +278,8 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
+    smoothed : bool
+        whether to use the spatially smoothed timeseries data
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy (uses default if None)
@@ -299,6 +301,9 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     if mask_name is None:
         mask_name = roi_name
 
+    if smoothed:
+        roi_name += "_smoothed"
+
     # Find the relevant disk location for the dataaset file
     ds_file = op.join(project["analysis_dir"],
                       exp_name, subj, "mvpa",
@@ -315,8 +320,9 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
                         "%s.nii.gz" % mask_name)
     design_file = op.join(project["data_dir"], subj, "design",
                           "%s.csv" % problem)
+    smoothing = "smoothed" if smoothed else "unsmoothed"
     ts_dir = op.join(project["analysis_dir"], exp_name, subj,
-                     "reg", "epi", "unsmoothed")
+                     "reg", "epi", smoothing)
     n_runs = len(glob(op.join(ts_dir, "run_*")))
     ts_files = [op.join(ts_dir, "run_%d/timeseries_xfm.nii.gz" % r_i)
                 for r_i in range(1, n_runs + 1)]
@@ -395,7 +401,8 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     # Save to disk and return
     dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
                    event_names=event_names, problem=problem, frames=frames,
-                   confounds=confounds, upsample=upsample, hash=ds_hash)
+                   confounds=confounds, upsample=upsample, smoothed=smoothed,
+                   hash=ds_hash)
     np.savez(ds_file, **dataset)
 
     # Possibly perform temporal compression
@@ -418,7 +425,7 @@ def _temporal_compression(collapse, dset):
 
 
 def extract_group(problem, roi_name, mask_name=None, frames=None,
-                  collapse=None, confounds=None, upsample=None,
+                  collapse=None, confounds=None, upsample=None, smoothed=False,
                   exp_name=None, event_names=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
@@ -442,8 +449,10 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
     confounds : sequence of arrays, optional
         list ofsubject-specific obs x n arrays of confounding variables
         to regress out of the data matrix during extraction
-    upsample : int
+    upsample : int, optional
         upsample the raw timeseries by this factor using cubic splines
+    smoothed : bool, optional
+        whether to extract the spatially smoothed dataset
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy (uses default if None)
@@ -489,12 +498,14 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
         collapse = [collapse for _ in subjects]
     confounds = [confounds for _ in subjects]
     upsample = [upsample for _ in subjects]
+    smoothed = [smoothed for _ in subjects]
     exp_name = [exp_name for _ in subjects]
     event_names = [event_names for _ in subjects]
 
     # Actually do the loading
     data = map(extract_subject, subjects, problem, roi_name, mask_name,
-               frames, collapse, confounds, upsample, exp_name, event_names)
+               frames, collapse, confounds, upsample, smoothed, exp_name,
+               event_names)
 
     return data
 
