@@ -167,33 +167,37 @@ def fixedfx_model(contrasts, copes, varcopes, dofs, masks):
 
 def fixedfx_r2(ss_files):
     """Find the R2 for the full fixedfx model."""
+    out_files = []
+
+    # First read the total sum of squares for each run
     ss_tot = [f for f in ss_files if "sstot" in f]
-    ss_res_full = [f for f in ss_files if "ssres_full" in f]
-    ss_res_main = [f for f in ss_files if "ssres_main" in f]
-
     tot_data = [nib.load(f).get_data() for f in ss_tot]
-    main_data = [nib.load(f).get_data() for f in ss_res_full]
-    full_data = [nib.load(f).get_data() for f in ss_res_main]
 
-    tot_data = np.sum(tot_data, axis=0)
-    main_data = np.sum(main_data, axis=0)
-    full_data = np.sum(full_data, axis=0)
+    # Sum across runs
+    tot_sum = np.sum(tot_data, axis=0)
 
-    r2_full = 1 - full_data / tot_data
-    r2_main = 1 - main_data / tot_data
-
+    # Get basic info about the image
     img = nib.load(ss_tot[0])
     aff, header = img.get_affine(), img.get_header()
 
-    r2_full_img = nib.Nifti1Image(r2_full, aff, header)
-    r2_full_file = op.abspath("r2_full.nii.gz")
-    r2_full_img.to_filename(r2_full_file)
+    # Do the same processing for the full and main model
+    for comp in ["full", "main"]:
 
-    r2_main_img = nib.Nifti1Image(r2_main, aff, header)
-    r2_main_file = op.abspath("r2_main.nii.gz")
-    r2_main_img.to_filename(r2_main_file)
+        # Read in the residual sum of squares and take grand sum
+        ss_res = [f for f in ss_files if "ssres_%s" % comp in f]
+        res_data = [nib.load(f).get_data() for f in ss_res]
+        res_sum = np.sum(res_data, axis=0)
 
-    return [r2_full_file, r2_main_file]
+        # Calculate the full model R2
+        r2 = 1 - res_sum / tot_sum
+
+        # Save an image with these data
+        r2_img = nib.Nifti1Image(r2, aff, header)
+        r2_file = op.abspath("r2_%s.nii.gz" % comp)
+        r2_img.to_filename(r2_file)
+        out_files.append(r2_file)
+
+    return out_files
 
 
 def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
