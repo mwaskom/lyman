@@ -38,7 +38,8 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
         filter cutoff in seconds or None to skip filter
     filter_data : bool
         if False data is assumed to have been filtered
-    copy_data : if False data is filtered in place
+    copy_data : bool
+        if False data is filtered in place
     split_confounds : boolean
         if true, confound regressors are separated by event type
     hrf_model : string
@@ -55,7 +56,7 @@ def iterated_deconvolution(data, evs, tr=2, hpf_cutoff=128, filter_data=True,
     # Possibly filter the data
     ntp = data.shape[0]
     if hpf_cutoff is not None:
-        F = moss.fsl_highpass_matrix(ntp, hpf_cutoff, tr)
+        F = moss.glm.fsl_highpass_matrix(ntp, hpf_cutoff, tr)
         if filter_data:
             if copy_data:
                 data = data.copy()
@@ -207,11 +208,12 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
         raise ValueError("Mask must be boolean array")
 
     # Initialize the outputs
-    X = np.zeros((len(frames), sched.shape[0], mask.sum()))
     if event_names is None:
         event_names = sorted(sched.condition.unique())
     else:
+        sched = sched[sched.condition.isin(event_names)]
         event_names = list(event_names)
+    X = np.zeros((len(frames), sched.shape[0], mask.sum()))
     y = sched.condition.map(lambda x: event_names.index(x))
 
     # Extract the ROI into a 2D n_tr x n_feat
@@ -239,7 +241,7 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
 
 def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
                     collapse=None, confounds=None, upsample=None,
-                    exp_name=None, event_names=None):
+                    smoothed=False, exp_name=None, event_names=None):
     """Build decoding dataset from predictable lyman outputs.
 
     This function will make use of the LYMAN_DIR environment variable
@@ -256,7 +258,7 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     subj : string
         subject id
     problem : string
-        problem name corresponding to set of event types
+        problem name corresponding to design file name
     roi_name : string
         ROI name associated with data
     mask_name : string, optional
@@ -276,6 +278,8 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     upsample : int
         upsample the raw timeseries by this factor using cubic spline
         interpolation
+    smoothed : bool
+        whether to use the spatially smoothed timeseries data
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy (uses default if None)
@@ -290,12 +294,15 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
 
     """
     project = gather_project_info()
+    exp = gather_experiment_info(exp_name)
     if exp_name is None:
         exp_name = project["default_exp"]
-    exp = gather_experiment_info(exp_name)
 
     if mask_name is None:
         mask_name = roi_name
+
+    if smoothed:
+        roi_name += "_smoothed"
 
     # Find the relevant disk location for the dataaset file
     ds_file = op.join(project["analysis_dir"],
@@ -311,24 +318,26 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     # Get paths to the relevant files
     mask_file = op.join(project["data_dir"], subj, "masks",
                         "%s.nii.gz" % mask_name)
-    problem_file = op.join(project["data_dir"], subj, "events",
-                           "%s.csv" % problem)
+    design_file = op.join(project["data_dir"], subj, "design",
+                          "%s.csv" % problem)
+    smoothing = "smoothed" if smoothed else "unsmoothed"
     ts_dir = op.join(project["analysis_dir"], exp_name, subj,
-                     "reg", "epi", "unsmoothed")
+                     "reg", "epi", smoothing)
     n_runs = len(glob(op.join(ts_dir, "run_*")))
-    ts_files = [op.join(ts_dir, "run_%d" % (r_i + 1),
-                        "timeseries_xfm.nii.gz") for r_i in range(n_runs)]
+    ts_files = [op.join(ts_dir, "run_%d/timeseries_xfm.nii.gz" % r_i)
+                for r_i in range(1, n_runs + 1)]
 
     # Get the hash value for this dataset
     ds_hash = hashlib.sha1()
     ds_hash.update(mask_name)
     ds_hash.update(str(op.getmtime(mask_file)))
-    ds_hash.update(str(op.getmtime(problem_file)))
+    ds_hash.update(str(op.getmtime(design_file)))
     for ts_file in ts_files:
         ds_hash.update(str(op.getmtime(ts_file)))
     ds_hash.update(np.asarray(frames).data)
     ds_hash.update(str(confounds))
     ds_hash.update(str(upsample))
+    ds_hash.update(str(event_names))
     ds_hash = ds_hash.hexdigest()
 
     # If the file exists and the hash matches, convert to a dict and return
@@ -350,15 +359,17 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     mask_data = nib.load(mask_file).get_data().astype(bool)
 
     # Load the event information
-    sched = pd.read_csv(problem_file)
+    sched = pd.read_csv(design_file)
 
     # Get a list of event names
     if event_names is None:
         event_names = sorted(sched.condition.unique())
+    else:
+        sched = sched[sched.condition.isin(event_names)]
 
     # Make each runs' dataset
     for r_i, sched_r in sched.groupby("run"):
-        ts_data = nib.load(ts_files[int(r_i)]).get_data()
+        ts_data = nib.load(ts_files[int(r_i - 1)]).get_data()
 
         # Use the basic extractor function
         X_i, y_i = extract_dataset(sched_r, ts_data,
@@ -390,7 +401,8 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     # Save to disk and return
     dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
                    event_names=event_names, problem=problem, frames=frames,
-                   confounds=confounds, upsample=upsample, hash=ds_hash)
+                   confounds=confounds, upsample=upsample, smoothed=smoothed,
+                   hash=ds_hash)
     np.savez(ds_file, **dataset)
 
     # Possibly perform temporal compression
@@ -413,7 +425,7 @@ def _temporal_compression(collapse, dset):
 
 
 def extract_group(problem, roi_name, mask_name=None, frames=None,
-                  collapse=None, confounds=None, upsample=None,
+                  collapse=None, confounds=None, upsample=None, smoothed=False,
                   exp_name=None, event_names=None, subjects=None, dv=None):
     """Load datasets for a group of subjects, possibly in parallel.
 
@@ -437,8 +449,10 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
     confounds : sequence of arrays, optional
         list ofsubject-specific obs x n arrays of confounding variables
         to regress out of the data matrix during extraction
-    upsample : int
+    upsample : int, optional
         upsample the raw timeseries by this factor using cubic splines
+    smoothed : bool, optional
+        whether to extract the spatially smoothed dataset
     exp_name : string, optional
         lyman experiment name where timecourse data can be found
         in analysis hierarchy (uses default if None)
@@ -484,12 +498,14 @@ def extract_group(problem, roi_name, mask_name=None, frames=None,
         collapse = [collapse for _ in subjects]
     confounds = [confounds for _ in subjects]
     upsample = [upsample for _ in subjects]
+    smoothed = [smoothed for _ in subjects]
     exp_name = [exp_name for _ in subjects]
     event_names = [event_names for _ in subjects]
 
     # Actually do the loading
     data = map(extract_subject, subjects, problem, roi_name, mask_name,
-               frames, collapse, confounds, upsample, exp_name, event_names)
+               frames, collapse, confounds, upsample, smoothed, exp_name,
+               event_names)
 
     return data
 

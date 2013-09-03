@@ -1,216 +1,163 @@
-"""Preprocessing workflow definition.
+"""Preprocessing workflow definition."""
+import os
+import os.path as op
+import json
+import numpy as np
+import scipy as sp
+import pandas as pd
+import nibabel as nib
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 
-See the docstring of create_preprocessing_workflow() for information
-about the workflow itself. This module contains the main setup
-function and assorted supporting functions for preprocessing.
+import moss
+import seaborn
 
-"""
-import nipype.interfaces.io as io
-import nipype.interfaces.fsl as fsl
-import nipype.interfaces.freesurfer as fs
-import nipype.interfaces.utility as util
-import nipype.algorithms.rapidart as ra
-from nipype.interfaces.utility import IdentityInterface, Rename, Function
-from nipype.pipeline.engine import Node, MapNode, Workflow
+from nipype import fsl
+from nipype import freesurfer as fs
+from nipype import (Node, MapNode, Workflow,
+                    IdentityInterface, Function)
+from nipype.workflows.fmri.fsl import create_susan_smooth
 
-try:
-    from nipype.workflows.fmri.fsl import create_susan_smooth
-except ImportError:
-    from nipype.workflows.fsl import create_susan_smooth
+import lyman
+
+# For nipype Function interfaces
+imports = ["import os",
+           "import os.path as op",
+           "import json",
+           "import numpy as np",
+           "import scipy as sp",
+           "import pandas as pd",
+           "import nibabel as nib",
+           "import matplotlib as mpl",
+           "import matplotlib.pyplot as plt",
+           "import moss",
+           "import seaborn"]
 
 
-def create_preprocessing_workflow(name="preproc",
-                                  do_slice_time_cor=True,
-                                  frames_to_toss=6,
-                                  interleaved=True,
-                                  slice_order="up",
-                                  TR=2,
-                                  smooth_fwhm=6,
-                                  highpass_sigma=32,
-                                  partial_fov=False):
+def create_preprocessing_workflow(name="preproc", exp_info=None):
     """Return a Nipype workflow for fMRI preprocessing.
 
+    This mostly follows the preprocessing in FSL, although some
+    of the processing has been moved into pure Python.
+
+    Parameters
+    ----------
+    name : string
+        workflow object name
+    exp_info : dict
+        dictionary with experimental information
 
     """
-    preproc = Workflow(name=name)
+    preproc = Workflow(name)
+
+    if exp_info is  None:
+        exp_info = lyman.default_experiment_parameters()
 
     # Define the inputs for the preprocessing workflow
     in_fields = ["timeseries", "subject_id"]
-    if partial_fov:
-        in_fields.append("full_fov_epi")
-    inputnode = Node(IdentityInterface(fields=in_fields),
-                     name="inputnode")
 
-    # Remove early frames to account for T1 stabalization
-    trimmer = MapNode(fsl.ExtractROI(t_min=frames_to_toss),
-                      iterfield=["in_file", "t_size"],
-                      name="trimmer")
+    if exp_info["whole_brain_template"]:
+        in_fields.append("whole_brain_epi")
 
-    # Convert functional images to float representation
-    img2float = MapNode(fsl.ChangeDataType(output_datatype="float"),
-                        iterfield=["in_file"],
-                        name="img2float")
+    inputnode = Node(IdentityInterface(in_fields), "inputs")
 
-    # Correct for slice-time acquisition differences
-    # We handle the logic of slice timing and realignment order
-    # below in the connections
-    if do_slice_time_cor:
-        slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
-                            iterfield=["in_file"],
-                            name="slicetime")
-        if slice_order == "down":
-            slicetime.inputs.index_dir = True
-        elif slice_order != "up":
-            raise ValueError("slice_order must be 'up' or 'down'")
-        if interleaved:
-            slicetime.inputs.interleaved = True
+    # Remove equilibrium frames and convert to float
+    prepare = MapNode(Function(["in_file", "frames_to_toss"],
+                               ["out_file"],
+                               prep_timeseries,
+                               imports),
+                      "in_file",
+                      "prep_timeseries")
+    prepare.inputs.frames_to_toss = exp_info["frames_to_toss"]
 
-    # Realign each timeseries to the middle volume of that run
-    realign = create_realignment_workflow()
+    # Motion and slice time correct
+    realign = create_realignment_workflow(
+        temporal_interp=exp_info["temporal_interp"],
+        TR=exp_info["TR"],
+        slice_order=exp_info["slice_order"],
+        interleaved=exp_info["interleaved"])
 
     # Run a conservative skull strip and get a brain mask
     skullstrip = create_skullstrip_workflow()
 
-    # Automatically detect motion and intensity outliers
-    art = create_art_workflow()
-
     # Estimate a registration from funtional to anatomical space
-    func2anat = create_bbregister_workflow()
+    coregister = create_bbregister_workflow(
+        partial_brain=bool(exp_info["whole_brain_template"]))
 
     # Smooth intelligently in the volume
     susan = create_susan_smooth()
-    susan.inputs.inputnode.fwhm = smooth_fwhm
+    susan.inputs.inputnode.fwhm = exp_info["smooth_fwhm"]
 
-    # Scale the grand median of the timeserieses to 10000
-    scale_smooth = MapNode(Function(input_names=["in_file",
-                                                 "mask",
-                                                 "statistic",
-                                                 "target"],
-                                     output_names=["out_file"],
-                                     function=scale_timeseries),
-                       iterfield=["in_file", "mask"],
-                       name="scale_smooth")
-    scale_smooth.inputs.statistic = "median"
-    scale_smooth.inputs.target = 10000
+    # Scale and filter the timeseries
+    filter_smooth = create_filtering_workflow("filter_smooth",
+                                              exp_info["hpf_cutoff"],
+                                              exp_info["TR"],
+                                              "smoothed_timeseries")
 
-    scale_rough = MapNode(util.Function(input_names=["in_file",
-                                                      "mask",
-                                                      "statistic",
-                                                      "target"],
-                                        output_names=["out_file"],
-                                        function=scale_timeseries),
-                           iterfield=["in_file", "mask"],
-                           name="scale_rough")
-    scale_rough.inputs.statistic = "median"
-    scale_rough.inputs.target = 10000
+    filter_rough = create_filtering_workflow("filter_rough",
+                                              exp_info["hpf_cutoff"],
+                                              exp_info["TR"],
+                                              "unsmoothed_timeseries")
 
-    # High pass filter the two timeserieses
-    hpfilt_smooth = MapNode(fsl.TemporalFilter(
-                                highpass_sigma=highpass_sigma),
-                            iterfield=["in_file"],
-                            name="hpfilt_smooth")
+    # Automatically detect motion and intensity outliers
+    artifacts = MapNode(Function(["timeseries",
+                                  "mask_file",
+                                  "motion_file",
+                                  "intensity_thresh",
+                                  "motion_thresh"],
+                                 ["artifact_report"],
+                                 detect_artifacts,
+                                 imports),
+                        ["timeseries", "mask_file", "motion_file"],
+                        "artifacts")
+    artifacts.inputs.intensity_thresh = exp_info["intensity_threshold"]
+    artifacts.inputs.motion_thresh = exp_info["motion_threshold"]
 
-    hpfilt_rough = MapNode(fsl.TemporalFilter(
-                               highpass_sigma=highpass_sigma),
-                           iterfield=["in_file"],
-                           name="hpfilt_rough")
+    # Save the experiment info for this run
+    dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
+                                 dump_exp_info, imports),
+                                "timeseries",
+                                "dumpjson")
+    dumpjson.inputs.exp_info = exp_info
 
-    # Rename the output timeserieses
-    rename_smooth = MapNode(util.Rename(format_string="smoothed_timeseries",
-                                        keep_ext=True),
-                            iterfield=["in_file"],
-                            name="rename_smooth")
-
-    rename_rough = MapNode(util.Rename(format_string="unsmoothed_timeseries",
-                                       keep_ext=True),
-                           iterfield=["in_file"],
-                           name="rename_rough")
 
     preproc.connect([
-        (inputnode, trimmer,
-            [("timeseries", "in_file"),
-            (("timeseries", get_trimmed_length, frames_to_toss), "t_size")]),
-        (trimmer, img2float,
-            [("roi_file", "in_file")]),
-        (img2float, realign,
+        (inputnode, prepare,
+            [("timeseries", "in_file")]),
+        (prepare, realign,
             [("out_file", "inputs.timeseries")]),
-        (realign, art,
-            [("outputs.realign_parameters", "inputs.realignment_parameters")]),
-        (img2float, art,
-            [("out_file", "inputs.raw_timeseries")]),
-        (skullstrip, art,
-            [("outputs.timeseries", "inputs.realigned_timeseries"),
-             ("outputs.mask_file", "inputs.mask_file")]),
-        (skullstrip, func2anat,
-            [("outputs.mean_func", "inputs.source_file")]),
-        (inputnode, func2anat,
+        (realign, skullstrip,
+            [("outputs.timeseries", "inputs.timeseries")]),
+        (realign, artifacts,
+            [("outputs.motion_file", "motion_file")]),
+        (skullstrip, artifacts,
+            [("outputs.mask_file", "mask_file")]),
+        (skullstrip, coregister,
+            [("outputs.mean_file", "inputs.source_file")]),
+        (inputnode, coregister,
             [("subject_id", "inputs.subject_id")]),
         (skullstrip, susan,
             [("outputs.mask_file", "inputnode.mask_file"),
              ("outputs.timeseries", "inputnode.in_files")]),
-        (susan, scale_smooth,
-            [("outputnode.smoothed_files", "in_file")]),
-        (skullstrip, scale_smooth,
-            [("outputs.mask_file", "mask")]),
-        (skullstrip, scale_rough,
-            [("outputs.timeseries", "in_file")]),
-        (skullstrip, scale_rough,
-            [("outputs.mask_file", "mask")]),
-        (scale_smooth, hpfilt_smooth,
-            [("out_file", "in_file")]),
-        (scale_rough, hpfilt_rough,
-            [("out_file", "in_file")]),
-        (hpfilt_smooth, rename_smooth,
-            [("out_file", "in_file")]),
-        (hpfilt_rough, rename_rough,
-            [("out_file", "in_file")]),
+        (susan, filter_smooth,
+            [("outputnode.smoothed_files", "inputs.timeseries")]),
+        (skullstrip, filter_smooth,
+            [("outputs.mask_file", "inputs.mask_file")]),
+        (skullstrip, filter_rough,
+            [("outputs.timeseries", "inputs.timeseries")]),
+        (skullstrip, filter_rough,
+            [("outputs.mask_file", "inputs.mask_file")]),
+        (filter_rough, artifacts,
+            [("outputs.timeseries", "timeseries")]),
+        (inputnode, dumpjson,
+            [("timeseries", "timeseries")]),
         ])
 
-    # Possibly hook-up slice time correction
-    if do_slice_time_cor:
+    if bool(exp_info["whole_brain_template"]):
         preproc.connect([
-            (realign,   slicetime,
-                [("outputs.timeseries", "in_file")]),
-            (slicetime, skullstrip,
-                [("slice_time_corrected_file", "inputs.timeseries")]),
-            ])
-    else:
-        preproc.connect([
-            (realign,     skullstrip,
-                [("outputs.timeseries", "inputs.timeseries")]),
-            ])
-
-    report = MapNode(util.Function(input_names=["subject_id",
-                                                "input_timeseries",
-                                                "realign_report",
-                                                "mean_func_slices",
-                                                "intensity_plot",
-                                                "outlier_volumes",
-                                                "coreg_report"],
-                                   output_names=["out_files"],
-                                   function=write_preproc_report),
-                     iterfield=["input_timeseries",
-                                "realign_report",
-                                "mean_func_slices",
-                                "intensity_plot",
-                                "outlier_volumes",
-                                "coreg_report"],
-                     name="report")
-
-    preproc.connect([
-        (inputnode, report,
-            [("subject_id", "subject_id"),
-             ("timeseries", "input_timeseries")]),
-        (realign, report,
-            [("outputs.realign_report", "realign_report")]),
-        (skullstrip, report,
-            [("outputs.report_png", "mean_func_slices")]),
-        (art, report,
-            [("outputs.intensity_plot", "intensity_plot"),
-             ("outputs.outlier_volumes", "outlier_volumes")]),
-        (func2anat, report,
-            [("outputs.report", "coreg_report")]),
-        ])
+            (inputnode, coregister,
+                [("whole_brain_epi", "whole_brain_epi")])
+                        ])
 
     # Define the outputs of the top-level workflow
     output_fields = ["smoothed_timeseries",
@@ -218,661 +165,601 @@ def create_preprocessing_workflow(name="preproc",
                      "example_func",
                      "mean_func",
                      "functional_mask",
-                     "realign_parameters",
-                     "mean_func_slices",
-                     "intensity_plot",
-                     "outlier_volumes",
                      "realign_report",
+                     "mask_report",
+                     "artifact_report",
                      "flirt_affine",
                      "tkreg_affine",
                      "coreg_report",
-                     "report_files"]
+                     "json_file"]
 
-    outputnode = Node(util.IdentityInterface(fields=output_fields),
-                      name="outputnode")
+    outputnode = Node(IdentityInterface(output_fields), "outputs")
 
     preproc.connect([
         (realign, outputnode,
-            [("outputs.realign_report", "realign_report"),
-             ("outputs.realign_parameters", "realign_parameters"),
-             ("outputs.example_func", "example_func")]),
+            [("outputs.example_func", "example_func"),
+             ("outputs.report", "realign_report")]),
         (skullstrip, outputnode,
-            [("outputs.mean_func", "mean_func"),
+            [("outputs.mean_file", "mean_func"),
              ("outputs.mask_file", "functional_mask"),
-             ("outputs.report_png", "mean_func_slices")]),
-        (art, outputnode,
-            [("outputs.intensity_plot", "intensity_plot"),
-             ("outputs.outlier_volumes", "outlier_volumes")]),
-        (func2anat, outputnode,
+             ("outputs.report", "mask_report")]),
+        (artifacts, outputnode,
+            [("artifact_report", "artifact_report")]),
+        (coregister, outputnode,
             [("outputs.tkreg_mat", "tkreg_affine"),
              ("outputs.flirt_mat", "flirt_affine"),
              ("outputs.report", "coreg_report")]),
-        (rename_smooth, outputnode,
-            [("out_file", "smoothed_timeseries")]),
-        (rename_rough, outputnode,
-            [("out_file", "unsmoothed_timeseries")]),
-        (report, outputnode,
-            [("out_files", "report_files")]),
+        (filter_smooth, outputnode,
+            [("outputs.timeseries", "smoothed_timeseries")]),
+        (filter_rough, outputnode,
+            [("outputs.timeseries", "unsmoothed_timeseries")]),
+        (dumpjson, outputnode,
+            [("json_file", "json_file")]),
         ])
 
     return preproc, inputnode, outputnode
 
 
-def create_realignment_workflow(name="realignment"):
-
-    # Define the workflow inputs
-    inputnode = Node(util.IdentityInterface(fields=["timeseries"]),
-                     name="inputs")
+def create_realignment_workflow(name="realignment", temporal_interp=True,
+                                TR=2, slice_order="up", interleaved=True):
+    """Motion and slice-time correct the timeseries and summarize."""
+    inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
     # Get the middle volume of each run for motion correction
-    extractref = MapNode(fsl.ExtractROI(t_size=1),
-                         iterfield=["in_file", "t_min"],
-                         name="extractref")
-
-    # Slice the example func for reporting
-    exampleslice = MapNode(fsl.Slicer(image_width=800,
-                                      all_axial=True,
-                                      show_orientation=False,
-                                      label_slices=False),
-                           iterfield=["in_file"],
-                           name="exampleslice")
+    extractref = MapNode(Function(["in_file"],
+                                  ["out_file"],
+                                  extract_mc_target,
+                                  imports),
+                         "in_file",
+                         "extractref")
 
     # Motion correct to middle volume of each run
-    mcflirt = MapNode(fsl.MCFLIRT(save_plots=True,
-                                  save_rms=True,
+    mcflirt = MapNode(fsl.MCFLIRT(cost="normcorr",
+                                  interpolation="spline",
                                   save_mats=True,
-                                  args="-spline_final"),
-                       name="mcflirt",
-                       iterfield=["in_file", "ref_file"])
+                                  save_rms=True,
+                                  save_plots=True),
+                       ["in_file", "ref_file"],
+                       "mcflirt")
+
+    # Optionally emoporally interpolate to correct for slice time differences
+    if temporal_interp:
+        slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
+                            "in_file",
+                            "slicetime")
+
+        if slice_order == "down":
+            slicetime.inputs.index_dir = True
+        elif slice_order != "up":
+            raise ValueError("slice_order must be 'up' or 'down'")
+
+        if interleaved:
+            slicetime.inputs.interleaved = True
 
     # Generate a report on the motion correction
-    report_inputs = ["realign_params", "rms_files"]
-    report_outputs = ["motion_file", "plot_file"]
-    mcreport = MapNode(util.Function(input_names=report_inputs,
-                                     output_names=report_outputs,
-                                     function=write_realign_report),
-                       iterfield=report_inputs,
-                       name="mcreport")
-
-    # Rename some things
-    exfuncname = MapNode(util.Rename(format_string="example_func",
-                                     keep_ext=True),
-                         iterfield=["in_file"],
-                         name="exfuncname")
-
-    exslicename = MapNode(util.Rename(format_string="example_func",
-                                      keep_ext=True),
-                          iterfield=["in_file"],
-                          name="exslicename")
-
-    parname = MapNode(util.Rename(format_string="realignment_parameters.par"),
-                      iterfield=["in_file"],
-                      name="parname")
-
-    # Send out all the report data as one list
-    mergereport = Node(util.Merge(numinputs=3, axis="hstack"),
-                       name="mergereport")
+    report_inputs = ["target_file", "realign_params", "displace_params"]
+    report_outputs = ["realign_report", "motion_file"]
+    mcreport = MapNode(Function(report_inputs,
+                                report_outputs,
+                                realign_report,
+                                imports),
+                       report_inputs,
+                       "mcreport")
 
     # Define the outputs
-    outputnode = Node(util.IdentityInterface(fields=["timeseries",
-                                                     "example_func",
-                                                     "realign_parameters",
-                                                     "realign_report"]),
-                      name="outputs")
+    outputnode = Node(IdentityInterface(["timeseries",
+                                         "example_func",
+                                         "report",
+                                         "motion_file"]),
+
+                      "outputs")
 
     # Define and connect the sub workflow
-    realignment = Workflow(name=name)
+    realignment = Workflow(name)
 
     realignment.connect([
         (inputnode, extractref,
-            [("timeseries", "in_file"),
-             (("timeseries", get_middle_volume), "t_min")]),
-        (extractref, exampleslice,
-            [("roi_file", "in_file")]),
+            [("timeseries", "in_file")]),
         (inputnode, mcflirt,
             [("timeseries", "in_file")]),
         (extractref, mcflirt,
-            [("roi_file", "ref_file")]),
+            [("out_file", "ref_file")]),
+        (extractref, mcreport,
+            [("out_file", "target_file")]),
         (mcflirt, mcreport,
             [("par_file", "realign_params"),
-             ("rms_files", "rms_files")]),
-        (exampleslice, exslicename,
-            [("out_file", "in_file")]),
-        (mcreport, mergereport,
-            [("motion_file", "in1"),
-             ("plot_file", "in2")]),
-        (exslicename, mergereport,
-            [("out_file", "in3")]),
-        (mcflirt, parname,
-            [("par_file", "in_file")]),
-        (parname, outputnode,
-            [("out_file", "realign_parameters")]),
-        (extractref, exfuncname,
-            [("roi_file", "in_file")]),
-        (mcflirt, outputnode,
-            [("out_file", "timeseries")]),
-        (exfuncname, outputnode,
+             ("rms_files", "displace_params")]),
+        (extractref, outputnode,
             [("out_file", "example_func")]),
-        (mergereport, outputnode,
-            [("out", "realign_report")]),
+        (mcreport, outputnode,
+            [("realign_report", "report"),
+             ("motion_file", "motion_file")]),
         ])
+
+    if temporal_interp:
+        realignment.connect([
+            (mcflirt, slicetime,
+                [("out_file", "in_file")]),
+            (slicetime, outputnode,
+                [("slice_time_corrected_file", "timeseries")])
+            ])
+    else:
+        realignment.connect([
+            (mcflirt, outputnode,
+                [("out_file", "timeseries")])
+            ])
 
     return realignment
 
 
 def create_skullstrip_workflow(name="skullstrip"):
+    """Remove non-brain voxels from the timeseries."""
 
     # Define the workflow inputs
-    inputnode = Node(util.IdentityInterface(fields=["timeseries"]),
-                     name="inputs")
+    inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
     # Mean the timeseries across the fourth dimension
-    meanfunc1 = MapNode(fsl.MeanImage(),
-                        iterfield=["in_file"],
-                        name="meanfunc1")
+    origmean = MapNode(fsl.MeanImage(), "in_file", name="origmean")
 
     # Skullstrip the mean functional image
-    stripmean = MapNode(fsl.BET(mask=True,
-                                no_output=True,
-                                frac=0.3),
-                        iterfield=["in_file"],
-                        name="stripmean")
+    findmask = MapNode(fsl.BET(mask=True,
+                               no_output=True,
+                               frac=0.3),
+                        "in_file",
+                        "findmask")
 
     # Use the mask from skullstripping to strip each timeseries
-    maskfunc1 = MapNode(fsl.ApplyMask(),
-                        iterfield=["in_file", "mask_file"],
-                        name="maskfunc1")
+    maskfunc = MapNode(fsl.ApplyMask(),
+                       ["in_file", "mask_file"],
+                       name="maskfunc")
 
-    # Determine the 2nd and 98th centile intensities of each run
-    getthresh = MapNode(fsl.ImageStats(op_string="-p 2 -p 98"),
-                        iterfield=["in_file"],
-                        name="getthreshold")
+    # Refine the brain mask
+    refinemask = MapNode(Function(["timeseries", "mask_file"],
+                                  ["timeseries", "mask_file", "mean_file"],
+                                  refine_mask,
+                                  imports),
+                         ["timeseries", "mask_file"],
+                         "refinemask")
 
-    # Threshold functional data at 10% of the 98th percentile
-    threshold = MapNode(fsl.ImageMaths(out_data_type="char",
-                                       suffix="_thresh"),
-                        iterfield=["in_file"],
-                        name="threshold")
-
-    # Dilate the mask
-    dilatemask = MapNode(fsl.DilateImage(operation="max"),
-                         iterfield=["in_file"],
-                         name="dilatemask")
-
-    # Mask the runs again with this new mask
-    maskfunc2 = MapNode(fsl.ApplyMask(),
-                        iterfield=["in_file", "mask_file"],
-                        name="maskfunc2")
-
-    # Get a new mean image from each functional run
-    meanfunc2 = MapNode(fsl.MeanImage(),
-                        iterfield=["in_file"],
-                        name="meanfunc2")
-
-    # Slice the mean func for reporting
-    meanslice = MapNode(fsl.Slicer(image_width=800,
-                                   all_axial=True,
-                                   show_orientation=False,
-                                   label_slices=False),
-                        iterfield=["in_file", "image_edges"],
-                        name="meanslice")
-
-    # Rename the outputs
-    meanname = MapNode(util.Rename(format_string="mean_func",
-                                   keep_ext=True),
-                       iterfield=["in_file"],
-                       name="meanname")
-
-    maskname = MapNode(util.Rename(format_string="functional_mask",
-                                   keep_ext=True),
-                       iterfield=["in_file"],
-                       name="maskname")
-
-    pngname = MapNode(util.Rename(format_string="mean_func.png"),
-                      iterfield=["in_file"],
-                      name="pngname")
+    # Generate images summarizing the skullstrip and resulting data
+    reportmask = MapNode(Function(["mask_file", "orig_file", "mean_file"],
+                                  ["mask_report"],
+                                  write_mask_report,
+                                  imports),
+                         ["mask_file", "orig_file", "mean_file"],
+                         "reportmask")
 
     # Define the workflow outputs
-    outputnode = Node(util.IdentityInterface(fields=["timeseries",
-                                                     "mean_func",
-                                                     "mask_file",
-                                                     "report_png"]),
-                      name="outputs")
+    outputnode = Node(IdentityInterface(["timeseries",
+                                         "mean_file",
+                                         "mask_file",
+                                         "report"]),
+                      "outputs")
 
     # Define and connect the workflow
-    skullstrip = Workflow(name=name)
+    skullstrip = Workflow(name)
 
     skullstrip.connect([
-        (inputnode,  meanfunc1,     [("timeseries", "in_file")]),
-        (meanfunc1,  stripmean,     [("out_file", "in_file")]),
-        (inputnode,  maskfunc1,     [("timeseries", "in_file")]),
-        (stripmean,  maskfunc1,     [("mask_file", "mask_file")]),
-        (maskfunc1,  getthresh,     [("out_file", "in_file")]),
-        (getthresh,  threshold,
-            [(("out_stat", get_thresh_op), "op_string")]),
-        (maskfunc1,  threshold,     [("out_file", "in_file")]),
-        (threshold,  dilatemask,    [("out_file", "in_file")]),
-        (inputnode,  maskfunc2,     [("timeseries", "in_file")]),
-        (dilatemask, maskfunc2,     [("out_file", "mask_file")]),
-        (maskfunc2,  meanfunc2,     [("out_file", "in_file")]),
-        (meanfunc2,  meanslice,     [("out_file", "in_file")]),
-        (dilatemask, meanslice,     [("out_file", "image_edges")]),
-        (meanslice,  pngname,       [("out_file", "in_file")]),
-        (meanfunc2,  meanname,      [("out_file", "in_file")]),
-        (dilatemask, maskname,      [("out_file", "in_file")]),
-        (maskfunc2,  outputnode,    [("out_file", "timeseries")]),
-        (pngname,    outputnode,    [("out_file", "report_png")]),
-        (maskname,   outputnode,    [("out_file", "mask_file")]),
-        (meanname,   outputnode,    [("out_file", "mean_func")]),
+        (inputnode, origmean,
+            [("timeseries", "in_file")]),
+        (origmean, findmask,
+            [("out_file", "in_file")]),
+        (inputnode, maskfunc,
+            [("timeseries", "in_file")]),
+        (findmask, maskfunc,
+            [("mask_file", "mask_file")]),
+        (maskfunc, refinemask,
+            [("out_file", "timeseries")]),
+        (findmask, refinemask,
+            [("mask_file", "mask_file")]),
+        (origmean, reportmask,
+            [("out_file", "orig_file")]),
+        (refinemask, reportmask,
+            [("mask_file", "mask_file"),
+             ("mean_file", "mean_file")]),
+        (refinemask, outputnode,
+            [("timeseries", "timeseries"),
+             ("mask_file", "mask_file"),
+             ("mean_file", "mean_file")]),
+        (reportmask, outputnode,
+            [("mask_report", "report")]),
         ])
 
     return skullstrip
 
 
-def create_art_workflow(name="art"):
-
-    # Define the workflow inputs
-    inputnode = Node(util.IdentityInterface(fields=["raw_timeseries",
-                                                    "realigned_timeseries",
-                                                    "mask_file",
-                                                    "realignment_parameters"]),
-                     name="inputs")
-
-    # Use RapidART to detect motion/intensity outliers
-    art = MapNode(ra.ArtifactDetect(use_differences=[True, False],
-                                    use_norm=True,
-                                    zintensity_threshold=3,
-                                    norm_threshold=1,
-                                    parameter_source="FSL",
-                                    mask_type="file"),
-                  iterfield=["realignment_parameters",
-                             "realigned_files",
-                             "mask_file"],
-                  name="art")
-
-    # Plot a timeseries of the global mean intensity
-    art_plot_inputs = ["intensity_file", "outlier_file"]
-    plotmean = MapNode(util.Function(input_names=art_plot_inputs,
-                                     output_names="intensity_plot",
-                                     function=write_art_plot),
-                       iterfield=art_plot_inputs,
-                       name="plotmean")
-
-    outliername = MapNode(util.Rename(format_string="outlier_volumes.txt"),
-                          iterfield=["in_file"],
-                          name="outliername")
-
-    # Define the workflow outputs
-    out_fields = ["outlier_volumes", "intensity_plot"]
-
-    outputnode = Node(util.IdentityInterface(fields=out_fields),
-                      name="outputs")
-
-    # Define and connect the workflow
-    artifact = Workflow(name=name)
-    artifact.connect([
-        (inputnode, art,
-            [("realignment_parameters", "realignment_parameters"),
-             ("realigned_timeseries", "realigned_files"),
-             ("mask_file", "mask_file")]),
-        (art, plotmean,
-            [("intensity_files", "intensity_file"),
-             ("outlier_files", "outlier_file")]),
-        (art, outliername,
-            [("outlier_files", "in_file")]),
-        (outliername, outputnode,
-            [("out_file", "outlier_volumes")]),
-        (plotmean, outputnode,
-            [("intensity_plot", "intensity_plot")]),
-        ])
-
-    return artifact
-
-
-def create_bbregister_workflow(name="bbregister", contrast_type="t2",
-                               partial_fov=False):
-
-    # Define the workflow inputs
+def create_bbregister_workflow(name="bbregister",
+                               contrast_type="t2",
+                               partial_brain=False):
+    """Find a linear transformation to align the EPI file with the anatomy."""
     in_fields = ["subject_id", "source_file"]
-    if partial_fov:
-        in_fields.append("full_fov_epi")
-    inputnode = Node(IdentityInterface(fields=in_fields),
-                     name="inputs")
-
-    mean_fullfov = Node(Function(input_names=["in_file"],
-                                 output_names=["out_file"],
-                                 function=maybe_mean),
-                        name="mean_fullfov")
+    if partial_brain:
+        in_fields.append("whole_brain_epi")
+    inputnode = Node(IdentityInterface(in_fields),
+                     "inputs")
 
     # Estimate the registration to Freesurfer conformed space
     func2anat = MapNode(fs.BBRegister(contrast_type=contrast_type,
                                       init="fsl",
                                       epi_mask=True,
                                       registered_file=True,
-                                      out_fsl_file=True),
-                        iterfield=["source_file"],
-                        name="func2anat")
+                                      out_reg_file="func2anat_tkreg.dat",
+                                      out_fsl_file="func2anat_flirt.mat"),
+                        "source_file",
+                        "func2anat")
 
     # Make an image for quality control on the registration
-    regpng = MapNode(util.Function(input_names=["subject_id", "in_file"],
-                                   output_names=["out_file"],
-                                   function=write_coreg_plot),
-                           iterfield=["in_file"],
-                           name="regpng")
-
-    # Rename some files
-    costname = MapNode(Rename(format_string="func2anat_cost.dat"),
-                       iterfield=["in_file"],
-                       name="costname")
-
-    tkregname = MapNode(Rename(format_string="func2anat_tkreg.dat"),
-                        iterfield=["in_file"],
-                        name="tkregname")
-
-    flirtname = MapNode(util.Rename(format_string="func2anat_flirt.mat"),
-                        iterfield=["in_file"],
-                        name="flirtname")
-
-    # Merge the slicer png and cost file into a report list
-    report = Node(util.Merge(2, axis="hstack"),
-                  name="report")
+    report = MapNode(Function(["subject_id", "in_file"],
+                              ["out_file"],
+                              write_coreg_plot,
+                              imports),
+                           "in_file",
+                           "coreg_report")
 
     # Define the workflow outputs
-    outputnode = Node(util.IdentityInterface(fields=["tkreg_mat",
-                                                     "flirt_mat",
-                                                     "report"]),
-                      name="outputs")
+    outputnode = Node(IdentityInterface(["tkreg_mat", "flirt_mat", "report"]),
+                      "outputs")
 
     bbregister = Workflow(name=name)
 
     # Connect the registration
     bbregister.connect([
-        (inputnode,    func2anat,    [("subject_id", "subject_id"),
-                                      ("source_file", "source_file")]),
-        (inputnode,    regpng,       [("subject_id", "subject_id")]),
-        (func2anat,    regpng,       [("registered_file", "in_file")]),
-        (func2anat,    tkregname,    [("out_reg_file", "in_file")]),
-        (func2anat,    flirtname,    [("out_fsl_file", "in_file")]),
-        (func2anat,    costname,     [("min_cost_file", "in_file")]),
-        (costname,     report,       [("out_file", "in1")]),
-        (regpng,       report,       [("out_file", "in2")]),
-        (tkregname,    outputnode,   [("out_file", "tkreg_mat")]),
-        (flirtname,    outputnode,   [("out_file", "flirt_mat")]),
-        (report,       outputnode,   [("out", "report")]),
+        (inputnode, func2anat,
+            [("subject_id", "subject_id"),
+             ("source_file", "source_file")]),
+        (inputnode, report,
+            [("subject_id", "subject_id")]),
+        (func2anat, report,
+            [("registered_file", "in_file")]),
+        (func2anat, outputnode,
+            [("out_reg_file", "tkreg_mat")]),
+        (func2anat, outputnode,
+            [("out_fsl_file", "flirt_mat")]),
+        (report, outputnode,
+            [("out_file", "report")]),
         ])
 
     # Possibly connect the full_fov image
-    if partial_fov:
+    if partial_brain:
         bbregister.connect([
-            (inputnode, mean_fullfov,
-                [("full_fov_epi", "in_file")]),
-            (mean_fullfov, func2anat,
-                [("out_file", "intermediate_file")]),
+            (inputnode, func2anat,
+                [("whole_brain_epi", "intermediate_file")]),
                 ])
 
     return bbregister
+
+
+def create_filtering_workflow(name="filter",
+                              hpf_cutoff=128,
+                              TR=2,
+                              output_name="timeseries"):
+    """Scale and high-pass filter the timeseries."""
+    inputnode = Node(IdentityInterface(["timeseries", "mask_file"]),
+                     "inputs")
+
+    # Grand-median scale within the brain mask
+    scale = MapNode(Function(["in_file",
+                              "mask_file"],
+                             ["out_file"],
+                             scale_timeseries,
+                             imports),
+                    ["in_file", "mask_file"],
+                    "scale")
+
+    # Gaussian running-line filter
+    hpf_sigma = (hpf_cutoff / 2.0) / TR
+    filter = MapNode(fsl.TemporalFilter(highpass_sigma=hpf_sigma,
+                                        out_file=output_name + ".nii.gz"),
+                     "in_file",
+                     "filter")
+
+    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
+
+    filtering = Workflow(name)
+    filtering.connect([
+        (inputnode, scale,
+            [("timeseries", "in_file"),
+             ("mask_file", "mask_file")]),
+        (scale, filter,
+            [("out_file", "in_file")]),
+        (filter, outputnode,
+            [("out_file", "timeseries")]),
+        ])
+
+    return filtering
 
 
 # ------------------------
 # Main interface functions
 # ------------------------
 
-def get_trimmed_length(in_files, frames_to_toss):
-    from nibabel import load
-    lengths = []
-    if not isinstance(in_files, list):
-        in_files = [in_files]
-    for f in in_files:
-        lengths.append(load(f).shape[-1] - frames_to_toss)
-    return lengths
 
-
-def max_motion_func(rms_files):
-    """Determine the maximum absolute and relative motion values."""
-    from os import getcwd
-    from os.path import join
-    from numpy import loadtxt, max
-    motion = map(loadtxt, rms_files)
-    maxima = map(max, motion)
-    out_file = join(getcwd(), "max_motion.txt")
-    with open(out_file, "w") as f:
-        f.write("#Absolute:\n%.4f\n#Relative\n%.4f" % tuple(maxima))
-    return out_file
-
-
-def maybe_mean(in_file):
-    """Mean over time if image is 4D otherwise pass it right back out."""
-    from os.path import getcwd
-    from nibabel import load, Nifti1Image
-    from nipype.utils.filemanip import fname_presuffix
-
-    # Load in the file and get the shape
-    img = load(in_file)
-    img_shape = img.get_shape()
-
-    # If it's 3D just pass it right back out
-    if len(img_shape) <= 3 or img_shape[3] == 1:
-        return in_file
-
-    # Otherwise, mean over time dimension and write a new file
+def prep_timeseries(in_file, frames_to_toss):
+    """Trim equilibrium TRs and change datatype to float."""
+    img = nib.load(in_file)
     data = img.get_data()
-    mean_data = data.mean(axis=3)
-    mean_img = Nifti1Image(mean_data, img.get_affine(), img.get_header())
+    aff = img.get_affine()
+    hdr = img.get_header()
 
-    # Write the mean image to disk and return the filename
-    out_file = fname_presuffix(in_file, suffix="_mean", newpath=getcwd())
-    mean_img.to_filename(out_file)
+    data = data[..., frames_to_toss:]
+    hdr.set_data_dtype(np.float32)
+
+    new_img = nib.Nifti1Image(data, aff, hdr)
+    out_file = os.path.abspath("timeseries.nii.gz")
+    new_img.to_filename(out_file)
     return out_file
 
 
-def write_realign_report(realign_params, rms_files):
-    from os.path import abspath
-    import numpy as np
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    sns.set()
+def extract_mc_target(in_file):
+    """Extract the middle frame of a timeseries."""
+    img = nib.load(in_file)
+    data = img.get_data()
 
-    # Set some visual defaults on the fly
-    mpl.rcParams.update({"font.size": 8, "legend.labelspacing": .2})
+    middle_vol = data.shape[-1] // 2
+    targ = np.empty(data.shape[:-1])
+    targ[:] = data[..., middle_vol]
 
-    # Open up the RMS files and get the max motion
-    displace = map(np.loadtxt, rms_files)
-    motion = map(max, displace)
-    motion.append(displace[1].sum())
-    displace[1] = np.concatenate(([0], displace[1]))
-    motion_file = abspath("max_motion.txt")
-    with open(motion_file, "w") as f:
-        f.write(
-            "#Absolute:\n%.4f\n#Relative\n%.4f\nTotal\n%.4f" % tuple(motion))
-
-    # Write the motion plot
-    fig = plt.figure(figsize=(8, 9))
-    ax = fig.add_subplot(311)
-    ax.plot(np.transpose(displace))
-    ax.set_xlim((0, len(displace[0]) - 1))
-    ax.legend(['abs', 'rel'], ncol=2)
-    ax.set_title('Displacement (mm)')
-
-    # Open up the realignment parameters
-    params = np.loadtxt(realign_params)
-    xyz = ['x', 'y', 'z']
-
-    # Write the rotation plot
-    ax = fig.add_subplot(312)
-    ax.plot(params[:, :3])
-    ax.plot(ax.get_xlim(), (0, 0), "k--")
-    ax.set_xlim((0, params.shape[0] - 1))
-    ax.legend(xyz, ncol=3)
-    ax.set_title('Rotations (rad)')
-
-    # Write the translation plot
-    ax = fig.add_subplot(313)
-    ax.plot(params[:, 3:])
-    ax.set_xlim((0, params.shape[0] - 1))
-    ax.plot(ax.get_xlim(), (0, 0), "k--")
-    ax.legend(xyz, ncol=3)
-    ax.set_title('Translations (mm)')
-
-    plot_file = abspath("realignment_plots.png")
-    plt.savefig(plot_file)
-
-    plt.close()
-
-    return motion_file, plot_file
+    targ_img = nib.Nifti1Image(targ, img.get_affine(), img.get_header())
+    out_file = os.path.abspath("example_func.nii.gz")
+    targ_img.to_filename(out_file)
+    return out_file
 
 
-def write_art_plot(intensity_file, outlier_file):
-    from os.path import abspath
-    import numpy as np
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    sns.set()
+def realign_report(target_file, realign_params, displace_params):
+    """Create files summarizing the motion correction."""
+    # Create a DataFrame with the 6 motion parameters
+    rot = ["rot_" + dim for dim in ["x", "y", "z"]]
+    trans = ["trans_" + dim for dim in ["x", "y", "z"]]
+    df = pd.DataFrame(np.loadtxt(realign_params),
+                      columns=rot + trans)
 
-    # Set some visual defaults on the fly
-    mpl.rcParams.update({'font.size': 8, 'legend.labelspacing': .2})
+    abs, rel = displace_params
+    df["displace_abs"] = np.loadtxt(abs)
+    df["displace_rel"] = pd.Series(np.loadtxt(rel), index=df.index[1:])
+    df.loc[0, "displace_rel"] = 0
+    motion_file = os.path.abspath("realignment_params.csv")
+    df.to_csv(motion_file, index=False)
 
-    # Build the figure
-    fig = plt.figure(figsize=(9, 2.5))
-    ax = fig.add_subplot(111)
+    # Write the motion plots
+    seaborn.set()
+    seaborn.set_color_palette("husl", 3)
+    f, (ax_rot, ax_trans) = plt.subplots(2, 1,
+                                         figsize=(8, 3.75),
+                                         sharex=True)
+    ax_rot.plot(df[rot] * 100)
+    ax_rot.axhline(0, c="#444444", ls="--", zorder=1)
+    ax_trans.plot(df[trans])
+    ax_trans.axhline(0, c="#444444", ls="--", zorder=1)
+    ax_rot.set_xlim(0, len(df) - 1)
 
-    # Plot the global timecourse
-    global_intensity = np.loadtxt(intensity_file)
-    ax.plot(global_intensity)
-    ax.set_xlim((0, len(global_intensity)))
+    ax_rot.set_ylabel(r"Rotations (rad $\times$ 100)")
+    ax_trans.set_ylabel("Translations (mm)")
+    plt.tight_layout()
 
-    # Plot the mean intensity value
-    mean = global_intensity.mean()
-    ax.plot(ax.get_xlim(), (mean, mean), "k--")
+    plot_file = os.path.abspath("realignment_plots.png")
+    f.savefig(plot_file, dpi=100, bbox_inches="tight")
+    plt.close(f)
 
-    # Find the high and low intensity outlier thresh and plot
-    # Could add thresh as parameter -- assume 3 for now
-    std = global_intensity.std()
-    high = mean + (3 * std)
-    low = mean - (3 * std)
-    ax.plot(ax.get_xlim(), [high, high], "k--")
-    ax.plot(ax.get_xlim(), [low, low], "k--")
+    # Write the example func plot
+    data = nib.load(target_file).get_data()
+    n_slices = data.shape[-1]
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2
+    figsize = (10, 1.375 * n_row)
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
 
-    ax.set_ylim((min(global_intensity.min(), (low - 1)),
-                 max(global_intensity.max(), (high + 1))))
+    vmin, vmax = 0, moss.percentiles(data, 99)
+    for i, ax in enumerate(axes.ravel(), start):
+        ax.imshow(data[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    f.subplots_adjust(hspace=1e-5, wspace=1e-5)
+    target_file = os.path.abspath("example_func.png")
+    f.savefig(target_file, dpi=100, bbox_inches="tight",
+              facecolor="k", edgecolor="k")
+    plt.close(f)
 
-    # Plot the outliers
-    try:
-        outliers = np.loadtxt(outlier_file, ndmin=1)
-        for out in outliers:
-            ax.axvline(out, color=sns.color_palette()[2])
-    except IOError:
-        pass
+    return [motion_file, plot_file, target_file], motion_file
 
-    # Title and write the plot
-    ax.set_title("Global mean timecourse and ART outliers")
-    intensity_plot = abspath("intensity_plot.png")
-    plt.savefig(intensity_plot)
-    plt.close()
-    return intensity_plot
+
+def refine_mask(timeseries, mask_file):
+    """Improve brain mask by thresholding and dilating masked timeseries."""
+    ts_img = nib.load(timeseries)
+    ts_data = ts_img.get_data()
+
+    mask_img = nib.load(mask_file)
+
+    # Find a robust 10% threshold and apply it to the timeseries
+    rmin, rmax = moss.percentiles(ts_data, [2, 98])
+    thresh = rmin + 0.1 * (rmax + rmin)
+    ts_data[ts_data < thresh] = 0
+    ts_min = ts_data.min(axis=-1)
+    mask = ts_min > 0
+
+    # Dilate the resulting mask by one voxel
+    dilator = sp.ndimage.generate_binary_structure(3, 3)
+    mask = sp.ndimage.binary_dilation(mask, dilator)
+
+    # Mask the timeseries and save it
+    ts_data[~mask] = 0
+    timeseries = os.path.abspath("timeseries_masked.nii.gz")
+    new_ts = nib.Nifti1Image(ts_data,
+                             ts_img.get_affine(),
+                             ts_img.get_header())
+    new_ts.to_filename(timeseries)
+
+    # Save the mask image
+    mask_file = os.path.abspath("functional_mask.nii.gz")
+    new_mask = nib.Nifti1Image(mask,
+                               mask_img.get_affine(),
+                               mask_img.get_header())
+    new_mask.to_filename(mask_file)
+
+    # Make a new mean functional image and save it
+    mean_file = os.path.abspath("mean_func.nii.gz")
+    new_mean = nib.Nifti1Image(ts_data.mean(axis=-1),
+                               ts_img.get_affine(),
+                               ts_img.get_header())
+    new_mean.to_filename(mean_file)
+
+    return timeseries, mask_file, mean_file
+
+
+def write_mask_report(mask_file, orig_file, mean_file):
+    """Write pngs with the mask and mean iamges."""
+    mean = nib.load(mean_file).get_data()
+    orig = nib.load(orig_file).get_data()
+    mask = nib.load(mask_file).get_data().astype(float)
+    mask[mask == 0] = np.nan
+
+    n_slices = mean.shape[-1]
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2
+    figsize = (10, 1.375 * n_row)
+
+    # Write the functional mask image
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
+    vmin, vmax = 0, moss.percentiles(orig, 98)
+
+    cmap = mpl.colors.ListedColormap(["MediumSpringGreen"])
+    for i, ax in enumerate(axes.ravel(), start):
+        ax.imshow(orig[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
+        ax.imshow(mask[..., i].T, alpha=.6, cmap=cmap)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    f.subplots_adjust(hspace=1e-5, wspace=1e-5)
+    mask_png = os.path.abspath("functional_mask.png")
+    f.savefig(mask_png, dpi=100, bbox_inches="tight",
+              facecolor="k", edgecolor="k")
+    plt.close(f)
+
+    # Write the mean func image
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
+    vmin, vmax = 0, moss.percentiles(mean, 98)
+
+    for i, ax in enumerate(axes.ravel(), start):
+        ax.imshow(mean[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
+        ax.imshow(mean[..., i].T, cmap="hot", alpha=.6,
+                  vmin=vmin, vmax=vmax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    f.subplots_adjust(hspace=1e-5, wspace=1e-5)
+    mean_png = os.path.abspath("mean_func.png")
+    f.savefig(mean_png, dpi=100, bbox_inches="tight",
+              facecolor="k", edgecolor="k")
+    plt.close(f)
+
+    return [mask_png, mean_png]
+
+
+def detect_artifacts(timeseries, mask_file, motion_file,
+                     intensity_thresh, motion_thresh):
+    """Find frames with exessive signal intensity or motion."""
+    seaborn.set()
+
+    # Load the timeseries and detect outliers
+    ts = nib.load(timeseries).get_data()
+    mask = nib.load(mask_file).get_data().astype(bool)
+    ts = ts[mask].mean(axis=0)
+    ts = (ts - ts.mean()) / ts.std()
+    art_intensity = np.abs(ts) > intensity_thresh
+
+    # Load the motion file and detect outliers
+    df = pd.read_csv(motion_file)
+    rel_motion = np.array(df["displace_rel"])
+    art_motion = rel_motion > motion_thresh
+
+    # Plot the timecourses with outliers
+    blue, green, red, _, _ = seaborn.color_palette("deep")
+    f, (ax_int, ax_mot) = plt.subplots(2, 1, sharex=True,
+                                       figsize=(8, 3.75))
+    ax_int.axhline(-intensity_thresh, c="gray", ls="--")
+    ax_int.axhline(intensity_thresh, c="gray", ls="--")
+    ax_int.plot(ts, c=blue)
+    for tr in np.flatnonzero(art_intensity):
+        ax_int.axvline(tr, color=red, lw=2.5, alpha=.8)
+    ax_int.set_xlim(0, len(df))
+
+    ax_mot.axhline(motion_thresh, c="gray", ls="--")
+    ax_mot.plot(rel_motion, c=green)
+    ymin, ymax = ax_mot.get_ylim()
+    for tr in np.flatnonzero(art_motion):
+        ax_mot.axvline(tr, color=red, lw=2.5, alpha=.8)
+
+    ax_int.set_ylabel("Normalized Intensity")
+    ax_mot.set_ylabel("Relative Motion (mm)")
+
+    plt.tight_layout()
+    plot_file = os.path.abspath("artifact_detection.png")
+    f.savefig(plot_file, dpi=100, bbox_inches="tight")
+
+    # Save the artifacts file as csv
+    artifacts = pd.DataFrame(dict(intensity=art_intensity,
+                                  motion=art_motion)).astype(int)
+    art_file = os.path.abspath("artifacts.csv")
+    artifacts.to_csv(art_file, index=False)
+
+    return [plot_file, art_file]
 
 
 def write_coreg_plot(subject_id, in_file):
     """Plot the wm surface edges on the mean functional."""
-    import os
-    import os.path as op
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import nibabel as nib
-    from nipy.labs import viz
-    bold_img = nib.load(in_file)
-    bold_data = bold_img.get_data()
-    aff = bold_img.get_affine()
+    bold = nib.load(in_file).get_data()
 
+    # Load the white matter volume from recon-all
     subj_dir = os.environ["SUBJECTS_DIR"]
-    wm_file = op.join(subj_dir, subject_id, "mri/wm.mgz")
-    wm_data = nib.load(wm_file).get_data()
+    wm_file = os.path.join(subj_dir, subject_id, "mri/wm.mgz")
+    wm = nib.load(wm_file).get_data()
 
-    f = plt.figure(figsize=(12, 6))
-    cut_coords = np.linspace(0, 60, 8).reshape(2, 4)
-    ax_positions = [(0, 0, 1, .5), (0, .5, 1, .5)]
-    for cc, ap in zip(cut_coords, ax_positions):
-        slicer = viz.plot_anat(bold_data, aff, cut_coords=cc,
-                               draw_cross=False, annotate=False,
-                               slicer="z", axes=ap, figure=f)
+    # Find the limits of the data
+    # note that FS conformed space is not (x, y, z)
+    xdata = np.flatnonzero(bold.any(axis=1).any(axis=1))
+    xmin, xmax = xdata.min(), xdata.max()
+    ydata = np.flatnonzero(bold.any(axis=0).any(axis=0))
+    ymin, ymax = ydata.min(), ydata.max()
+    zdata = np.flatnonzero(bold.any(axis=0).any(axis=1))
+    zmin, zmax = zdata.min() + 10, zdata.max() - 25
+
+    # Figure out the plot parameters
+    n_slices = (zmax - zmin) // 3
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // 2 + zmin
+    figsize = (10, 1.375 * n_row)
+    slices = (start + np.arange(zmax - zmin))[::3][:n_slices]
+
+    # Draw the slices and save
+    vmin, vmax = 0, moss.percentiles(bold, 99)
+    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
+    cmap = mpl.colors.ListedColormap(["#C41E3A"])
+    for i, ax in enumerate(reversed(axes.ravel())):
+        i = slices[i]
+        ax.imshow(np.flipud(bold[xmin:xmax, i, ymin:ymax].T),
+                  cmap="gray", vmin=vmin, vmax=vmax)
         try:
-            slicer.contour_map(wm_data, aff, colors="gold")
+            ax.contour(np.flipud(wm[xmin:xmax, i, ymin:ymax].T),
+                       linewidths=.5, cmap=cmap)
         except ValueError:
             pass
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-    out_file = op.abspath("func2anat.png")
-    plt.savefig(out_file)
+    out_file = os.path.abspath("func2anat.png")
+    plt.savefig(out_file, dpi=100, bbox_inches="tight",
+                facecolor="k", edgecolor="k")
+    plt.close(f)
     return out_file
 
 
-def write_preproc_report(subject_id, input_timeseries, realign_report,
-                         mean_func_slices, intensity_plot, outlier_volumes,
-                         coreg_report):
-
-    import os.path as op
-    import time
-    from nibabel import load
-    from lyman.tools import write_workflow_report
-    from lyman.workflows.reporting import preproc_report_template
-
-    # Gather some attributes of the input timeseries
-    input_image = load(input_timeseries)
-    image_dimensions = "%dx%dx%d" % input_image.get_shape()[:3]
-    image_timepoints = input_image.get_shape()[-1]
-
-    # Read in motion statistics
-    motion_file = realign_report[0]
-    motion_info = [l.strip() for l in open(motion_file)]
-    max_abs_motion, max_rel_motion, total_motion = (motion_info[1],
-                                                    motion_info[3],
-                                                    motion_info[5])
-
-    # Fill in the report template dictionary
-    report_dict = dict(now=time.asctime(),
-                       subject_id=subject_id,
-                       timeseries_file=input_timeseries,
-                       orig_timeseries_path=op.realpath(input_timeseries),
-                       image_dimensions=image_dimensions,
-                       image_timepoints=image_timepoints,
-                       mean_func_slices=mean_func_slices,
-                       intensity_plot=intensity_plot,
-                       n_outliers=len(open(outlier_volumes).readlines()),
-                       max_abs_motion=max_abs_motion,
-                       max_rel_motion=max_rel_motion,
-                       total_motion=total_motion,
-                       realignment_plot=realign_report[1],
-                       example_func_slices=realign_report[2],
-                       func_to_anat_cost=open(
-                           coreg_report[0]).read().split()[0],
-                       func_to_anat_slices=coreg_report[1])
-
-    # Write the reports (this is sterotyped for workflows from here
-    out_files = write_workflow_report("preproc",
-                                      preproc_report_template,
-                                      report_dict)
-
-    # Return both report files as a list
-    return out_files
-
-
-def scale_timeseries(in_file, mask, statistic="median", target=10000):
-
-    import os.path as op
-    import numpy as np
-    import nibabel as nib
-    from nipype.utils.filemanip import split_filename
-
+def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
+    """Scale an entire series with a single number."""
     ts_img = nib.load(in_file)
     ts_data = ts_img.get_data()
-    mask = nib.load(mask).get_data().astype(bool)
+    mask = nib.load(mask_file).get_data().astype(bool)
 
-    if statistic == "median":
-        stat_value = np.median(ts_data[mask])
-    elif statistic == "mean":
-        stat_value = np.mean(ts_data[mask])
-    else:
-        raise ValueError("Statistic must be either 'mean' or 'median'")
+    # Flexibly get the statistic value.
+    # This has to be stringly-typed because nipype
+    # can't pass around functions
+    stat_value = getattr(np, statistic)(ts_data[mask])
 
     scale_value = float(target) / stat_value
     scaled_ts = ts_data * scale_value
@@ -880,43 +767,14 @@ def scale_timeseries(in_file, mask, statistic="median", target=10000):
                                  ts_img.get_affine(),
                                  ts_img.get_header())
 
-    pth, fname, ext = split_filename(in_file)
-    out_file = op.abspath(fname + "_scaled.nii.gz")
+    out_file = os.path.abspath("timeseries_scaled.nii.gz")
     scaled_img.to_filename(out_file)
 
     return out_file
 
-
-# ----------------
-# Helper functions
-# ----------------
-
-
-def get_middle_volume(func):
-    """Return the middle volume index."""
-    from nibabel import load
-    return [(load(f).get_shape()[3] / 2) - 1 for f in func]
-
-
-def get_thresh_op(thresh):
-    """Return an fslmaths op string to get 10% of the intensity"""
-    return "-thr %.10f -Tmin -bin" % (0.1 * thresh[0][1])
-
-
-def get_scale_value(medianvals):
-    """Get the scale value to set the grand mean of the timeseries ~10000."""
-    return [10000. / val for val in medianvals]
-
-
-def get_bright_thresh(medianvals):
-    """Get the brightness threshold for SUSAN."""
-    return [0.75 * val for val in medianvals]
-
-
-def get_usans(inlist):
-    """Return the usans at the right threshold."""
-    return [[tuple([val[0], 0.75 * val[1]])] for val in inlist]
-
-
-def divide_by_two(x):
-    return float(x) / 2
+def dump_exp_info(exp_info, timeseries):
+    """Dump the exp_info dict into a json file."""
+    json_file = op.abspath("experiment_info.json")
+    with open(json_file, "w") as fp:
+        json.dump(exp_info, fp, sort_keys=True, indent=2)
+        return json_file

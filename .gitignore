@@ -1,3 +1,4 @@
 *.pyc
 *.sw*
 build/
+doc/_build/
