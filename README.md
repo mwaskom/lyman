@@ -4,31 +4,38 @@ Python fMRI Analysis Ecosystem
 This repository contains a set of Python-based code for analyzing
 functional MRI data using FSL and Freesurfer tools and Nipype.
 
+Documentation
+-------------
+
+Online documentation can be found [here](http://www.stanford.edu/~mwaskom/software/lyman)
+
 Dependencies
 ------------
 
 ### External
 
-- Freesurfer
-
 - FSL
+
+- Freesurfer
 
 ### Python
 
 
-- Core scientific Python environment (EPD)
+- Core scientific Python environment (ipython, numpy, scipy, matplotlib)
+
+- [pandas](https://github.com/pydata/pandas)
+
+- [scikit-learn](https://github.com/scikit-learn/scikit-learn)
 
 - [nipype](https://github.com/nipy/nipype)
+
+- [nibabel](https://github.com/nipy/nibabel)
 
 - [nipy](https://github.com/nipy/nipy)
 
 - [nibabel](https://github.com/nipy/nibabel)
 
 - [statsmodels](https://github.com/statsmodels/statsmodels)
-
-- [rst2pdf](https://code.google.com/p/rst2pdf/)
-
-- Docutils >= 0.9 (rst2pdf does not work with 0.8)
 
 - My utility packages: [moss](https://github.com/mwaskom/moss) and [seaborn](https://github.com/mwaskom/seaborn)
 
@@ -40,11 +47,11 @@ Basic Workflow
 - All stages of processing assume that your anatomical data have been
   processed in Freesurfer (recon-all)
 
-- run_warp.py: perform anatomical normalization
+- `run_warp.py`: perform anatomical normalization
 
-- run_fmri.py: perform subject-level functional analyses
+- `run_fmri.py`: perform subject-level functional analyses
 
-- run_group.py: perform basic group level mixed effects analyses
+- `run_group.py`: perform basic group level mixed effects analyses
 
 License
 -------

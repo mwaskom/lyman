@@ -1,233 +1,321 @@
-from nipype.interfaces import fsl
-from nipype.interfaces import freesurfer as surf
-from nipype.interfaces.utility import IdentityInterface, Function
-from nipype.pipeline.engine import Workflow, Node
+"""Fixed effects model to combine across runs for a single subject."""
+import os
+import os.path as op
+import subprocess as sub
+import numpy as np
+import nibabel as nib
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import seaborn as sns
+import moss
 
-from .model import plot_zstats
+from nipype import fsl, Workflow, Node, IdentityInterface, Function
+
+imports = ["import os",
+           "import os.path as op",
+           "import subprocess as sub",
+           "import numpy as np",
+           "import nibabel as nib",
+           "import matplotlib as mpl",
+           "import matplotlib.pyplot as plt",
+           "import seaborn as sns",
+           "import moss",
+           "from nipype import fsl"]
 
 
-def create_volume_ffx_workflow(name="volume_ffx",
-                               regressors=None,
-                               contrasts=None):
+def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
+    """Return a workflow object to execute a fixed-effects mode."""
+    if contrasts is None:
+        contrasts = []
 
-    inputnode = Node(IdentityInterface(fields=["subject_id",
-                                               "contrast",
-                                               "copes",
-                                               "varcopes",
-                                               "masks",
-                                               "dof_files",
-                                               "background_file"]),
-                        name="inputnode")
+    inputnode = Node(IdentityInterface(["copes",
+                                        "varcopes",
+                                        "masks",
+                                        "dofs",
+                                        "ss_files",
+                                        "anatomy"]),
+                     name="inputnode")
 
-    # Concatenate the inputs for each run
-    copemerge = Node(fsl.Merge(dimension="t"),
-                     name="copemerge")
+    # Fit the fixedfx model for each contrast
+    ffxmodel = Node(Function(["contrasts",
+                              "copes",
+                              "varcopes",
+                              "dofs",
+                              "masks"],
+                             ["flame_results",
+                              "zstat_files"],
+                             fixedfx_model,
+                             imports),
+                    "ffxmodel")
+    ffxmodel.inputs.contrasts = contrasts
 
-    varcopemerge = Node(fsl.Merge(dimension="t"),
-                        name="varcopemerge")
+    # Calculate the fixed effects Rsquared maps
+    ffxr2 = Node(Function(["ss_files"], ["r2_files"],
+                          fixedfx_r2, imports),
+                 "ffxr2")
 
-    # Create suitable DOF images to use in FLAME
-    createdof = Node(Function(input_names=["copes",
-                                           "dof_files"],
-                              output_names=["out_file"],
-                              function=create_dof_image),
-                     name="createdof")
+    # Plot the fixedfx results
+    report = Node(Function(["space",
+                            "anatomy",
+                            "zstat_files",
+                            "r2_files",
+                            "masks"],
+                           ["report"],
+                           fixedfx_report,
+                           imports),
+                  "report")
+    report.inputs.space = space
 
-    # Determine a mask by area of overlap of nonzero varcopes
-    getmask = Node(Function(input_names=["masks",
-                                         "background_file"],
-                            output_names=["mask_file",
-                                          "mask_png"],
-                            function=create_ffx_mask),
-                   name="getmask")
-
-    # Set up a fixed effects FLAMEO model
-    if regressors is None:
-        ffxmodel = Node(fsl.L2Model(),
-                        name="ffxmodel")
-    else:
-        ffxmodel = Node(fsl.MultipleRegressDesign(regressors=regressors,
-                                                  contrasts=contrasts),
-                        name="ffxmodel")
-
-    # Run a fixed effects analysis in FLAMEO
-    flameo = Node(fsl.FLAMEO(run_mode="fe"),
-                  name="flameo")
-
-    # Plot the zstat images
-    plotzstats = Node(Function(input_names=["background_file",
-                                            "zstat_files",
-                                            "contrasts"],
-                               output_names=["out_files"],
-                               function=plot_zstats),
-                         name="plotzstats")
-    plotzstats.inputs.contrasts = ["main_effect"]
-
-    # Build pdf and html reports
-    report = Node(Function(input_names=["subject_id",
-                                        "mask_png",
-                                        "zstat_pngs",
-                                        "contrast"],
-                           output_names=["reports"],
-                           function=write_ffx_report),
-                  name="report")
-
-    outputnode = Node(IdentityInterface(fields=["stats",
-                                                "zstat_png",
-                                                "mask_png",
-                                                "report"]),
-                      name="outputnode")
+    outputnode = Node(IdentityInterface(["flame_results",
+                                         "r2_files",
+                                         "report"]),
+                      "outputs")
 
     ffx = Workflow(name=name)
     ffx.connect([
-        (inputnode, copemerge,
-            [(("copes", force_list), "in_files")]),
-        (inputnode, varcopemerge,
-            [(("varcopes", force_list), "in_files")]),
-        (inputnode, createdof,
-            [("copes", "copes"),
-             ("dof_files", "dof_files")]),
-        (copemerge, flameo,
-            [("merged_file", "cope_file")]),
-        (varcopemerge, flameo,
-            [("merged_file", "var_cope_file")]),
-        (createdof, flameo,
-            [("out_file", "dof_var_cope_file")]),
-        (inputnode, getmask,
-            [("masks", "masks"),
-             ("background_file", "background_file")]),
-        (getmask, flameo,
-            [("mask_file", "mask_file")]),
         (inputnode, ffxmodel,
-            [(("copes", length), "num_copes")]),
-        (ffxmodel, flameo,
-            [("design_mat", "design_file"),
-             ("design_con", "t_con_file"),
-             ("design_grp", "cov_split_file")]),
-        (flameo, plotzstats,
-            [("zstats", "zstat_files")]),
-        (inputnode, plotzstats,
-            [("background_file", "background_file")]),
+            [("copes", "copes"),
+             ("varcopes", "varcopes"),
+             ("dofs", "dofs"),
+             ("masks", "masks")]),
+        (inputnode, ffxr2,
+            [("ss_files", "ss_files")]),
         (inputnode, report,
-            [("subject_id", "subject_id"),
-             ("contrast", "contrast")]),
-        (plotzstats, report,
-            [("out_files", "zstat_pngs")]),
-        (getmask, report,
-            [("mask_png", "mask_png")]),
-        (flameo, outputnode,
-            [("stats_dir", "stats")]),
-        (getmask, outputnode,
-            [("mask_png", "mask_png")]),
-        (plotzstats, outputnode,
-            [("out_files", "zstat_png")]),
+            [("anatomy", "anatomy"),
+             ("masks", "masks")]),
+        (ffxmodel, report,
+            [("zstat_files", "zstat_files")]),
+        (ffxr2, report,
+            [("r2_files", "r2_files")]),
+        (ffxmodel, outputnode,
+            [("flame_results", "flame_results")]),
+        (ffxr2, outputnode,
+            [("r2_files", "r2_files")]),
         (report, outputnode,
-            [("reports", "report")]),
-        ])
+            [("report", "report")]),
+                 ])
 
     return ffx, inputnode, outputnode
 
 
-def create_surface_ffx_workflow(name="surface_ffx"):
-
-    raise NotImplementedError
-
-
-def create_dof_image(copes, dof_files):
-    """Create images where voxel values are DOF for that run."""
-    from os.path import abspath
-    from numpy import ones, int16
-    from nibabel import load, Nifti1Image
-    from lyman.workflows.fixedfx import force_list
-    copes = force_list(copes)
-    dof_files = force_list(dof_files)
-    cope_imgs = map(load, copes)
-    data_shape = list(cope_imgs[0].shape) + [len(cope_imgs)]
-    dof_data = ones(data_shape, int16)
-    for i, img in enumerate(cope_imgs):
-        dof_val = int(open(dof_files[i]).read().strip())
-        dof_data[..., i] *= dof_val
-
-    template_img = load(copes[0])
-    dof_hdr = template_img.get_header()
-    dof_hdr.set_data_dtype(int16)
-    dof_img = Nifti1Image(dof_data,
-                          template_img.get_affine(),
-                          dof_hdr)
-    out_file = abspath("dof.nii.gz")
-    dof_img.to_filename(out_file)
-    return out_file
+# Main interface functions
+# ------------------------
 
 
-def create_ffx_mask(masks, background_file):
-    """Create a mask for areas that are nonzero in all masks"""
-    import os
-    from os.path import abspath, join
-    from nibabel import load, Nifti1Image
-    from numpy import zeros
-    from subprocess import call
-    from lyman.workflows.fixedfx import force_list
-    masks = force_list(masks)
-    mask_imgs = map(load, masks)
-    data_shape = list(mask_imgs[0].shape) + [len(mask_imgs)]
-    mask_data = zeros(data_shape, int)
-    for i, img in enumerate(mask_imgs):
-        data = img.get_data()
-        data[data < 1e-4] = 0
-        mask_data[..., i] = img.get_data()
+def fixedfx_model(contrasts, copes, varcopes, dofs, masks):
+    """Fit the fixed effects model for each contrast."""
+    n_con = len(contrasts)
 
-    out_mask_data = mask_data.all(axis=-1)
-    sum_data = mask_data.astype(bool).sum(axis=-1)
+    # Find the basic geometry of the image
+    img = nib.load(copes[0])
+    x, y, z = img.shape
+    aff, hdr = img.get_affine(), img.get_header()
 
-    template_img = load(masks[0])
-    template_affine = template_img.get_affine()
-    template_hdr = template_img.get_header()
+    # Get lists of files for each contrast
+    copes = [[f for f in copes if "cope%d_" % (i + 1) in f]
+             for i in range(n_con)]
+    varcopes = [[f for f in varcopes if "varcope%d_" % (i + 1) in f]
+                for i in range(n_con)]
 
-    mask_img = Nifti1Image(out_mask_data, template_affine, template_hdr)
-    mask_file = abspath("fixed_effects_mask.nii.gz")
-    mask_img.to_filename(mask_file)
+    # Make an image with the DOF for each run
+    dofs = np.array([np.loadtxt(f) for f in dofs])
+    dof_data = np.ones((x, y, z, len(dofs))) * dofs
+    nib.Nifti1Image(dof_data, aff, hdr).to_filename("dof.nii.gz")
 
-    sum_img = Nifti1Image(sum_data, template_affine, template_hdr)
-    sum_file = abspath("mask_overlap.nii.gz")
-    sum_img.to_filename(sum_file)
+    # Find the intersection of the masks
+    mask_data = [nib.load(f).get_data() for f in masks]
+    common_mask = np.all(mask_data, axis=0)
+    nib.Nifti1Image(common_mask, aff, hdr).to_filename("mask.nii.gz")
 
-    overlay_file = abspath("mask_overlap_overlay.nii.gz")
-    call(["overlay", "1", "0", background_file, "-a",
-          sum_file, "1", str(len(masks)), overlay_file])
-    native = sum_img.shape[-1] < 50
-    width = 750 if native else 872
-    sample = 1 if native else 2
-    mask_png = abspath("mask_overlap.png")
-    lut = join(os.environ["FSLDIR"], "etc/luts/renderjet.lut")
-    call(["slicer", overlay_file, "-l", lut, "-S",
-          str(sample), str(width), mask_png])
+    # Write out the design information
+    fsl.L2Model(num_copes=len(masks)).run()
 
-    return mask_file, mask_png
+    # Run the flame models
+    flame_results = []
+    zstat_files = []
+    for i, contrast in enumerate(contrasts):
+
+        # Concatenate the copes and varcopes
+        for kind, files in zip(["cope", "varcope"],
+                               [copes[i], varcopes[i]]):
+            data = [nib.load(f).get_data()[..., np.newaxis] for f in files]
+            data = np.concatenate(data, axis=-1)
+            outname = kind + "_4d.nii.gz"
+            nib.Nifti1Image(data, aff, hdr).to_filename(outname)
+
+        flamecmd = ["flameo",
+                    "--cope=cope_4d.nii.gz",
+                    "--varcope=varcope_4d.nii.gz",
+                    "--mask=mask.nii.gz",
+                    "--dvc=dof.nii.gz",
+                    "--runmode=fe",
+                    "--dm=design.mat",
+                    "--tc=design.con",
+                    "--cs=design.grp",
+                    "--ld=" + contrast,
+                    "--npo"]
+        sub.check_output(flamecmd)
+
+        for kind in ["cope", "varcope"]:
+            os.rename(kind + "_4d.nii.gz", "%s/%s_4d.nii.gz" % (contrast, kind))
+
+        flame_results.append(op.abspath(contrast))
+        zstat_files.append(op.abspath("%s/zstat1.nii.gz" % contrast))
+
+    return flame_results, zstat_files
 
 
-def write_ffx_report(subject_id, mask_png, zstat_pngs, contrast):
-    import time
-    from lyman.tools import write_workflow_report
-    from lyman.workflows.reporting import ffx_report_template
+def fixedfx_r2(ss_files):
+    """Find the R2 for the full fixedfx model."""
+    out_files = []
 
-    # Fill in the report template dict
-    report_dict = dict(now=time.asctime(),
-                       subject_id=subject_id,
-                       contrast_name=contrast,
-                       mask_png=mask_png,
-                       zstat_png=zstat_pngs[0])
+    # First read the total sum of squares for each run
+    ss_tot = [f for f in ss_files if "sstot" in f]
+    tot_data = [nib.load(f).get_data() for f in ss_tot]
 
-    out_files = write_workflow_report("ffx",
-                                      ffx_report_template,
-                                      report_dict)
+    # Sum across runs
+    tot_sum = np.sum(tot_data, axis=0)
+
+    # Get basic info about the image
+    img = nib.load(ss_tot[0])
+    aff, header = img.get_affine(), img.get_header()
+
+    # Do the same processing for the full and main model
+    for comp in ["full", "main"]:
+
+        # Read in the residual sum of squares and take grand sum
+        ss_res = [f for f in ss_files if "ssres_%s" % comp in f]
+        res_data = [nib.load(f).get_data() for f in ss_res]
+        res_sum = np.sum(res_data, axis=0)
+
+        # Calculate the full model R2
+        r2 = 1 - res_sum / tot_sum
+
+        # Save an image with these data
+        r2_img = nib.Nifti1Image(r2, aff, header)
+        r2_file = op.abspath("r2_%s.nii.gz" % comp)
+        r2_img.to_filename(r2_file)
+        out_files.append(r2_file)
+
     return out_files
 
-def force_list(f):
-    if not isinstance(f, list):
-        return [f]
-    return f
 
-def length(x):
-    if isinstance(x, list):
-        return len(x)
-    return 1
+def fixedfx_report(space, anatomy, zstat_files, r2_files, masks):
+    """Plot the resulting data."""
+    sns.set()
+    bg = nib.load(anatomy).get_data()
+
+    mask_data = [nib.load(f).get_data() for f in masks]
+    mask = np.where(np.all(mask_data, axis=0), np.nan, 1)
+    mask[bg < moss.percentiles(bg, 5)] = np.nan
+
+    # Find the plot parameters
+    xdata = np.flatnonzero(bg.any(axis=1).any(axis=1))
+    xslice = slice(xdata.min(), xdata.max() + 1)
+    ydata = np.flatnonzero(bg.any(axis=0).any(axis=1))
+    yslice = slice(ydata.min(), ydata.max() + 1)
+    zdata = np.flatnonzero(bg.any(axis=0).any(axis=0))
+    zmin, zmax = zdata.min(), zdata.max()
+
+    step = 2 if space == "mni" else 1
+    offset = 4 if space == "mni" else 0
+
+    n_slices = (zmax - zmin) // step
+    n_row, n_col = n_slices // 8, 8
+    start = n_slices % n_col // step + zmin + offset
+    figsize = (10, 1.375 * n_row)
+    slices = (start + np.arange(zmax - zmin))[::step][:n_slices]
+    pltkws = dict(nrows=int(n_row), ncols=int(n_col),
+                  figsize=figsize, facecolor="k")
+    pngkws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
+
+    vmin, vmax = 0, moss.percentiles(bg, 95)
+    mask_cmap = mpl.colors.ListedColormap(["#160016"])
+
+    report = []
+
+    def add_colorbar(f, cmap, low, high, left, width, fmt):
+        cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
+        cbar_ax = f.add_axes([left, 0, width, .03])
+        cbar_ax.imshow(cbar.T, aspect="auto", cmap=cmap)
+        cbar_ax.axis("off")
+        f.text(left - .01, .018, fmt % low, ha="right", va="center",
+               color="white", size=13, weight="demibold")
+        f.text(left + width + .01, .018, fmt % high, ha="left",
+               va="center", color="white", size=13, weight="demibold")
+
+    # Plot the mask edges
+    f, axes = plt.subplots(**pltkws)
+    mask_colors = sns.husl_palette(len(mask_data))
+    mask_colors.reverse()
+    cmaps = [mpl.colors.ListedColormap([c]) for c in mask_colors]
+    for i, ax in zip(slices, axes.ravel()):
+        ax.imshow(bg[xslice, yslice, i].T,
+                  cmap="gray", vmin=vmin, vmax=vmax)
+        for j, m in enumerate(mask_data):
+            if m[xslice, yslice, i].any():
+                ax.contour(m[xslice, yslice, i].T,
+                           cmap=cmaps[j], linewidths=.75)
+        ax.axis("off")
+    text_min = max(.15, .5 - len(mask_data) * .05)
+    text_max = min(.85, .5 + len(mask_data) * .05)
+    text_pos = np.linspace(text_min, text_max, len(mask_data))
+    for i, color in enumerate(mask_colors):
+        f.text(text_pos[i], .03, "Run %d" % (i + 1), color=color,
+               size=11, weight="demibold", ha="center", va="center")
+    mask_png = op.abspath("mask_overlap.png")
+    plt.savefig(mask_png, **pngkws)
+    report.append(mask_png)
+    plt.close(f)
+
+    # Now plot the R2 images
+    for fname, cmap in zip(r2_files, ["GnBu_r", "YlGn_r"]):
+        f, axes = plt.subplots(**pltkws)
+        r2data = nib.load(fname).get_data()
+        rmax = r2data[~np.isnan(r2data)].max()
+        r2data[bg == 0] = np.nan
+        for i, ax in zip(slices, axes.ravel()):
+            ax.imshow(bg[xslice, yslice, i].T,
+                      cmap="gray", vmin=vmin, vmax=vmax)
+            ax.imshow(r2data[xslice, yslice, i].T, cmap=cmap,
+                      vmin=0, vmax=rmax, alpha=.8)
+            ax.imshow(mask[xslice, yslice, i].T, alpha=.5,
+                      cmap=mask_cmap, interpolation="nearest")
+            ax.axis("off")
+        savename = op.abspath(op.basename(fname).replace(".nii.gz", ".png"))
+        add_colorbar(f, cmap, 0, rmax, .35, .3, "%.2f")
+        plt.savefig(savename, **pngkws)
+        report.append(savename)
+        plt.close(f)
+
+    # Finally plot each zstat image
+    for fname in zstat_files:
+        zdata = nib.load(fname).get_data()
+        zpos = zdata.copy()
+        zneg = zdata.copy()
+        zpos[zdata < 2.3] = np.nan
+        zneg[zdata > -2.3] = np.nan
+        zlow = 2.3
+        zhigh = max(np.abs(zdata).max(), 3.71)
+        f, axes = plt.subplots(**pltkws)
+        for i, ax in zip(slices, axes.ravel()):
+            ax.imshow(bg[xslice, yslice, i].T, cmap="gray",
+                      vmin=vmin, vmax=vmax)
+            ax.imshow(zpos[xslice, yslice, i].T, cmap="Reds_r",
+                      vmin=zlow, vmax=zhigh)
+            ax.imshow(zneg[xslice, yslice, i].T, cmap="Blues",
+                      vmin=-zhigh, vmax=-zlow)
+            ax.imshow(mask[xslice, yslice, i].T, alpha=.5,
+                      cmap=mask_cmap, interpolation="nearest")
+            ax.axis("off")
+        add_colorbar(f, "Blues", -zhigh, -zlow, .18, .23, "%.1f")
+        add_colorbar(f, "Reds_r", zlow, zhigh, .59, .23, "%.1f")
+
+        contrast = fname.split("/")[-2]
+        os.mkdir(contrast)
+        savename = op.join(contrast, "zstat1.png")
+        f.savefig(savename, **pngkws)
+        report.append(op.abspath(contrast))
+        plt.close(f)
+
+    return report

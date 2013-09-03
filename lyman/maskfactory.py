@@ -7,7 +7,14 @@ from subprocess import check_output
 from IPython.parallel import Client
 from IPython.parallel.error import TimeoutError
 
-from . import main
+import numpy as np
+import nibabel as nib
+import matplotlib as mpl
+mpl.use("Agg")
+import matplotlib.pyplot as plt
+
+import moss
+from lyman import frontend
 
 
 class MaskFactory(object):
@@ -22,8 +29,8 @@ class MaskFactory(object):
                  orig_type, force_serial=False, debug=False):
 
         # Set up basic info
-        self.subject_list = main.determine_subjects(subject_list)
-        project = main.gather_project_info()
+        self.subject_list = frontend.determine_subjects(subject_list)
+        project = frontend.gather_project_info()
         self.experiment = experiment
         self.roi_name = roi_name
         self.orig_type = orig_type
@@ -194,14 +201,14 @@ class MaskFactory(object):
         for subj in self.subject_list:
             args = dict(subj=subj)
             xfm_cmds.append(
-                      ["mri_vol2vol",
-                       "--mov", self.epi_template % args,
-                       "--targ", hires_mask_template % args,
-                       "--inv",
-                       "--o", self.out_template % args,
-                       "--reg", self.reg_template % args,
-                       "--no-save-reg",
-                       "--nearest"])
+                ["mri_vol2vol",
+                 "--mov", self.epi_template % args,
+                 "--targ", hires_mask_template % args,
+                 "--inv",
+                 "--o", self.out_template % args,
+                 "--reg", self.reg_template % args,
+                 "--no-save-reg",
+                 "--nearest"])
         self.execute(xfm_cmds, self.out_template)
 
     def from_statistical_file(self, stat_file_temp, thresh):
@@ -220,29 +227,35 @@ class MaskFactory(object):
 
     def write_png(self):
         """Write a mosiac png showing the masked voxels."""
-        overlay_temp = op.join(self.temp_dir, "%(subj)s_overlay.nii.gz")
         slices_temp = op.join(self.data_dir, "%(subj)s/masks",
                               self.roi_name + ".png")
 
-        overlay_cmds = []
+        cmap = mpl.colors.ListedColormap(["#C41E3A"])
         for subj in self.subject_list:
             args = dict(subj=subj)
-            overlay_cmds.append(
-                          ["overlay", "1", "0",
-                           self.epi_template % args, "-a",
-                           self.out_template % args, "0.6", "2",
-                           overlay_temp % args])
-        self.execute(overlay_cmds, overlay_temp)
+            epi = nib.load(self.epi_template % args).get_data()
+            mask = nib.load(self.out_template % args).get_data()
+            mask = mask.astype(np.float)
+            mask[mask == 0] = np.nan
 
-        slicer_cmds = []
-        for subj in self.subject_list:
-            args = dict(subj=subj)
-            slicer_cmds.append(
-                          ["slicer",
-                           overlay_temp % args,
-                           "-A", "750",
-                           slices_temp % args])
-        self.execute(slicer_cmds, slices_temp)
+            n_slices = epi.shape[-1]
+            n_row, n_col = n_slices // 8, 8
+            start = n_slices % n_col // 2
+            figsize = (10, 1.375 * n_row)
+
+            # Write the functional mask image
+            f, axes = plt.subplots(n_row, n_col,
+                                   figsize=figsize,
+                                   facecolor="k")
+            vmin, vmax = 0, moss.percentiles(epi, 98)
+
+            for i, ax in enumerate(axes.ravel(), start):
+                ax.imshow(epi[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
+                ax.imshow(mask[..., i].T, cmap=cmap, interpolation="nearest")
+                ax.axis("off")
+            f.subplots_adjust(hspace=1e-5, wspace=1e-5)
+            plt.savefig(slices_temp % args, dpi=100, bbox_inches="tight",
+                        facecolor="k", edgecolor="k")
 
     def execute(self, cmd_list, out_temp):
         """Exceute a list of commands and verify output file existence."""
@@ -255,19 +268,3 @@ class MaskFactory(object):
         if self.parallel:
             if not res.successful():
                 raise RuntimeError(res.pyerr)
-        else:
-            self.check_exists(out_temp)
-
-    def check_exists(self, fpath_temp):
-        """Ensure that output files exist on disk."""
-        fail_list = []
-        for hemi in ["lh", "rh"]:
-            for subj in self.subject_list:
-                args = dict(hemi=hemi, subj=subj)
-                f_want = fpath_temp % args
-                if not op.exists(f_want):
-                    fail_list.append(f_want)
-        if fail_list:
-            print "Failed to write files:"
-            print "\n".join(fail_list)
-            raise RuntimeError
