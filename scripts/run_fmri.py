@@ -123,7 +123,7 @@ def main(arglist):
         name=smoothing + "_model", exp_info=exp)
 
     model_base = op.join(analysis_dir, "{subject_id}/preproc/run_*/")
-    design_file = exp["design_name"] + ".csv"
+    design_file = "%s.csv" % exp["design_name"]
     model_templates = dict(
         design_file=op.join(data_dir, "{subject_id}/design", design_file),
         realign_file=op.join(model_base, "realignment_params.csv"),
