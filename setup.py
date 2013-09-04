@@ -34,5 +34,5 @@ if __name__ == "__main__":
                   'lyman.tools', 'lyman.tools.tests'],
         scripts=['scripts/run_fmri.py', 'scripts/run_group.py',
                  'scripts/run_warp.py', 'scripts/setup_project.py',
-                 'scripts/make_masks.py'],
+                 'scripts/make_masks.py', 'scripts/anatomy_snapshots.py'],
     )
