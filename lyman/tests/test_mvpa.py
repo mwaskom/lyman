@@ -146,6 +146,20 @@ def test_extract_upsample():
     assert_equal(X.shape, (4, 3, mask.sum()))
 
 
+def test_extract_zero_variance():
+    """Test that we exclude zero-variance voxels."""
+    evs = pd.DataFrame(dict(onset=[1, 2, 3],
+                            condition=["foo", "foo", "bar"]),
+                            dtype=float)
+    ts = np.random.randn(2, 2, 2, 4)
+    mask = np.ones((2, 2, 2), bool)
+    ts[0, 0, 0] = 0
+
+    X, y = mvpa.extract_dataset(evs, ts, mask, 1)
+    assert not np.any(np.isnan(X))
+    assert_equal(X.shape, (3, (2 ** 3) - 1))
+
+
 @raises(ValueError)
 def test_extract_mask_error():
     """Make sure mask is enforced as boolean."""

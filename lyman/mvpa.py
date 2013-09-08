@@ -236,7 +236,11 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
         onsets += int(frame)
         X[i, ...] = sp.stats.zscore(roi_data[onsets])
 
-    return X.squeeze(), y
+    # Remove voxels with zero-variance across the timeseries
+    X = X.squeeze()
+    X = X[..., np.var(roi_data, axis=0) > 0]
+
+    return X, y
 
 
 def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
