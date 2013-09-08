@@ -236,11 +236,7 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
         onsets += int(frame)
         X[i, ...] = sp.stats.zscore(roi_data[onsets])
 
-    # Remove voxels with zero-variance across the timeseries
-    X = X.squeeze()
-    X = X[..., np.var(roi_data, axis=0) > 0]
-
-    return X, y
+    return X.squeeze(), y
 
 
 def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
@@ -383,6 +379,18 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
         # Just add to list
         X.append(X_i)
         y.append(y_i)
+
+    # Remove features that are NaN in at least one run
+    # (This can happen if variance = 0 in one of the voxels
+    # E.g. if the ROI mask is outside the brain mask
+    mask = np.ones(mask_data.sum(), bool)
+    for X_i in X:
+        if X_i.ndim == 3:
+            X_i = X_i[0]
+        nans = np.isnan(X_i).any(axis=0)
+        mask *= np.logical_not(nans)
+    for i, X_i in enumerate(X):
+        X[i] = X_i[..., mask]
 
     # Stick the list items together for final dataset
     if frames is not None and len(frames) > 1:
