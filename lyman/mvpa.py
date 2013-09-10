@@ -880,7 +880,7 @@ def model_coefs(datasets, model, flat=True, mask=None, exp_name=None):
                     else:
                         data = nib.load(coef_nifti).get_data()
                     out_coefs.append(data)
-            continue
+                    continue
 
         # Determine the mask
         if "mask" in dset and mask is None:
