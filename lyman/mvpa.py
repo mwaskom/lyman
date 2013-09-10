@@ -823,7 +823,7 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
     return np.array(group_scores)
 
 
-def model_coefs(datasets, model, flat=True, mask=None, exp_name=None):
+def model_coefs(datasets, model, flat=True, exp_name=None):
     """Fit a model on all data and save the learned model weights.
 
     This does not work for datasets with > 1 frames.
@@ -834,9 +834,6 @@ def model_coefs(datasets, model, flat=True, mask=None, exp_name=None):
         group mvpa datasets
     model : scikit-learn estimator
         decoding model
-    mask : 3D boolean array
-        array defining features in the image space, overriding the
-        "mask" entry that may be in the dataset dictionary
     flat : bool
         if False return in original data space (with voxels outside
         mask represented as NaN. otherwise return straight from model
@@ -883,10 +880,7 @@ def model_coefs(datasets, model, flat=True, mask=None, exp_name=None):
                     continue
 
         # Determine the mask
-        if "mask" in dset and mask is None:
-            mask = dset["mask"]
-        elif mask is None:
-            raise ValueError("Dataset does not have mask.")
+        mask = dset["mask"]
 
         # Get the mask dimensions
         x, y, z = mask.shape
@@ -899,7 +893,7 @@ def model_coefs(datasets, model, flat=True, mask=None, exp_name=None):
             coef = model.coef_
         coef_data = np.zeros((x, y, z, len(coef))) * np.nan
         coef_data[mask] = coef.T
-
+:X
         # Save the data both as a npz and nifti
         coef_dict = dict(data=coef, hash=decoder_hash)
         np.savez(coef_file, **coef_dict)
