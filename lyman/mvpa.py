@@ -236,7 +236,10 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
         onsets += int(frame)
         X[i, ...] = sp.stats.zscore(roi_data[onsets])
 
-    return X.squeeze(), y
+    # Find a mask to only use features with nonzero variance
+    good_features = np.all([(np.var(X_i, axis=0) > 0) for X_i in X], axis=0)
+
+    return X.squeeze(), y, good_features
 
 
 def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
@@ -352,8 +355,8 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
                 _temporal_compression(collapse, dataset)
                 return dataset
 
-    # Othersies, initialize outputs
-    X, y, runs = [], [], []
+    # Otherwise, initialize outputs
+    X, y, runs, used = [], [], [], []
 
     # Load mask file
     mask_data = nib.load(mask_file).get_data().astype(bool)
@@ -372,25 +375,18 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
         ts_data = nib.load(ts_files[int(r_i - 1)]).get_data()
 
         # Use the basic extractor function
-        X_i, y_i = extract_dataset(sched_r, ts_data,
-                                   mask_data, exp["TR"],
-                                   frames, upsample, event_names)
+        X_i, y_i, used_i = extract_dataset(sched_r, ts_data,
+                                           mask_data, exp["TR"],
+                                           frames, upsample, event_names)
 
         # Just add to list
         X.append(X_i)
         y.append(y_i)
+        used.append(used_i)
 
-    # Remove features that are NaN in at least one run
-    # (This can happen if variance = 0 in one of the voxels
-    # E.g. if the ROI mask is outside the brain mask
-    mask = np.ones(mask_data.sum(), bool)
-    for X_i in X:
-        if X_i.ndim == 3:
-            X_i = X_i[0]
-        nans = np.isnan(X_i).any(axis=0)
-        mask *= np.logical_not(nans)
-    for i, X_i in enumerate(X):
-        X[i] = X_i[..., mask]
+    # Find the voxels that are good in every run and make a final mask
+    always_used = np.all(used, axis=0)
+    mask_data[mask_data] = always_used
 
     # Stick the list items together for final dataset
     if frames is not None and len(frames) > 1:
@@ -414,7 +410,7 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     dataset = dict(X=X, y=y, runs=runs, roi_name=roi_name, subj=subj,
                    event_names=event_names, problem=problem, frames=frames,
                    confounds=confounds, upsample=upsample, smoothed=smoothed,
-                   hash=ds_hash)
+                   hash=ds_hash, mask=mask_data, mask_name=mask_name)
     np.savez(ds_file, **dataset)
 
     # Possibly perform temporal compression
@@ -827,7 +823,7 @@ def classifier_permutations(datasets, model, n_iter=1000, cv_method="run",
     return np.array(group_scores)
 
 
-def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
+def model_coefs(datasets, model, flat=True, mask=None, exp_name=None):
     """Fit a model on all data and save the learned model weights.
 
     This does not work for datasets with > 1 frames.
@@ -838,8 +834,9 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
         group mvpa datasets
     model : scikit-learn estimator
         decoding model
-    mask_name : string or None
-        string, unless datasets have `mask_name` field
+    mask : 3D boolean array
+        array defining features in the image space, overriding the
+        "mask" entry that may be in the dataset dictionary
     flat : bool
         if False return in original data space (with voxels outside
         mask represented as NaN. otherwise return straight from model
@@ -856,13 +853,18 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
     if exp_name is None:
         exp_name = project["default_exp"]
 
-    mask_template = op.join(project["data_dir"], "%s/masks/%s.nii.gz")
-
     out_coefs = []
 
     # Iterate through the datasets
     for dset in datasets:
         subj = dset["subj"]
+
+        # Get a header and affine matrix for the EPI space
+        smoothed = "smoothed" if dset["smoothed"] else "unsmoothed"
+        epi_file = op.join(project["analysis_dir"], exp_name, subj,
+                           "preproc/run_1/example_func.nii.gz")
+        epi_img = nib.load(epi_file)
+        epi_header, epi_affine = epi_img.get_header(), epi_img.get_affine()
 
         # Check if we need to do anything
         decoder_hash = _hash_decoder(dset, model, None)
@@ -870,7 +872,7 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
                                    False, False, exp_name)
         coef_file = coef_file.strip(".npz") + "_coef.npz"
         coef_nifti = coef_file.strip(".npz") + ".nii.gz"
-        if op.exists(coef_file):
+        if op.exists(coef_file) and op.exists(coef_nifti):
             with np.load(coef_file) as res_obj:
                 if decoder_hash == str(res_obj["hash"]):
                     if flat:
@@ -878,15 +880,15 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
                     else:
                         data = nib.load(coef_nifti).get_data()
                     out_coefs.append(data)
+            continue
 
         # Determine the mask
-        if "mask_name" in dset:
-            mask_name = dset["mask_name"]
-        mask_file = mask_template % (subj, mask_name)
+        if "mask" in dset and mask is None:
+            mask = dset["mask"]
+        elif mask is None:
+            raise ValueError("Dataset does not have mask.")
 
-        # Load the mask file
-        mask_img = nib.load(mask_file)
-        mask = mask_img.get_data().astype(bool)
+        # Get the mask dimensions
         x, y, z = mask.shape
 
         # Fit the model and extract the learned model weights
@@ -902,7 +904,7 @@ def model_coefs(datasets, model, mask_name=None, flat=True, exp_name=None):
         coef_dict = dict(data=coef, hash=decoder_hash)
         np.savez(coef_file, **coef_dict)
         coef_nifti = coef_file.strip(".npz") + ".nii.gz"
-        coef_img = nib.Nifti1Image(coef_data, mask_img.get_affine())
+        coef_img = nib.Nifti1Image(coef_data, epi_affine, epi_header)
         nib.save(coef_img, coef_nifti)
 
     return out_coefs

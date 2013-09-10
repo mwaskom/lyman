@@ -105,17 +105,18 @@ def test_extract_dataset():
                             dtype=float)
     ts = np.random.randn(5, 5, 5, 4)
     mask = ts[..., 0] > .5
-    X, y = mvpa.extract_dataset(evs, ts, mask, 1)
+    X, y, m = mvpa.extract_dataset(evs, ts, mask, 1)
 
     assert_array_equal(y, np.array([1, 1, 0]))
 
     should_be = sp.stats.zscore(ts[mask].T[np.array([1, 2, 3])])
     assert_array_equal(X, should_be)
 
-    X_, y_ = mvpa.extract_dataset(evs, ts, mask, 1,
+    X_, y_, m_ = mvpa.extract_dataset(evs, ts, mask, 1,
                                   event_names=["bar", "foo"])
     assert_array_equal(X_, X)
     assert_array_equal(y_, y)
+    assert_array_equal(m_, m)
 
 
 def test_extract_sizes():
@@ -126,11 +127,12 @@ def test_extract_sizes():
     ts = np.random.randn(5, 5, 5, 4)
     mask = ts[..., 0] > .5
 
-    X_1, y_1 = mvpa.extract_dataset(evs, ts, mask, 1)
+    X_1, y_1, m_1 = mvpa.extract_dataset(evs, ts, mask, 1)
     assert_equal(X_1.shape, (3, mask.sum()))
+    assert_equal(len(m_1), mask.sum())
 
-    X_1, y_1 = mvpa.extract_dataset(evs, ts, mask, 1, [-1, 0])
-    assert_equal(X_1.shape, (2, 3, mask.sum()))
+    X_2, y_2, m_2 = mvpa.extract_dataset(evs, ts, mask, 1, [-1, 0])
+    assert_equal(X_2.shape, (2, 3, mask.sum()))
 
 
 def test_extract_upsample():
@@ -141,9 +143,23 @@ def test_extract_upsample():
     ts = np.random.randn(5, 5, 5, 10)
     mask = ts[..., 0] > .5
 
-    X, y = mvpa.extract_dataset(evs, ts, mask, tr=1,
+    X, y, m = mvpa.extract_dataset(evs, ts, mask, tr=1,
                                 frames=[-1, 0], upsample=2)
     assert_equal(X.shape, (4, 3, mask.sum()))
+    assert_equal(len(m), mask.sum())
+
+
+def test_extract_zero_var():
+    """Test that zero-variance features are masked out."""
+    evs = pd.DataFrame(dict(onset=[1, 2, 3],
+                            condition=["foo", "foo", "bar"]),
+                            dtype=float)
+    ts = np.random.randn(5, 5, 5, 10)
+    ts[0, 0, 0, :] = 0
+    mask = np.ones((5, 5, 5), np.bool)
+
+    X, y, m = mvpa.extract_dataset(evs, ts, mask, 1)
+    assert_array_equal(m, np.array([0] + [1] * (5 ** 3 - 1), np.bool))
 
 
 @raises(ValueError)
