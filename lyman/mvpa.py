@@ -893,7 +893,7 @@ def model_coefs(datasets, model, flat=True, exp_name=None):
             coef = model.coef_
         coef_data = np.zeros((x, y, z, len(coef))) * np.nan
         coef_data[mask] = coef.T
-:X
+
         # Save the data both as a npz and nifti
         coef_dict = dict(data=coef, hash=decoder_hash)
         np.savez(coef_file, **coef_dict)
