@@ -74,7 +74,7 @@ def gather_experiment_info(exp_name=None, altmodel=None):
 
     # Set up the default contrasts
     if exp_dict["condition_names"] is not None:
-        cs = [[name, [name], [1]] for name in exp_dict["condition_names"]]
+        cs = [(name, [name], [1]) for name in exp_dict["condition_names"]]
         exp_dict["contrasts"] = cs + exp_dict["contrasts"]
 
     # Build contrasts list if neccesary
