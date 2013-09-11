@@ -139,7 +139,7 @@ Group Analysis Parameters
 
    flame_mode
     A string indicating the type of inference that should be performed in the
-    group model. Options are ``ols``, ``flame1``, and ``flame2``, for ordinary
+    group model. Options are ``ols``, ``flame1``, and ``flame12``, for ordinary
     least squares, MAP mixed effects, and full MCMC mixed effects,
     respectively.
 
