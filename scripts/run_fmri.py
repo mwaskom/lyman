@@ -59,10 +59,10 @@ def main(arglist):
     if not op.exists(analysis_dir):
         os.makedirs(analysis_dir)
     if exp_base != exp_name:
-        for subj in args.subjects:
+        for subj in subject_list:
             subj_dir = op.join(analysis_dir, subj)
             if not op.exists(subj_dir):
-                os.mkdir(subj_dir)
+                os.makedirs(subj_dir)
             link_dir = op.join(analysis_dir, subj, "preproc")
             if not op.exists(link_dir):
                 preproc_dir = op.join(project["analysis_dir"], exp_base)
