@@ -389,7 +389,7 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
 
     # Find the voxels that are good in every run and make a final mask
     good_features = np.all(use, axis=0)
-    mask_data[mask_data] = always_used
+    mask_data[mask_data] = good_features 
 
     # Stick the list items together for final dataset
     if frames is not None and len(frames) > 1:
