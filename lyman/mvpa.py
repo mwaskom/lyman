@@ -186,8 +186,11 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
     X : (n_frame) x n_samp x n_feat array
         model matrix (zscored by feature)
         if n_frame is 1, matrix is 2D
+        NOTE: this array can have NaNs; use mask to remove
     y : n_ev vector
         target vector
+    mask : n_feat boolean vector
+        False where the variance for that feature is 0
 
     """
     # Set up the extraction frames
@@ -356,7 +359,7 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
                 return dataset
 
     # Otherwise, initialize outputs
-    X, y, runs, used = [], [], [], []
+    X, y, runs, use = [], [], [], []
 
     # Load mask file
     mask_data = nib.load(mask_file).get_data().astype(bool)
@@ -375,17 +378,17 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
         ts_data = nib.load(ts_files[int(r_i - 1)]).get_data()
 
         # Use the basic extractor function
-        X_i, y_i, used_i = extract_dataset(sched_r, ts_data,
+        X_i, y_i, use_i = extract_dataset(sched_r, ts_data,
                                            mask_data, exp["TR"],
                                            frames, upsample, event_names)
 
         # Just add to list
         X.append(X_i)
         y.append(y_i)
-        used.append(used_i)
+        use.append(use_i)
 
     # Find the voxels that are good in every run and make a final mask
-    always_used = np.all(used, axis=0)
+    good_features = np.all(use, axis=0)
     mask_data[mask_data] = always_used
 
     # Stick the list items together for final dataset
@@ -395,6 +398,9 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
         X = np.concatenate(X, axis=0)
     y = np.concatenate(y)
     runs = sched.run
+
+    # Apply the feature mask
+    X = X[..., good_features]
 
     # Regress the confound vector out from the data matrix
     if confounds is not None:
