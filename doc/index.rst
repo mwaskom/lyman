@@ -3,7 +3,9 @@ Lyman: an fMRI Analysis Ecosystem
 
 Lyman is a high-level ecosystem for analyzing neuroimaging data.
 It aims to support an analysis workflow that is powerful, flexible, and
-reproducible, while automating as much of the processing as possible. 
+reproducible, while automating as much of the processing as possible. Aiming
+for as much openness as possible, lyman uses only free and open source
+software. 
 
 Lyman is broadly divided into two sets of tools. There is a command-line based
 interface to a set of pipelines, where FSL, Freesurfer, and Python-based tools
@@ -11,9 +13,10 @@ are integrated using `Nipype <http://nipy.sourceforge.net/nipype/>`_. These
 pipelines will take raw Nifti files and process them all the way through a
 basic group analysis with minimal manual intervention. There is also a library
 for multivariate analyses that adapts `Scikit-Learn
-<http://scikit-learn.org/stable/>`_ for common fMRI applications. An attractive
-feature of both sets of tools is that they cache intermediate processing steps
-and can be easily parallelized.
+<http://scikit-learn.org/stable/>`_ for common fMRI applications. Both sets of
+tools cache their intermediate processing steps and can be easily parallelized,
+which helps to make data analysis more efficient and encourages the development
+of reproducible 
 
 Because the processing is heavily automated, lyman generates a number of static
 plots and images that are useful for understanding the results of the analyses
@@ -39,6 +42,7 @@ Contents:
    :maxdepth: 2
 
    glossary
+   dependencies
    workflow
    experiments
    procstream
