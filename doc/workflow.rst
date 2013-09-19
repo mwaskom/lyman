@@ -54,7 +54,9 @@ Lyman also relies on the outputs from `Freesurfer
 <http://surfer.nmr.mgh.harvard.edu/>`_. Before using the lyman tools, you
 should processes your anatomical data using ``recon-all``. The lyman *data_dir*
 should be synonymous with your Freesurfer *SUBJECTS_DIR*, and you should use
-the same subject ids with both tools.
+the same subject ids with both tools. The ``anatomy_snapshots.py`` script that
+ships with lyman can be useful for performing quality control on these
+outputs.
 
 To fit any models (either univariate timeseries models or multivariate decoding
 models), you'll need a description of your experiment design. The basic format
