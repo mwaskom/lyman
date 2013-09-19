@@ -1,9 +1,7 @@
 #! /usr/bin/env python
 """Generate static images summarizing the Freesurfer reconstruction.
 
-This script is part of the lyman packges. LYMAN_DIR must be defined.
-
-USAGE: anatomy_snapshots.py <subject arg>
+This script is part of the lyman package. LYMAN_DIR must be defined.
 
 The subject arg can be one or more subject IDs, name of subject file, or
 path to subject file. Running with no arguments will use the default
@@ -15,11 +13,17 @@ Dependencies:
 
 The resulting files can be most easily viewed using the Ziegler app.
 
+There is a bug in Mayavi on some 64 bit versions of Python that causes
+a segfault when repeatedly closing figures. If you encounter this bug,
+you can try the `-noclose` switch which will keep all of the PySurfer
+figures open until the script exits.
+
 """
 import os
 import os.path as op
 import sys
-import subprocess as sp
+import subprocess as sub
+import argparse
 
 import numpy as np
 import matplotlib as mpl
@@ -34,9 +38,8 @@ import lyman
 def main(arglist):
 
     # Find the subjects for this execution
-    if not arglist:
-        arglist = None
-    subjects = lyman.determine_subjects(arglist)
+    args = parse_args(arglist)
+    subjects = lyman.determine_subjects(args.subjects)
 
     # Find the project details
     proj = lyman.gather_project_info()
@@ -51,29 +54,30 @@ def main(arglist):
             os.mkdir(out_dir)
 
         # Do each chunk of reporting
-        inflated_surfaces(out_dir, subj)
-        curvature_normalization(data_dir, subj)
+        inflated_surfaces(out_dir, subj, args.close)
+        curvature_normalization(data_dir, subj, args.close)
         volume_images(data_dir, subj)
 
 
-def inflated_surfaces(out_dir, subj):
+def inflated_surfaces(out_dir, subj, close=True):
     """Native inflated surfaces with cortical label."""
     for hemi in ["lh", "rh"]:
         b = Brain(subj, hemi, "inflated", curv=False,
                   config_opts=dict(background="white",
                                    width=800, height=500))
-        b.add_label("cortex", color="black", alpha=.2)
+        b.add_label("cortex", color="#6B6B6B")
 
         for view in ["lat", "med"]:
             b.show_view(view)
             mlab.view(distance="auto")
             png = op.join(out_dir, "%s.surface_%s.png" % (hemi, view))
             b.save_image(png)
-        b.close()
+        if close:
+            b.close()
 
 
-def curvature_normalization(data_dir, subj):
-    """Normalize the curvature map and plot conour over fsaverage."""
+def curvature_normalization(data_dir, subj, close=True):
+    """Normalize the curvature map and plot contour over fsaverage."""
     surf_dir = op.join(data_dir, subj, "surf")
     snap_dir = op.join(data_dir, subj, "snapshots")
     for hemi in ["lh", "rh"]:
@@ -85,7 +89,7 @@ def curvature_normalization(data_dir, subj):
                "--sval", op.join(surf_dir, "%s.curv" % hemi),
                "--tval", op.join(surf_dir, "%s.curv.fsaverage.mgz" % hemi)]
 
-        sp.check_output(cmd)
+        sub.check_output(cmd)
 
         b = Brain("fsaverage", hemi, "inflated",
                   config_opts=dict(background="white",
@@ -99,7 +103,9 @@ def curvature_normalization(data_dir, subj):
             mlab.view(distance="auto")
             png = op.join(snap_dir, "%s.surf_warp_%s.png" % (hemi, view))
             b.save_image(png)
-        b.close()
+
+        if close:
+            b.close()
 
 
 def volume_images(data_dir, subj):
@@ -172,11 +178,18 @@ def volume_images(data_dir, subj):
     plt.close(f)
 
 
-if __name__ == "__main__":
+def parse_args(arglist):
 
-    # Usage exit
-    if any(set(sys.argv) & {"-h", "-help", "--help"}):
-        print __doc__
-        sys.exit()
+    parser = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("-subjects", nargs="*", help="lyman subjects argument")
+    parser.add_argument("-noclose", dest="close", action="store_false",
+                        help="don't close mayavi figures during runtime")
+    args = parser.parse_args(arglist)
+
+    return args
+
+
+if __name__ == "__main__":
 
     main(sys.argv[1:])
