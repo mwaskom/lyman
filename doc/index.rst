@@ -1,11 +1,10 @@
 Lyman: an fMRI Analysis Ecosystem
 =================================
 
-Lyman is a high-level ecosystem for analyzing neuroimaging data.
-It aims to support an analysis workflow that is powerful, flexible, and
-reproducible, while automating as much of the processing as possible. Aiming
-for as much openness as possible, lyman uses only free and open source
-software. 
+Lyman is a high-level ecosystem for analyzing neuroimaging data using
+open-source software. It aims to support an analysis workflow that is
+powerful, flexible, and reproducible, while automating as much of the
+processing as possible.
 
 Lyman is broadly divided into two sets of tools. There is a command-line based
 interface to a set of pipelines, where FSL, Freesurfer, and Python-based tools
