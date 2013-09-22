@@ -228,8 +228,8 @@ def extract_dataset(sched, timeseries, mask, tr=2, frames=None,
     else:
         time_points = len(roi_data)
         x = np.linspace(0, time_points - 1, time_points)
-        xx = np.linspace(0, time_points - 1,
-                         time_points * upsample + 1)
+        xx = np.linspace(0, time_points,
+                         time_points * upsample + 1)[:-upsample]
         interpolator = interp1d(x, roi_data, "cubic", axis=0)
         roi_data = interpolator(xx)
 
