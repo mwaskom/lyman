@@ -15,7 +15,7 @@ for multivariate analyses that adapts `Scikit-Learn
 <http://scikit-learn.org/stable/>`_ for common fMRI applications. Both sets of
 tools cache their intermediate processing steps and can be easily parallelized,
 which helps to make data analysis more efficient and encourages the development
-of reproducible 
+of reproducible analysis notebooks.
 
 Because the processing is heavily automated, lyman generates a number of static
 plots and images that are useful for understanding the results of the analyses
