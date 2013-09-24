@@ -34,8 +34,8 @@ Github commit log if you're updating while actively analyzing data. With that
 said, the main body of code has about three years of development under it, and
 much of the package has gotten quite mature and stable.
 
-Contents:
----------
+Documentation Contents:
+-----------------------
 
 .. toctree::
    :maxdepth: 2
