@@ -57,7 +57,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     in_fields = ["timeseries", "subject_id"]
 
     if exp_info["whole_brain_template"]:
-        in_fields.append("whole_brain_epi")
+        in_fields.append("whole_brain_template")
 
     inputnode = Node(IdentityInterface(in_fields), "inputs")
 
@@ -156,7 +156,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     if bool(exp_info["whole_brain_template"]):
         preproc.connect([
             (inputnode, coregister,
-                [("whole_brain_epi", "whole_brain_epi")])
+                [("whole_brain_template", "inputs.whole_brain_template")])
                         ])
 
     # Define the outputs of the top-level workflow
@@ -374,9 +374,8 @@ def create_bbregister_workflow(name="bbregister",
     """Find a linear transformation to align the EPI file with the anatomy."""
     in_fields = ["subject_id", "source_file"]
     if partial_brain:
-        in_fields.append("whole_brain_epi")
-    inputnode = Node(IdentityInterface(in_fields),
-                     "inputs")
+        in_fields.append("whole_brain_template")
+    inputnode = Node(IdentityInterface(in_fields), "inputs")
 
     # Estimate the registration to Freesurfer conformed space
     func2anat = MapNode(fs.BBRegister(contrast_type=contrast_type,
@@ -423,7 +422,7 @@ def create_bbregister_workflow(name="bbregister",
     if partial_brain:
         bbregister.connect([
             (inputnode, func2anat,
-                [("whole_brain_epi", "intermediate_file")]),
+                [("whole_brain_template", "intermediate_file")]),
                 ])
 
     return bbregister
