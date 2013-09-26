@@ -11,6 +11,7 @@ import os.path as op
 import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
+import matplotlib.image as mplimg
 import nibabel as nib
 from nipy.labs import viz
 import seaborn as sns
@@ -120,6 +121,7 @@ def create_anatwarp_workflow(data_dir=None, subjects=None, name="anatwarp"):
                                 "import numpy as np",
                                 "import scipy as sp",
                                 "import matplotlib.pyplot as plt",
+                                "import matplotlib.image as mplimg",
                                 "import nibabel as nib",
                                 "from nipy.labs import viz",
                                 "import seaborn as sns"]),
@@ -217,11 +219,11 @@ def warp_report(in_file):
         slicer.contour_map(mni_data, mni_aff, colors=colors)
         fname = "slices_%s.png" % axis
         f.savefig(fname, facecolor="k", edgecolor="k")
-        im_data[axis] = sp.ndimage.imread(fname)
+        im_data[axis] = mplimg.imread(fname)
 
     concat_data = [im_data[axis] for axis in ["x", "y", "z"]]
     concat_data = np.concatenate(concat_data, axis=0)
-    sp.misc.imsave("warp_report.png", concat_data)
+    mplimg.imsave("warp_report.png", concat_data)
     return op.abspath("warp_report.png")
 
 
