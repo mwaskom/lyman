@@ -148,7 +148,6 @@ def parse_args(arglist):
 
     # Necessary arguments
     parser.add_argument("-s", "-subjects", nargs="*", dest="subjects",
-                        required=True,
                         help="subject ids or path to text file")
     parser.add_argument("-roi", required=True,
                         help="will form name out output mask file")
