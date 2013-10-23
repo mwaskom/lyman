@@ -185,7 +185,7 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
     events : dataframe or list of dataframes
         one dataframe describing event information for each subj.
         must contain `onset`, `run`, and `condition` columns
-        caution: `run` should be 0-based
+        caution: `run` should be 1-based
     tr : int
         original time resolution of the data
     upsample : int
@@ -233,14 +233,14 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
         # Create the timeseries of event occurances
         event_list = []
         data_list = []
-        for run, run_data in enumerate(data_i["data"]):
+        for run, run_data in enumerate(data_i["data"], 1):
 
             # Possibly upsample the data
             if upsample != 1:
                 time_points = len(run_data)
                 x = np.linspace(0, time_points - 1, time_points)
-                xx = np.linspace(0, time_points - 1,
-                                 time_points * upsample + 1)
+                xx = np.linspace(0, time_points,
+                                 time_points * upsample + 1)[:-upsample]
                 interpolator = interp1d(x, run_data, "cubic", axis=0)
                 run_data = interpolator(xx)
 
