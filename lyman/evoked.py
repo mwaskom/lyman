@@ -231,6 +231,8 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
                               index=event_names)
 
         # Create the timeseries of event occurances
+        calc_tr = float(tr) / upsample
+
         event_list = []
         data_list = []
         for run, run_data in enumerate(data_i["data"], 1):
@@ -248,8 +250,7 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
             run_events.onset += offset
 
             event_id = np.zeros(len(run_data), int)
-            event_index = np.array(run_events.onset / tr).astype(int)
-            event_index *= upsample
+            event_index = np.array(run_events.onset / calc_tr).astype(int)
             event_id[event_index] = run_events.condition.map(event_map)
             event_list.append(event_id)
 
@@ -262,7 +263,6 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
         data = np.concatenate(data_list, axis=0)
 
         # Do the calculations
-        calc_tr = float(tr) / upsample
         calc_bins = n_bins * upsample
         if data.ndim == 1:
             evoked_data = _evoked_1d(data, event_info, calc_bins, calc_tr,
