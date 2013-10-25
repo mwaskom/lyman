@@ -54,6 +54,8 @@ Released Python Packages
 
 - scikit-learn 0.14
 
+- scikit-image 0.9
+
 - statsmodels 0.5
 
 - pandas 0.12

@@ -400,7 +400,7 @@ def extract_subject(subj, problem, roi_name, mask_name=None, frames=None,
     runs = sched.run
 
     # Apply the feature mask
-    X = X[..., good_features]
+    X =  np.atleast_3d(X)[:, :, good_features].squeeze()
 
     # Regress the confound vector out from the data matrix
     if confounds is not None:
