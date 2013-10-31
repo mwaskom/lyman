@@ -325,7 +325,7 @@ def parse_args(arglist):
     At each stage of the pipeline, a number of static image files are created
     to summarize the results of the processing and facilitate quality
     assurance. These files are stored in the output directories alongside the
-    data they correspond with and can be easily browsed using the Ziegler
+    data they correspond with and can be easily browsed using the ziegler
     web-app.
 
     The processing is organized into four large workflows that save their
@@ -408,6 +408,12 @@ def parse_args(arglist):
         `subj2`, and `subj3` with distributed execution in the `batch.q` queue
         of the Sun Grid Engine.
 
+    run_fmri.py -s pilot_subjects -w preproc -e nback -n 8
+
+        Preprocess the subjects enumerated in $LYMAN_DIR/pilot_subjects.txt
+        with the experiment details in $LYMAN_DIR/nback.py. Distribute the
+        execution locally with 8 parallel processes.
+
     run_fmri.py -s subj1 -w model reg ffx -e nback -a parametric
 
         Fit the model, register, and combine across runs for subject `subj1`
@@ -449,7 +455,7 @@ def parse_args(arglist):
     parser.add_argument("-timeseries", action="store_true",
                         help="perform registration on preprocessed timeseries")
     parser.add_argument("-unsmoothed", action="store_true",
-                        help="model and reg use unsmoothed image in volume")
+                        help="used unsmoothed data for model, reg, and ffx")
     return parser.parse_args(arglist)
 
 if __name__ == "__main__":
