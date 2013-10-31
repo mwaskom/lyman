@@ -61,6 +61,7 @@ def create_surface_ols_workflow(name="surface_group",
                   "glmfit")
 
     # Use the cached Monte-Carlo simulations for correction
+    # TODO expose sign as a configurable
     cluster = Node(Function(["y_file", "glm_dir",
                              "cluster_zthresh", "p_thresh"],
                             ["glm_dir"],

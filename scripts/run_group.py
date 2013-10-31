@@ -8,6 +8,8 @@ import sys
 import time
 import shutil
 import os.path as op
+from textwrap import dedent
+import argparse
 
 import matplotlib as mpl
 mpl.use("Agg")
@@ -129,7 +131,7 @@ def main(arglist):
                                       mfx_sink, mfx_output)
     mfx_outwrap.sink_outputs()
     mfx_outwrap.set_mapnode_substitutions(1)
-    mfx_outwrap.add_regexp_substitutions([("_l1_contrast_\w*/", "/")])
+    mfx_outwrap.add_regexp_substitutions([(r"_l1_contrast_[-\w]*/", "/")])
     mfx.connect(contrast_source, "l1_contrast",
                 mfx_sink, "container")
 
@@ -146,7 +148,71 @@ def main(arglist):
 
 def parse_args(arglist):
     """Take an arglist and return an argparse Namespace."""
+    help = dedent("""
+    Perform a basic group analysis in lyman.
+
+    This script currently only handles one-sample group mean tests
+    on each of the fixed-effects contrasts. It is possible to run
+    the group model in the volume or on the surface, although the
+    actual model changes depending on this choice.
+
+    The volume model uses FSL's FLAME mixed effects for hierarchical
+    inference that uses the lower-level variance estimates, and
+    it applies standard GRF-based correction for multiple comparisons.
+
+    The surface model uses a standard Ordinary Least Squares fit and
+    does correction with an approach based on a Monte Carlo simulation
+    of the null distribution of cluster sizes for smoothed Gaussian
+    data. Fortunately, the simulations are cached so this runs very
+    quickly. Unfortunately, the cached simulations used a whole-brain
+    search space, so this will be overly conservative for partial-brain
+    acquisitions.
+
+    For both the volume and surface modes, the inferential results can
+    be plotted on the fsaverage surface with PySurfer. In the volume
+    case, this uses a transformation that is less accurate than the
+    surface-based stream (although certainly adequate for visualization).
+    Because PySurfer is not always guaranteed to work, it is possible to
+    skip the visualization nodes.
+
+    By default the results are written under `group` next to the subject
+    level data in the lyman analysis directory, although the output
+    directory name can be changed.
+
+    Examples
+    --------
+
+    Note that the parameter switches match any unique short version
+    of the full parameter name.
+
+    run_group.py
+
+        With no arguments, this will process the default experiment
+        with the subjects defined in $LYMAN_DIR/subjects.txt in the
+        MNI space using the MultiProc plugin with 4 processes.
+
+    run_group.py -s pilot_subjects -r fsaverage -o pilot
+
+        This will processes the subjects defined in a file at
+        $LYMAN_DIR/pilot_subjects.txt as above but with the surface
+        workflow. The resulting files will be stored under
+        <analysis_dir>/nback/pilot/fsaverage/<contrast>/<hemi>
+
+    run_group.py -e nback -a parametric -p sge -q batch.q -n
+
+        This will process an alternate model for the `nback`
+        experiment using the SGE plugin by submitting jobs to the
+        batch.q queue. The surface visualization nodes will be
+        skipped, and `surfer` will not be imported.
+
+    Usage Details
+    -------------
+
+    """)
+
     parser = tools.parser
+    parser.description = help
+    parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.add_argument("-experiment", help="experimental paradigm")
     parser.add_argument("-altmodel", help="alternate model to fit")
     parser.add_argument("-regspace", default="mni",
@@ -154,6 +220,9 @@ def parse_args(arglist):
                         help="common space for group analysis")
     parser.add_argument("-output", default="group",
                         help="output directory name")
+    parser.add_argument("-nosurfviz", action="store_false",
+                        dest="surfviz",
+                        help="do not run the surface plotting nodes")
     return parser.parse_args(arglist)
 
 if __name__ == "__main__":
