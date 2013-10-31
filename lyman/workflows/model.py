@@ -82,6 +82,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                             "timeseries",
                             "pe_files"],
                            "calcrsquared")
+    calcrsquared.plugin_args = dict(qsub_args="-l h_vmem=8G")
 
     # Save the experiment info for this run
     dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],

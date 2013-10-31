@@ -120,29 +120,44 @@ def fixedfx_model(contrasts, copes, varcopes, dofs, masks):
     # Make an image with the DOF for each run
     dofs = np.array([np.loadtxt(f) for f in dofs])
     dof_data = np.ones((x, y, z, len(dofs))) * dofs
-    nib.Nifti1Image(dof_data, aff, hdr).to_filename("dof.nii.gz")
 
     # Find the intersection of the masks
     mask_data = [nib.load(f).get_data() for f in masks]
     common_mask = np.all(mask_data, axis=0)
     nib.Nifti1Image(common_mask, aff, hdr).to_filename("mask.nii.gz")
 
-    # Write out the design information
-    fsl.L2Model(num_copes=len(masks)).run()
-
     # Run the flame models
     flame_results = []
     zstat_files = []
     for i, contrast in enumerate(contrasts):
 
-        # Concatenate the copes and varcopes
-        for kind, files in zip(["cope", "varcope"],
-                               [copes[i], varcopes[i]]):
-            data = [nib.load(f).get_data()[..., np.newaxis] for f in files]
-            data = np.concatenate(data, axis=-1)
-            outname = kind + "_4d.nii.gz"
-            nib.Nifti1Image(data, aff, hdr).to_filename(outname)
+        # Load each run of cope and varcope files into a list
+        cs = [nib.load(f).get_data()[..., np.newaxis] for f in copes[i]]
+        vs = [nib.load(f).get_data()[..., np.newaxis] for f in varcopes[i]]
 
+        # Find all of the nonzero copes
+        # This handles cases where there were no events for some of
+        # the runs for the contrast we're currently dealing with
+        good_cs = [not np.allclose(d, 0) for d in cs]
+        good_vs = [not np.allclose(d, 0) for d in vs]
+        good = np.all([good_cs, good_vs], axis=0)
+
+        # Concatenate the cope and varcope data, saving only the good frames
+        c_data = np.concatenate(cs, axis=-1)[:, :, :, good]
+        v_data = np.concatenate(vs, axis=-1)[:, :, :, good]
+
+        # Write out the concatenated copes and varcopes
+        nib.Nifti1Image(c_data, aff, hdr).to_filename("cope_4d.nii.gz")
+        nib.Nifti1Image(v_data, aff, hdr).to_filename("varcope_4d.nii.gz")
+
+        # Write out a correctly sized design for this contrast
+        fsl.L2Model(num_copes=int(good.sum())).run()
+
+        # Mask the DOF data and write it out for this run
+        contrast_dof = dof_data[:, :, :, good]
+        nib.Nifti1Image(contrast_dof, aff, hdr).to_filename("dof.nii.gz")
+
+        # Build the flamo commandline and run
         flamecmd = ["flameo",
                     "--cope=cope_4d.nii.gz",
                     "--varcope=varcope_4d.nii.gz",
@@ -156,8 +171,10 @@ def fixedfx_model(contrasts, copes, varcopes, dofs, masks):
                     "--npo"]
         sub.check_output(flamecmd)
 
+        # Rename the written file and append to the outputs
         for kind in ["cope", "varcope"]:
-            os.rename(kind + "_4d.nii.gz", "%s/%s_4d.nii.gz" % (contrast, kind))
+            os.rename(kind + "_4d.nii.gz",
+                      "%s/%s_4d.nii.gz" % (contrast, kind))
 
         flame_results.append(op.abspath(contrast))
         zstat_files.append(op.abspath("%s/zstat1.nii.gz" % contrast))
