@@ -44,5 +44,6 @@ Documentation Contents:
    dependencies
    workflow
    experiments
+   commandline
    procstream
 

@@ -41,6 +41,14 @@ help:
 clean:
 	-rm -rf $(BUILDDIR)/*
 
+cmdline:
+	mkdir -p commandline
+	python ../scripts/run_fmri.py -h > commandline/run_fmri.txt
+	python ../scripts/run_group.py -h > commandline/run_group.txt
+	python ../scripts/run_warp.py -h > commandline/run_warp.txt
+	python ../scripts/make_masks.py -h > commandline/make_masks.txt
+	python ../scripts/anatomy_snapshots.py -h > commandline/anatomy_snapshots.txt
+
 html:
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
 	@echo
