@@ -37,6 +37,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                    exp_info=None,
                                    surfviz=True):
 
+    # Handle default arguments
     if subject_list is None:
         subject_list = []
     if regressors is None:
@@ -46,32 +47,37 @@ def create_volume_mixedfx_workflow(name="volume_group",
     if exp_info is None:
         exp_info = lyman.default_experiment_parameters()
 
+    # Define workflow inputs
     inputnode = Node(IdentityInterface(["l1_contrast",
                                         "copes",
                                         "varcopes",
                                         "dofs"]),
                      "inputnode")
 
+    # Merge the fixed effect summary images into one 4D image
     mergecope = Node(fsl.Merge(dimension="t"), "mergecope")
-
     mergevarcope = Node(fsl.Merge(dimension="t"), "mergevarcope")
-
     mergedof = Node(fsl.Merge(dimension="t"), "mergedof")
 
+    # Make a simple design
     design = Node(fsl.MultipleRegressDesign(regressors=regressors,
                                             contrasts=contrasts),
                   "design")
 
+    # Find the intersection of masks across subjects
     makemask = Node(Function(["varcope_file"],
                              ["mask_file"],
                              make_group_mask,
                              imports),
                     "makemask")
 
+    # Fit the mixed effects model
     flameo = Node(fsl.FLAMEO(run_mode=exp_info["flame_mode"]), "flameo")
 
+    # Estimate the smoothness of the data
     smoothest = Node(fsl.SmoothEstimate(), "zstat_file")
 
+    # Correct for multiple comparisons
     cluster = Node(fsl.Cluster(threshold=exp_info["cluster_zthresh"],
                                pthreshold=exp_info["grf_pthresh"],
                                out_threshold_file=True,
@@ -81,18 +87,21 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                use_mm=True),
                    "cluster")
 
+    # Deal with FSL's poorly formatted table of peaks
     peaktable = Node(Function(["localmax_file"],
                               ["out_file"],
                               imports=imports,
                               function=cluster_table),
                      "peaktable")
 
+    # Segment the z stat image with a watershed algorithm
     watershed = Node(Function(["zstat_file", "localmax_file"],
                               ["seg_file", "peak_file", "lut_file"],
                               watershed_segment,
                               imports),
                      "watershed")
 
+    # Make static report images in the volume
     report = Node(Function(["mask_file",
                             "zstat_file",
                             "localmax_file",
@@ -100,11 +109,12 @@ def create_volume_mixedfx_workflow(name="volume_group",
                             "seg_file",
                             "subjects"],
                            ["report"],
-                            mfx_report,
-                            imports),
+                           mfx_report,
+                           imports),
                   "report")
     report.inputs.subjects = subject_list
 
+    # Make static report images on the surface
     surfplot = Node(Function(["mask_file",
                               "zstat_file",
                               "cluster_zthresh",
@@ -116,6 +126,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
     surfplot.inputs.cluster_zthresh = exp_info["cluster_zthresh"]
     surfplot.inputs.surf_name = exp_info["surf_name"]
 
+    # Define the workflow outputs
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",
                                          "mask_file",
@@ -130,6 +141,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                          "surf_pngs"]),
                       "outputnode")
 
+    # Define and connect up the workflow
     group = Workflow(name)
     group.connect([
         (inputnode, mergecope,
@@ -194,7 +206,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("lut_file", "lut_file")]),
         (report, outputnode,
             [("report", "report")]),
-                   ])
+        ])
 
     if surfviz:
         group.connect([
@@ -204,9 +216,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                 [("threshold_file", "zstat_file")]),
             (surfplot, outputnode,
                 [("surf_pngs", "surf_pngs")]),
-                     ])
-
-
+        ])
 
     return group, inputnode, outputnode
 
@@ -353,7 +363,6 @@ def mfx_report(mask_file, zstat_file, localmax_file,
         f.text(left + width + .01, .018, fmt % high, ha="left",
                va="center", color="white", size=13, weight="demibold")
 
-
     # Now plot the zstat image
     mask = np.where(mask_data, np.nan, 1)
     mask_cmap = mpl.colors.ListedColormap(["#160016"])
@@ -476,6 +485,7 @@ def plot_surface_viz(mask_file, zstat_file, cluster_zthresh, surf_name):
     # Delay the import so the workflow can run without Pysurfer installed
     from surfer import Brain, io
     from mayavi import mlab
+    from traits.trait_errors import TraitError
 
     # Use the registration file to plot from MNI152 on fsaverage
     reg_file = op.join(os.environ["FREESURFER_HOME"],
@@ -499,7 +509,11 @@ def plot_surface_viz(mask_file, zstat_file, cluster_zthresh, surf_name):
 
         # Project the zstat data and plot it
         zstat_data = io.project_volume_data(zstat_file, hemi, reg_file)
-        b.add_overlay(zstat_data, cluster_zthresh, sign="pos", name="zstat") 
+        try:
+            b.add_overlay(zstat_data, cluster_zthresh,
+                          sign="pos", name="zstat")
+        except TraitError:
+            print "No vertices above the threshold."
 
         view_temp = "%s.zstat1_threshold_%s.png"
         views = ["lat", "med", "ven"]

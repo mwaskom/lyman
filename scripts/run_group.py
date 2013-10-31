@@ -152,35 +152,39 @@ def parse_args(arglist):
     help = dedent("""
     Perform a basic group analysis in lyman.
 
-    This script currently only handles one-sample group mean tests
-    on each of the fixed-effects contrasts. It is possible to run
-    the group model in the volume or on the surface, although the
-    actual model changes depending on this choice.
+    This script currently only handles one-sample group mean tests on each of
+    the fixed-effects contrasts. It is possible to run the group model in the
+    volume or on the surface, although the actual model changes depending on
+    this choice.
 
-    The volume model runs FSL's FLAME mixed effects for hierarchical
-    inference, which uses the lower-level variance estimates, and
-    it applies standard GRF-based correction for multiple comparisons.
-    The details of the model-fitting procedure are set in the experiment
-    file, along with the thresholds used for correction.
+    The volume model runs FSL's FLAME mixed effects for hierarchical inference,
+    which uses the lower-level variance estimates, and it applies standard
+    GRF-based correction for multiple comparisons.  The details of the
+    model-fitting procedure are set in the experiment file, along with the
+    thresholds used for correction.
 
-    The surface model uses a standard ordinary least squares fit and
-    does correction with an approach based on a Monte Carlo simulation
-    of the null distribution of cluster sizes for smoothed Gaussian
-    data. Fortunately, the simulations are cached so this runs very
-    quickly. Unfortunately, the cached simulations used a whole-brain
-    search space, so this will be overly conservative for partial-brain
-    acquisitions.
+    The surface model uses a standard ordinary least squares fit and does
+    correction with an approach based on a Monte Carlo simulation of the null
+    distribution of cluster sizes for smoothed Gaussian data. Fortunately, the
+    simulations are cached so this runs very quickly. Unfortunately, the cached
+    simulations used a whole-brain search space, so this will be overly
+    conservative for partial-brain acquisitions.
 
-    For both the volume and surface modes, the inferential results can
-    be plotted on the fsaverage surface with PySurfer. In the volume
-    case, this uses a transformation that is less accurate than the
-    surface-based stream (although certainly adequate for visualization).
-    Because PySurfer is not always guaranteed to work, it is possible to
-    skip the visualization nodes.
+    Because of how GRF-based correction works, the thresholded volume images
+    only have positive voxels. It is up to you to define "negative" versions of
+    any contrasts where you are interested in relative deactivation.  The
+    surface correction does not have this constraint, and the test sign is
+    configurable in the experiment file (and will thus apply to all contrasts).
 
-    By default the results are written under `group` next to the subject
-    level data in the lyman analysis directory, although the output
-    directory name can be changed.
+    For both the volume and surface modes, the inferential results can be
+    plotted on the fsaverage surface with PySurfer. In the volume case, this
+    uses a transformation that is less accurate than the surface-based stream
+    (although certainly adequate for visualization).  Because PySurfer is not
+    always guaranteed to work, it is possible to skip the visualization nodes.
+
+    By default the results are written under `group` next to the subject level
+    data in the lyman analysis directory, although the output directory name
+    can be changed.
 
     Examples
     --------
@@ -190,23 +194,22 @@ def parse_args(arglist):
 
     run_group.py
 
-        With no arguments, this will process the default experiment
-        with the subjects defined in $LYMAN_DIR/subjects.txt in the
-        MNI space using the MultiProc plugin with 4 processes.
+        With no arguments, this will process the default experiment with the
+        subjects defined in $LYMAN_DIR/subjects.txt in the MNI space using the
+        MultiProc plugin with 4 processes.
 
     run_group.py -s pilot_subjects -r fsaverage -o pilot
 
         This will processes the subjects defined in a file at
-        $LYMAN_DIR/pilot_subjects.txt as above but with the surface
-        workflow. The resulting files will be stored under
+        $LYMAN_DIR/pilot_subjects.txt as above but with the surface workflow.
+        The resulting files will be stored under
         <analysis_dir>/nback/pilot/fsaverage/<contrast>/<hemi>
 
     run_group.py -e nback -a parametric -p sge -q batch.q -n
 
-        This will process an alternate model for the `nback`
-        experiment using the SGE plugin by submitting jobs to the
-        batch.q queue. The surface visualization nodes will be
-        skipped, and `surfer` will not be imported.
+        This will process an alternate model for the `nback` experiment using
+        the SGE plugin by submitting jobs to the batch.q queue. The surface
+        visualization nodes will be skipped, and `surfer` will not be imported.
 
     Usage Details
     -------------
