@@ -155,6 +155,31 @@ Group Analysis Parameters
     A float specifying the minimum distance (in mm) between local
     minima when finding activation peaks.
 
+   surf_name
+    The name of a Freesurfer surface to plot group results on.
+
+   surf_smooth
+    Extent of spatial smoothing (in mm) to apply after sampling to the surface.
+
+   sampling_units
+    A string that is either "frac" or "mm" that makes up part of the specification
+    for projecting results onto the surface manifold. This only applies to group
+    analysis in fsaverage space.
+
+   sampling_method
+    A string that is either "average", "max", or "point that makes up part of
+    the specification for projecting results onto the surface manifold. This
+    only applies to group analysis in fsaverage space.
+
+   sampling_range
+    A 3-tuple of floats where where to start, stop and the size of the step
+    (all in `sampling_units`) when projecting data onto the white surface. This
+    only applies to group analysis in fsaverage space.
+
+   surf_corr_sign
+    A string that is either "pos", "neg", or "abs" for the sign of the test to
+    run. This only applies to group analysis in fsaverage space.
+
 The parameters that were present in this file at runtime will be saved with the
 other processing outputs in the preproc and model analysis directories (in a
 file called ``experiment_info.json``). Any comments in the docstring to this
