@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 """
-Group fMRI analysis frontend for Lyman ecosystem
+Group fMRI analysis frontend for Lyman ecosystem.
 
 """
 import os
@@ -61,21 +61,36 @@ def main(arglist):
                            iterables=("l1_contrast", exp["contrast_names"]),
                            name="contrast_source")
 
-    # Mixed effects group workflow
-    mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
-        args.output, subject_list, regressors, contrasts, exp)
+    # Group workflow
+    space = args.regspace
+    if space == "mni":
+        mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
+            args.output, subject_list, regressors, contrasts, exp)
+    else:
+        mfx, mfx_input, mfx_output = wf.create_surface_ols_workflow(
+            args.output, subject_list, exp)
 
     # Mixed effects inputs
-    mfx_base = op.join("{subject_id}/ffx/mni/smoothed/{l1_contrast}")
-    templates = dict(copes=op.join(mfx_base, "cope1.nii.gz"),
-                     varcopes=op.join(mfx_base, "varcope1.nii.gz"),
-                     dofs=op.join(mfx_base, "tdof_t1.nii.gz"))
+    ffxspace = "mni" if space == "mni" else "epi"
+    mfx_base = op.join("{subject_id}/ffx/%s/smoothed/{l1_contrast}" % ffxspace)
+    templates = dict(copes=op.join(mfx_base, "cope1.nii.gz"))
+    if space == "mni":
+        templates.update(dict(
+            varcopes=op.join(mfx_base, "varcope1.nii.gz"),
+            dofs=op.join(mfx_base, "tdof_t1.nii.gz")))
+    else:
+        templates.update(dict(
+            reg_file=op.join(anal_dir_base, "{subject_id}/preproc/run_1",
+                             "func2anat_tkreg.dat")))
+
+    # Workflow source node
     mfx_source = MapNode(SelectFiles(templates,
                                      base_directory=anal_dir_base,
                                      sort_filelist=True),
                          "subject_id",
                          "mfx_source")
 
+    # Workflow input connections
     mfx.connect([
         (contrast_source, mfx_source,
             [("l1_contrast", "l1_contrast")]),
@@ -84,21 +99,37 @@ def main(arglist):
         (subj_source, mfx_source,
             [("subject_id", "subject_id")]),
         (mfx_source, mfx_input,
-            [("copes", "copes"),
-             ("varcopes", "varcopes"),
-             ("dofs", "dofs")]),
-                 ])
+            [("copes", "copes")])
+                 ]),
+    if space == "mni":
+        mfx.connect([
+            (mfx_source, mfx_input,
+                [("varcopes", "varcopes"),
+                 ("dofs", "dofs")]),
+                     ])
+    else:
+        mfx.connect([
+            (mfx_source, mfx_input,
+                [("reg_file", "reg_file")]),
+            (subj_source, mfx_input,
+                [("subject_id", "subject_id")])
+                     ])
 
     # Mixed effects outputs
-    mfx_sink = Node(DataSink(base_directory="%s/%s/mni" % (anal_dir_base,
-                                                           args.output),
-                             substitutions=[("/stats", "/")],
-                             parameterization=False),
+    mfx_sink = Node(DataSink(base_directory="/".join([anal_dir_base,
+                                                      args.output,
+                                                      space]),
+                             substitutions=[("/stats", "/"),
+                                            ("_hemi_", ""),
+                                            ("_glm_results", "")],
+                             parameterization=True),
                     name="mfx_sink")
 
     mfx_outwrap = tools.OutputWrapper(mfx, subj_source,
                                       mfx_sink, mfx_output)
     mfx_outwrap.sink_outputs()
+    mfx_outwrap.set_mapnode_substitutions(1)
+    mfx_outwrap.add_regexp_substitutions([("_l1_contrast_\w*/", "/")])
     mfx.connect(contrast_source, "l1_contrast",
                 mfx_sink, "container")
 
@@ -118,6 +149,9 @@ def parse_args(arglist):
     parser = tools.parser
     parser.add_argument("-experiment", help="experimental paradigm")
     parser.add_argument("-altmodel", help="alternate model to fit")
+    parser.add_argument("-regspace", default="mni",
+                        choices=["mni", "fsaverage"],
+                        help="common space for group analysis")
     parser.add_argument("-output", default="group",
                         help="output directory name")
     return parser.parse_args(arglist)
