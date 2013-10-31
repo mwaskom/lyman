@@ -69,43 +69,39 @@ def create_volume_mixedfx_workflow(name="volume_group",
 
     flameo = Node(fsl.FLAMEO(run_mode=exp_info["flame_mode"]), "flameo")
 
-    smoothest = MapNode(fsl.SmoothEstimate(), "zstat_file", "smoothest")
+    smoothest = Node(fsl.SmoothEstimate(), "zstat_file")
 
-    cluster = MapNode(fsl.Cluster(threshold=exp_info["cluster_zthresh"],
-                                  pthreshold=exp_info["grf_pthresh"],
-                                  out_threshold_file=True,
-                                  out_index_file=True,
-                                  out_localmax_txt_file=True,
-                                  peak_distance=exp_info["peak_distance"],
-                                  use_mm=True),
-                      ["in_file", "dlh", "volume"],
-                      "cluster")
+    cluster = Node(fsl.Cluster(threshold=exp_info["cluster_zthresh"],
+                               pthreshold=exp_info["grf_pthresh"],
+                               out_threshold_file=True,
+                               out_index_file=True,
+                               out_localmax_txt_file=True,
+                               peak_distance=exp_info["peak_distance"],
+                               use_mm=True),
+                   "cluster")
 
-    peaktable = MapNode(Function(["localmax_file"],
-                                 ["out_file"],
-                                 imports=imports,
-                                 function=cluster_table),
-                        "localmax_file",
-                        "peaktable")
+    peaktable = Node(Function(["localmax_file"],
+                              ["out_file"],
+                              imports=imports,
+                              function=cluster_table),
+                     "peaktable")
 
-    watershed = MapNode(Function(["zstat_file", "localmax_file"],
-                                 ["seg_file", "peak_file", "lut_file"],
-                                 watershed_segment,
-                                 imports),
-                        ["zstat_file", "localmax_file"],
-                        "watershed")
-
-    report = MapNode(Function(["mask_file",
-                               "zstat_file",
-                               "localmax_file",
-                               "cope_file",
-                               "seg_file",
-                               "subjects"],
-                              ["report"],
-                              mfx_report,
+    watershed = Node(Function(["zstat_file", "localmax_file"],
+                              ["seg_file", "peak_file", "lut_file"],
+                              watershed_segment,
                               imports),
-                     ["zstat_file", "localmax_file", "seg_file"],
-                     "report")
+                     "watershed")
+
+    report = Node(Function(["mask_file",
+                            "zstat_file",
+                            "localmax_file",
+                            "cope_file",
+                            "seg_file",
+                            "subjects"],
+                           ["report"],
+                            mfx_report,
+                            imports),
+                  "report")
     report.inputs.subjects = subject_list
 
     outputnode = Node(IdentityInterface(["copes",
