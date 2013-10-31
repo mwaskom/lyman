@@ -65,12 +65,13 @@ def main(arglist):
 
     # Group workflow
     space = args.regspace
+    surfviz = args.surfviz
     if space == "mni":
         mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
-            args.output, subject_list, regressors, contrasts, exp)
+            args.output, subject_list, regressors, contrasts, exp, surfviz)
     else:
         mfx, mfx_input, mfx_output = wf.create_surface_ols_workflow(
-            args.output, subject_list, exp)
+            args.output, subject_list, exp, surfviz)
 
     # Mixed effects inputs
     ffxspace = "mni" if space == "mni" else "epi"
@@ -156,11 +157,13 @@ def parse_args(arglist):
     the group model in the volume or on the surface, although the
     actual model changes depending on this choice.
 
-    The volume model uses FSL's FLAME mixed effects for hierarchical
-    inference that uses the lower-level variance estimates, and
+    The volume model runs FSL's FLAME mixed effects for hierarchical
+    inference, which uses the lower-level variance estimates, and
     it applies standard GRF-based correction for multiple comparisons.
+    The details of the model-fitting procedure are set in the experiment
+    file, along with the thresholds used for correction.
 
-    The surface model uses a standard Ordinary Least Squares fit and
+    The surface model uses a standard ordinary least squares fit and
     does correction with an approach based on a Monte Carlo simulation
     of the null distribution of cluster sizes for smoothed Gaussian
     data. Fortunately, the simulations are cached so this runs very

@@ -34,7 +34,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                    subject_list=None,
                                    regressors=None,
                                    contrasts=None,
-                                   exp_info=None):
+                                   exp_info=None,
+                                   surfviz=True):
 
     if subject_list is None:
         subject_list = []
@@ -104,6 +105,17 @@ def create_volume_mixedfx_workflow(name="volume_group",
                   "report")
     report.inputs.subjects = subject_list
 
+    surfplot = Node(Function(["mask_file",
+                              "zstat_file",
+                              "cluster_zthresh",
+                              "surf_name"],
+                             ["surf_pngs"],
+                             plot_surface_viz,
+                             imports),
+                    "surfplot")
+    surfplot.inputs.cluster_zthresh = exp_info["cluster_zthresh"]
+    surfplot.inputs.surf_name = exp_info["surf_name"]
+
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",
                                          "mask_file",
@@ -114,7 +126,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                          "seg_file",
                                          "peak_file",
                                          "lut_file",
-                                         "report"]),
+                                         "report",
+                                         "surf_pngs"]),
                       "outputnode")
 
     group = Workflow(name)
@@ -182,6 +195,18 @@ def create_volume_mixedfx_workflow(name="volume_group",
         (report, outputnode,
             [("report", "report")]),
                    ])
+
+    if surfviz:
+        group.connect([
+            (makemask, surfplot,
+                [("mask_file", "mask_file")]),
+            (cluster, surfplot,
+                [("threshold_file", "zstat_file")]),
+            (surfplot, outputnode,
+                [("surf_pngs", "surf_pngs")]),
+                     ])
+
+
 
     return group, inputnode, outputnode
 
@@ -443,3 +468,55 @@ def cluster_table(localmax_file):
     out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
     df.to_csv(out_file)
     return out_file
+
+
+def plot_surface_viz(mask_file, zstat_file, cluster_zthresh, surf_name):
+    """Use PySurfer to project the zstat file onto the surface and plot."""
+
+    # Delay the import so the workflow can run without Pysurfer installed
+    from surfer import Brain, io
+    from mayavi import mlab
+
+    # Use the registration file to plot from MNI152 on fsaverage
+    reg_file = op.join(os.environ["FREESURFER_HOME"],
+                       "average/mni152.register.dat")
+    for hemi in ["lh", "rh"]:
+
+        # Load the visualization
+        b = Brain("fsaverage", hemi, surf_name,
+                  config_opts=dict(background="white",
+                                   width=800, height=500))
+
+        # Project the mask onto the surface and flip the boolean
+        mask_data = io.project_volume_data(mask_file, hemi, reg_file,
+                                           projsum="max",
+                                           smooth_fwhm=0)
+        mask_data = np.logical_not(mask_data).astype(np.float)
+
+        # Plot the masked-out vertices
+        b.add_data(mask_data, min=0, max=10, thresh=.5,
+                   colormap="bone", alpha=.6, colorbar=False)
+
+        # Project the zstat data and plot it
+        zstat_data = io.project_volume_data(zstat_file, hemi, reg_file)
+        b.add_overlay(zstat_data, cluster_zthresh, sign="pos", name="zstat") 
+
+        view_temp = "%s.zstat1_threshold_%s.png"
+        views = ["lat", "med", "ven"]
+        for view in views:
+
+            if view == "ven":
+                b.overlays["zstat"].pos_bar.visible = True
+            else:
+                b.overlays["zstat"].pos_bar.visible = False
+
+            b.show_view(view, distance=330)
+
+            b.save_image(view_temp % (hemi, view))
+
+        frames = [mpl.image.imread(view_temp % (hemi, v)) for v in views]
+        full_img = np.concatenate(frames, axis=0)
+        mpl.image.imsave("%s.zstat1_threshold.png" % hemi, full_img)
+
+    return_temp = op.abspath("%s.zstat1_threshold.png")
+    return [return_temp % hemi for hemi in ["lh", "rh"]]
