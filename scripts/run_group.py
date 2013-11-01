@@ -206,7 +206,7 @@ def parse_args(arglist):
         The resulting files will be stored under
         <analysis_dir>/nback/pilot/fsaverage/<contrast>/<hemi>
 
-    run_group.py -e nback -a parametric -p sge -q batch.q -n
+    run_group.py -e nback -a parametric -p sge -q batch.q -nosurf
 
         This will process an alternate model for the `nback` experiment using
         the SGE plugin by submitting jobs to the batch.q queue. The surface
