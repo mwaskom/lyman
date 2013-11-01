@@ -66,12 +66,13 @@ def main(arglist):
     # Group workflow
     space = args.regspace
     surfviz = args.surfviz
+    wf_name = "_".join([space, args.output])
     if space == "mni":
         mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
-            args.output, subject_list, regressors, contrasts, exp, surfviz)
+            wf_name, subject_list, regressors, contrasts, exp, surfviz)
     else:
         mfx, mfx_input, mfx_output = wf.create_surface_ols_workflow(
-            args.output, subject_list, exp, surfviz)
+            wf_name, subject_list, exp, surfviz)
 
     # Mixed effects inputs
     ffxspace = "mni" if space == "mni" else "epi"
