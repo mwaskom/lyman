@@ -117,6 +117,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
     # Make static report images on the surface
     surfplot = Node(Function(["mask_file",
                               "zstat_file",
+                              "cluster_peaks",
                               "cluster_zthresh",
                               "surf_name"],
                              ["surf_pngs"],
@@ -214,6 +215,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
                 [("mask_file", "mask_file")]),
             (cluster, surfplot,
                 [("threshold_file", "zstat_file")]),
+            (peaktable, surfplot,
+                [("out_file", "cluster_peaks")]),
             (surfplot, outputnode,
                 [("surf_pngs", "surf_pngs")]),
         ])
@@ -479,7 +482,8 @@ def cluster_table(localmax_file):
     return out_file
 
 
-def plot_surface_viz(mask_file, zstat_file, cluster_zthresh, surf_name):
+def plot_surface_viz(mask_file, zstat_file, cluster_peaks, cluster_zthresh,
+                     surf_name):
     """Use PySurfer to project the zstat file onto the surface and plot."""
 
     # Delay the import so the workflow can run without Pysurfer installed
@@ -490,6 +494,10 @@ def plot_surface_viz(mask_file, zstat_file, cluster_zthresh, surf_name):
     # Use the registration file to plot from MNI152 on fsaverage
     reg_file = op.join(os.environ["FREESURFER_HOME"],
                        "average/mni152.register.dat")
+
+    # Initialize the outputs list
+    out_files = []
+
     for hemi in ["lh", "rh"]:
 
         # Load the visualization
@@ -509,20 +517,20 @@ def plot_surface_viz(mask_file, zstat_file, cluster_zthresh, surf_name):
 
         # Project the zstat data and plot it
         zstat_data = io.project_volume_data(zstat_file, hemi, reg_file)
-        try:
+        if zstat_data.any():
             b.add_overlay(zstat_data, cluster_zthresh,
                           sign="pos", name="zstat")
-        except TraitError:
-            print "No vertices above the threshold."
 
+        # Save the zstat overlays
         view_temp = "%s.zstat1_threshold_%s.png"
         views = ["lat", "med", "ven"]
         for view in views:
 
-            if view == "ven":
-                b.overlays["zstat"].pos_bar.visible = True
-            else:
-                b.overlays["zstat"].pos_bar.visible = False
+            if "zstat" in b.overlays:
+                if view == "ven":
+                    b.overlays["zstat"].pos_bar.visible = True
+                else:
+                    b.overlays["zstat"].pos_bar.visible = False
 
             b.show_view(view, distance=330)
 
@@ -531,6 +539,36 @@ def plot_surface_viz(mask_file, zstat_file, cluster_zthresh, surf_name):
         frames = [mpl.image.imread(view_temp % (hemi, v)) for v in views]
         full_img = np.concatenate(frames, axis=0)
         mpl.image.imsave("%s.zstat1_threshold.png" % hemi, full_img)
+        out_files.append(op.abspath("%s.zstat1_threshold.png" % hemi))
 
-    return_temp = op.abspath("%s.zstat1_threshold.png")
-    return [return_temp % hemi for hemi in ["lh", "rh"]]
+        # Remove the zstat overlay and plot the foci
+        if "zstat" in b.overlays:
+            b.overlays["zstat"].remove()
+
+        # Read in the peak file
+        peaks = pd.read_csv(cluster_peaks)[["x", "y", "z"]]
+        if len(peaks):
+            palette = seaborn.husl_palette(len(peaks))
+            for i, xyz in peaks.iterrows():
+                if ((xyz["x"] <= 0 and hemi == "lh")
+                   or (xyz["x"] >= 0 and hemi == "rh")):
+
+                    # Plot the foci as sphereoids
+                    b.add_foci(xyz.values,
+                               map_surface="white",
+                               color=palette[i])
+
+        # Save the peak overlays
+        view_temp = "%s.zstat1_threshold_peaks_%s.png"
+        views = ["lat", "med", "ven"]
+        for view in views:
+
+            b.show_view(view, distance=330)
+            b.save_image(view_temp % (hemi, view))
+
+        frames = [mpl.image.imread(view_temp % (hemi, v)) for v in views]
+        full_img = np.concatenate(frames, axis=0)
+        mpl.image.imsave("%s.zstat1_threshold_peaks.png" % hemi, full_img)
+        out_files.append(op.abspath("%s.zstat1_threshold_peaks.png" % hemi))
+
+    return out_files

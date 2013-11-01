@@ -196,17 +196,19 @@ def plot_surface_viz(mask_file, sig_file, hemi, sign,
     views = ["lat", "med", "ven"]
     for view in views:
 
-        if view == "ven":
-            b.overlays["zstat"].pos_bar.visible = True
-        else:
-            b.overlays["zstat"].pos_bar.visible = False
+        if "zstat" in b.overlays:
+            if view == "ven":
+                b.overlays["zstat"].pos_bar.visible = True
+            else:
+                b.overlays["zstat"].pos_bar.visible = False
 
         b.show_view(view, distance=330)
 
         b.save_image(view_temp % view)
 
-    frames = [mpl.image.imread(view_temp % v)) for v in views]
+    frames = [mpl.image.imread(view_temp % v) for v in views]
     full_img = np.concatenate(frames, axis=0)
 
     mpl.image.imsave("zstat_threshold.png", full_img)
+
     return op.abspath("zstat_threshold.png")
