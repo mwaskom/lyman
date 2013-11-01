@@ -161,20 +161,23 @@ Group Analysis Parameters
    surf_smooth
     Extent of spatial smoothing (in mm) to apply after sampling to the surface.
 
-   sampling_units
-    A string that is either "frac" or "mm" that makes up part of the specification
-    for projecting results onto the surface manifold. This only applies to group
-    analysis in fsaverage space.
-
-   sampling_method
-    A string that is either "average", "max", or "point that makes up part of
-    the specification for projecting results onto the surface manifold. This
-    only applies to group analysis in fsaverage space.
-
    sampling_range
     A 3-tuple of floats where where to start, stop and the size of the step
     (all in `sampling_units`) when projecting data onto the white surface. This
     only applies to group analysis in fsaverage space.
+
+   sampling_units
+    A string that is either "frac" or "mm" that makes up part of the
+    specification for projecting results onto the surface manifold (it
+    determines the units of the `sampling_range` paramters`). This only applies
+    to group analysis in fsaverage space.
+
+   sampling_method
+    A string that is either "average", "max", or "point" that makes up part of
+    the specification for projecting results onto the surface manifold (it
+    determines how to summarize the samples obtained using `sampling_range` and
+    `sampling_method` into a single value at each verex). This only applies to
+    group analysis in fsaverage space.
 
    surf_corr_sign
     A string that is either "pos", "neg", or "abs" for the sign of the test to
