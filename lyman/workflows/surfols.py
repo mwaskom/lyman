@@ -192,7 +192,7 @@ def plot_surface_viz(mask_file, sig_file, hemi, sign,
         print "No vertices above the threshold."
 
     # Save the plots
-    view_temp = "%s.zstat_threshold_%s.png"
+    view_temp = "zstat_threshold_%s.png"
     views = ["lat", "med", "ven"]
     for view in views:
 
@@ -203,10 +203,10 @@ def plot_surface_viz(mask_file, sig_file, hemi, sign,
 
         b.show_view(view, distance=330)
 
-        b.save_image(view_temp % (hemi, view))
+        b.save_image(view_temp % view)
 
-    frames = [mpl.image.imread(view_temp % (hemi, v)) for v in views]
+    frames = [mpl.image.imread(view_temp % v)) for v in views]
     full_img = np.concatenate(frames, axis=0)
 
-    mpl.image.imsave("%s.zstat_threshold.png" % hemi, full_img)
-    return op.abspath("%s.zstat_threshold.png" % hemi)
+    mpl.image.imsave("zstat_threshold.png", full_img)
+    return op.abspath("zstat_threshold.png")
