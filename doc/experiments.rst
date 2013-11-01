@@ -130,7 +130,8 @@ Model Parameters
     present in the design, but you do not have to include the names of any
     conditions not involved in the contrast. If you provided a list of
     condition names, baseline contrasts are automatically generated for each of
-    these conditions and prepended to this list.
+    these conditions and prepended to this list. Importantly, the contrast names
+    end up in file paths for the analysis results, so you should avoid spaces.
 
 Group Analysis Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~
