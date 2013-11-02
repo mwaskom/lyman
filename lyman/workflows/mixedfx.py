@@ -517,9 +517,12 @@ def plot_surface_viz(mask_file, zstat_file, cluster_peaks, cluster_zthresh,
 
         # Project the zstat data and plot it
         zstat_data = io.project_volume_data(zstat_file, hemi, reg_file)
-        if zstat_data.any():
-            b.add_overlay(zstat_data, cluster_zthresh,
-                          sign="pos", name="zstat")
+        if zstat_data.min() > cluster_zthresh:
+            try:
+                b.add_overlay(zstat_data, min=cluster_zthresh,
+                              sign="pos", name="zstat")
+            except TraitError:
+                pass
 
         # Save the zstat overlays
         view_temp = "%s.zstat1_threshold_%s.png"
