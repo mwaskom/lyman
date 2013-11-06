@@ -33,7 +33,8 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
                                         "masks",
                                         "dofs",
                                         "ss_files",
-                                        "anatomy"]),
+                                        "anatomy",
+                                        "reg_file"]),
                      name="inputnode")
 
     # Fit the fixedfx model for each contrast
@@ -41,7 +42,8 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
                               "copes",
                               "varcopes",
                               "dofs",
-                              "masks"],
+                              "masks",
+                              "reg_file"],
                              ["flame_results",
                               "zstat_files"],
                              fixedfx_model,
@@ -77,7 +79,8 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
             [("copes", "copes"),
              ("varcopes", "varcopes"),
              ("dofs", "dofs"),
-             ("masks", "masks")]),
+             ("masks", "masks"),
+             ("reg_file", "reg_file")]),
         (inputnode, ffxr2,
             [("ss_files", "ss_files")]),
         (inputnode, report,
@@ -102,7 +105,7 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
 # ------------------------
 
 
-def fixedfx_model(contrasts, copes, varcopes, dofs, masks):
+def fixedfx_model(contrasts, copes, varcopes, dofs, masks, reg_file):
     """Fit the fixed effects model for each contrast."""
     n_con = len(contrasts)
 
@@ -175,6 +178,17 @@ def fixedfx_model(contrasts, copes, varcopes, dofs, masks):
         for kind in ["cope", "varcope"]:
             os.rename(kind + "_4d.nii.gz",
                       "%s/%s_4d.nii.gz" % (contrast, kind))
+
+        # Put the zstats on the surface
+        for hemi in ["lh", "rh"]:
+            projcmd = ["mri_vol2surf",
+                       "--mov", "%s/zstat1.nii.gz" % contrast,
+                       "--reg", reg_file,
+                       "--surf-fwhm", "5",
+                       "--hemi", hemi,
+                       "--projfrac-avg", "0", "1", ".1",
+                       "--o", "%s/%s.zstat1.mgz" % (contrast, hemi)]
+            sub.check_output(projcmd)
 
         flame_results.append(op.abspath(contrast))
         zstat_files.append(op.abspath("%s/zstat1.nii.gz" % contrast))

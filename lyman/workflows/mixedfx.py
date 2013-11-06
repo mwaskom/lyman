@@ -105,17 +105,13 @@ def create_volume_mixedfx_workflow(name="volume_group",
     hemisource = Node(IdentityInterface(["mni_hemi"]), "hemisource")
     hemisource.iterables = ("mni_hemi", ["lh", "rh"])
 
-    # Matrix to register an MNI map to the fsaverage surface
-    mni_reg = op.join(os.environ["FREESURFER_HOME"],
-                      "average/mni152.register.dat")
-
     zstatproj = Node(freesurfer.SampleToSurface(
         sampling_method=exp_info["sampling_method"],
         sampling_range=exp_info["sampling_range"],
         sampling_units=exp_info["sampling_units"],
         smooth_surf=exp_info["surf_smooth"],
         subject_id="fsaverage",
-        reg_file=mni_reg,
+        mni152reg=True,
         target_subject="fsaverage"),
         "zstatproj")
 
@@ -126,7 +122,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
         sampling_units=exp_info["sampling_units"],
         smooth_surf=exp_info["surf_smooth"],
         subject_id="fsaverage",
-        reg_file=mni_reg,
+        mni152reg=True,
         target_subject="fsaverage"),
         "maskproj")
 

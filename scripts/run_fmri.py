@@ -255,11 +255,16 @@ def main(arglist):
                          )
     ffx_lists = ffx_templates.keys()
 
+    # Space-conditional inputs
     if space == "mni":
         bg = op.join(data_dir, "{subject_id}/normalization/brain_warp.nii.gz")
+        reg = op.join(os.environ["FREESURFER_HOME"],
+                      "average/mni152.register.dat")
     else:
         bg = "{subject_id}/preproc/run_1/mean_func.nii.gz"
+        reg = "{subject_id}/preproc/run_1/func2anat_tkreg.dat"
     ffx_templates["anatomy"] = bg
+    ffx_templates["reg_file"] = reg
 
     # Define the ffxistration data source node
     ffx_source = Node(SelectFiles(ffx_templates,
