@@ -27,8 +27,7 @@ imports = ["import os",
 
 def create_surface_ols_workflow(name="surface_group",
                                 subject_list=None,
-                                exp_info=None,
-                                surfviz=True):
+                                exp_info=None):
     """Workflow to project ffx copes onto surface and run ols."""
     if subject_list is None:
         subject_list = []
@@ -81,21 +80,6 @@ def create_surface_ols_workflow(name="surface_group",
     cluster.inputs.p_thresh = exp_info["grf_pthresh"]
     cluster.inputs.sign = exp_info["surf_corr_sign"]
 
-    # Plot the results on the surface
-    surfplot = Node(Function(["mask_file",
-                              "sig_file",
-                              "hemi",
-                              "sign",
-                              "cluster_zthresh",
-                              "surf_name"],
-                             ["surf_png"],
-                             plot_surface_viz,
-                             imports),
-                    "surfplot")
-    surfplot.inputs.cluster_zthresh = exp_info["cluster_zthresh"]
-    surfplot.inputs.sign = exp_info["surf_corr_sign"]
-    surfplot.inputs.surf_name = exp_info["surf_name"]
-
     # Return the outputs
     outputnode = Node(IdentityInterface(["glm_dir", "surf_png"]), "outputnode")
 
@@ -121,19 +105,6 @@ def create_surface_ols_workflow(name="surface_group",
         (glmfit, outputnode,
             [("glm_dir", "glm_dir")]),
         ])
-
-    # Optionally connect the surface visualization
-    if surfviz:
-        group.connect([
-            (glmfit, surfplot,
-                [("mask_file", "mask_file")]),
-            (cluster, surfplot,
-                [("thresholded_file", "sig_file")]),
-            (hemisource, surfplot,
-                [("hemi", "hemi")]),
-            (surfplot, outputnode,
-                [("surf_png", "surf_png")]),
-            ])
 
     return group, inputnode, outputnode
 
