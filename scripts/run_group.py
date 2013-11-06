@@ -65,14 +65,13 @@ def main(arglist):
 
     # Group workflow
     space = args.regspace
-    surfviz = args.surfviz
     wf_name = "_".join([space, args.output])
     if space == "mni":
         mfx, mfx_input, mfx_output = wf.create_volume_mixedfx_workflow(
-            wf_name, subject_list, regressors, contrasts, exp, surfviz)
+            wf_name, subject_list, regressors, contrasts, exp)
     else:
         mfx, mfx_input, mfx_output = wf.create_surface_ols_workflow(
-            wf_name, subject_list, exp, surfviz)
+            wf_name, subject_list, exp)
 
     # Mixed effects inputs
     ffxspace = "mni" if space == "mni" else "epi"
@@ -124,7 +123,7 @@ def main(arglist):
                                                       args.output,
                                                       space]),
                              substitutions=[("/stats", "/"),
-                                            ("_hemi_", ""),
+                                            ("/_hemi_", "/"),
                                             ("_glm_results", "")],
                              parameterization=True),
                     name="mfx_sink")
@@ -133,7 +132,10 @@ def main(arglist):
                                       mfx_sink, mfx_output)
     mfx_outwrap.sink_outputs()
     mfx_outwrap.set_mapnode_substitutions(1)
-    mfx_outwrap.add_regexp_substitutions([(r"_l1_contrast_[-\w]*/", "/")])
+    mfx_outwrap.add_regexp_substitutions([
+        (r"_l1_contrast_[-\w]*/", "/"),
+        (r"_mni_hemi_[lr]h", "")
+        ])
     mfx.connect(contrast_source, "l1_contrast",
                 mfx_sink, "container")
 

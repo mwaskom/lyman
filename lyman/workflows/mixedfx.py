@@ -9,7 +9,8 @@ from skimage import morphology
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from nipype import fsl, IdentityInterface, Function, Node, MapNode, Workflow
+from nipype import (fsl, freesurfer, IdentityInterface, Function, Rename,
+                    Node, MapNode, Workflow)
 
 import seaborn
 from moss import locator
@@ -34,8 +35,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                    subject_list=None,
                                    regressors=None,
                                    contrasts=None,
-                                   exp_info=None,
-                                   surfviz=True):
+                                   exp_info=None):
 
     # Handle default arguments
     if subject_list is None:
@@ -101,6 +101,35 @@ def create_volume_mixedfx_workflow(name="volume_group",
                               imports),
                      "watershed")
 
+    # Sample the zstat image to the surface
+    hemisource = Node(IdentityInterface(["mni_hemi"]), "hemisource")
+    hemisource.iterables = ("mni_hemi", ["lh", "rh"])
+
+    # Matrix to register an MNI map to the fsaverage surface
+    mni_reg = op.join(os.environ["FREESURFER_HOME"],
+                      "average/mni152.register.dat")
+
+    zstatproj = Node(freesurfer.SampleToSurface(
+        sampling_method=exp_info["sampling_method"],
+        sampling_range=exp_info["sampling_range"],
+        sampling_units=exp_info["sampling_units"],
+        smooth_surf=exp_info["surf_smooth"],
+        subject_id="fsaverage",
+        reg_file=mni_reg,
+        target_subject="fsaverage"),
+        "zstatproj")
+
+    # Sample the mask to the surface
+    maskproj = Node(freesurfer.SampleToSurface(
+        sampling_method="max",
+        sampling_range=exp_info["sampling_range"],
+        sampling_units=exp_info["sampling_units"],
+        smooth_surf=exp_info["surf_smooth"],
+        subject_id="fsaverage",
+        reg_file=mni_reg,
+        target_subject="fsaverage"),
+        "maskproj")
+
     # Make static report images in the volume
     report = Node(Function(["mask_file",
                             "zstat_file",
@@ -114,32 +143,20 @@ def create_volume_mixedfx_workflow(name="volume_group",
                   "report")
     report.inputs.subjects = subject_list
 
-    # Make static report images on the surface
-    surfplot = Node(Function(["mask_file",
-                              "zstat_file",
-                              "cluster_peaks",
-                              "cluster_zthresh",
-                              "surf_name"],
-                             ["surf_pngs"],
-                             plot_surface_viz,
-                             imports),
-                    "surfplot")
-    surfplot.inputs.cluster_zthresh = exp_info["cluster_zthresh"]
-    surfplot.inputs.surf_name = exp_info["surf_name"]
-
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",
                                          "mask_file",
                                          "flameo_stats",
                                          "thresh_zstat",
+                                         "surf_zstat",
+                                         "surf_mask",
                                          "cluster_image",
                                          "cluster_peaks",
                                          "seg_file",
                                          "peak_file",
                                          "lut_file",
-                                         "report",
-                                         "surf_pngs"]),
+                                         "report"]),
                       "outputnode")
 
     # Define and connect up the workflow
@@ -188,6 +205,14 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("seg_file", "seg_file")]),
         (cluster, peaktable,
             [("localmax_txt_file", "localmax_file")]),
+        (cluster, zstatproj,
+            [("threshold_file", "source_file")]),
+        (hemisource, zstatproj,
+            [("mni_hemi", "hemi")]),
+        (makemask, maskproj,
+            [("mask_file", "source_file")]),
+        (hemisource, maskproj,
+            [("mni_hemi", "hemi")]),
         (mergecope, outputnode,
             [("merged_file", "copes")]),
         (mergevarcope, outputnode,
@@ -205,20 +230,12 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("seg_file", "seg_file"),
              ("peak_file", "peak_file"),
              ("lut_file", "lut_file")]),
+        (zstatproj, outputnode,
+            [("out_file", "surf_zstat")]),
+        (maskproj, outputnode,
+            [("out_file", "surf_mask")]),
         (report, outputnode,
             [("report", "report")]),
-        ])
-
-    if surfviz:
-        group.connect([
-            (makemask, surfplot,
-                [("mask_file", "mask_file")]),
-            (cluster, surfplot,
-                [("threshold_file", "zstat_file")]),
-            (peaktable, surfplot,
-                [("out_file", "cluster_peaks")]),
-            (surfplot, outputnode,
-                [("surf_pngs", "surf_pngs")]),
         ])
 
     return group, inputnode, outputnode
