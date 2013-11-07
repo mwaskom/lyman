@@ -81,7 +81,7 @@ def create_surface_ols_workflow(name="surface_group",
     cluster.inputs.sign = exp_info["surf_corr_sign"]
 
     # Return the outputs
-    outputnode = Node(IdentityInterface(["glm_dir", "surf_png"]), "outputnode")
+    outputnode = Node(IdentityInterface(["glm_dir", "sig_file"]), "outputnode")
 
     # Define and connect the workflow
     group = Workflow(name)
@@ -104,6 +104,8 @@ def create_surface_ols_workflow(name="surface_group",
             [("glm_dir", "glm_dir")]),
         (glmfit, outputnode,
             [("glm_dir", "glm_dir")]),
+        (cluster, outputnode,
+            [("thresholded_file", "sig_file")]),
         ])
 
     return group, inputnode, outputnode
