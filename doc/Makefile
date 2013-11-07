@@ -48,6 +48,7 @@ cmdline:
 	python ../scripts/run_warp.py -h > commandline/run_warp.txt
 	python ../scripts/make_masks.py -h > commandline/make_masks.txt
 	python ../scripts/anatomy_snapshots.py -h > commandline/anatomy_snapshots.txt
+	python ../scripts/surface_snapshots.py -h > commandline/surface_snapshots.txt
 
 html:
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html

@@ -11,7 +11,7 @@ run_fmri.py
 .. literalinclude:: commandline/run_fmri.txt
 
 run_group.py
------------
+------------
 
 .. literalinclude:: commandline/run_group.txt
 
@@ -22,11 +22,16 @@ run_warp.py
 
 
 make_masks.py
------------
+-------------
 
 .. literalinclude:: commandline/make_masks.txt
 
 anatomy_snapshots.py
------------
+--------------------
 
 .. literalinclude:: commandline/anatomy_snapshots.txt
+
+surface_snapshots.py
+--------------------
+
+.. literalinclude:: commandline/surface_snapshots.txt
