@@ -31,3 +31,8 @@ Mixed Effects Model
 
 .. image:: ../graphs/volume_group.dot.png
 
+Surface OLS Model
+-----------------
+
+.. image:: ../graphs/surface_group.dot.png
+

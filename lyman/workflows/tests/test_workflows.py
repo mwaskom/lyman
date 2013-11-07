@@ -3,6 +3,9 @@ import re
 from nose.tools import assert_is_instance
 from nipype import Workflow, Node, IdentityInterface
 
+import warnings
+warnings.simplefilter("ignore", UserWarning)
+
 from lyman import workflows as wf
 
 

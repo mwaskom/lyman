@@ -9,7 +9,8 @@ from skimage import morphology
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from nipype import fsl, IdentityInterface, Function, Node, MapNode, Workflow
+from nipype import (fsl, freesurfer, IdentityInterface, Function, Rename,
+                    Node, MapNode, Workflow)
 
 import seaborn
 from moss import locator
@@ -36,6 +37,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                    contrasts=None,
                                    exp_info=None):
 
+    # Handle default arguments
     if subject_list is None:
         subject_list = []
     if regressors is None:
@@ -45,74 +47,106 @@ def create_volume_mixedfx_workflow(name="volume_group",
     if exp_info is None:
         exp_info = lyman.default_experiment_parameters()
 
+    # Define workflow inputs
     inputnode = Node(IdentityInterface(["l1_contrast",
                                         "copes",
                                         "varcopes",
                                         "dofs"]),
                      "inputnode")
 
+    # Merge the fixed effect summary images into one 4D image
     mergecope = Node(fsl.Merge(dimension="t"), "mergecope")
-
     mergevarcope = Node(fsl.Merge(dimension="t"), "mergevarcope")
-
     mergedof = Node(fsl.Merge(dimension="t"), "mergedof")
 
+    # Make a simple design
     design = Node(fsl.MultipleRegressDesign(regressors=regressors,
                                             contrasts=contrasts),
                   "design")
 
+    # Find the intersection of masks across subjects
     makemask = Node(Function(["varcope_file"],
                              ["mask_file"],
                              make_group_mask,
                              imports),
                     "makemask")
 
+    # Fit the mixed effects model
     flameo = Node(fsl.FLAMEO(run_mode=exp_info["flame_mode"]), "flameo")
 
-    smoothest = MapNode(fsl.SmoothEstimate(), "zstat_file", "smoothest")
+    # Estimate the smoothness of the data
+    smoothest = Node(fsl.SmoothEstimate(), "zstat_file")
 
-    cluster = MapNode(fsl.Cluster(threshold=exp_info["cluster_zthresh"],
-                                  pthreshold=exp_info["grf_pthresh"],
-                                  out_threshold_file=True,
-                                  out_index_file=True,
-                                  out_localmax_txt_file=True,
-                                  peak_distance=exp_info["peak_distance"],
-                                  use_mm=True),
-                      ["in_file", "dlh", "volume"],
-                      "cluster")
+    # Correct for multiple comparisons
+    cluster = Node(fsl.Cluster(threshold=exp_info["cluster_zthresh"],
+                               pthreshold=exp_info["grf_pthresh"],
+                               out_threshold_file=True,
+                               out_index_file=True,
+                               out_localmax_txt_file=True,
+                               peak_distance=exp_info["peak_distance"],
+                               use_mm=True),
+                   "cluster")
 
-    peaktable = MapNode(Function(["localmax_file"],
-                                 ["out_file"],
-                                 imports=imports,
-                                 function=cluster_table),
-                        "localmax_file",
-                        "peaktable")
+    # Deal with FSL's poorly formatted table of peaks
+    peaktable = Node(Function(["localmax_file"],
+                              ["out_file"],
+                              imports=imports,
+                              function=cluster_table),
+                     "peaktable")
 
-    watershed = MapNode(Function(["zstat_file", "localmax_file"],
-                                 ["seg_file", "peak_file", "lut_file"],
-                                 watershed_segment,
-                                 imports),
-                        ["zstat_file", "localmax_file"],
-                        "watershed")
-
-    report = MapNode(Function(["mask_file",
-                               "zstat_file",
-                               "localmax_file",
-                               "cope_file",
-                               "seg_file",
-                               "subjects"],
-                              ["report"],
-                              mfx_report,
+    # Segment the z stat image with a watershed algorithm
+    watershed = Node(Function(["zstat_file", "localmax_file"],
+                              ["seg_file", "peak_file", "lut_file"],
+                              watershed_segment,
                               imports),
-                     ["zstat_file", "localmax_file", "seg_file"],
-                     "report")
+                     "watershed")
+
+    # Sample the zstat image to the surface
+    hemisource = Node(IdentityInterface(["mni_hemi"]), "hemisource")
+    hemisource.iterables = ("mni_hemi", ["lh", "rh"])
+
+    zstatproj = Node(freesurfer.SampleToSurface(
+        sampling_method=exp_info["sampling_method"],
+        sampling_range=exp_info["sampling_range"],
+        sampling_units=exp_info["sampling_units"],
+        smooth_surf=exp_info["surf_smooth"],
+        subject_id="fsaverage",
+        mni152reg=True,
+        target_subject="fsaverage"),
+        "zstatproj")
+
+    # Sample the mask to the surface
+    maskproj = Node(freesurfer.SampleToSurface(
+        sampling_method="max",
+        sampling_range=exp_info["sampling_range"],
+        sampling_units=exp_info["sampling_units"],
+        smooth_surf=exp_info["surf_smooth"],
+        subject_id="fsaverage",
+        mni152reg=True,
+        target_subject="fsaverage"),
+        "maskproj")
+
+    # Make static report images in the volume
+    report = Node(Function(["mask_file",
+                            "zstat_file",
+                            "localmax_file",
+                            "cope_file",
+                            "seg_file",
+                            "subjects"],
+                           ["report"],
+                           mfx_report,
+                           imports),
+                  "report")
     report.inputs.subjects = subject_list
 
+    # Define the workflow outputs
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",
                                          "mask_file",
                                          "flameo_stats",
                                          "thresh_zstat",
+                                         "surf_zstat",
+                                         "surf_mask",
                                          "cluster_image",
                                          "cluster_peaks",
                                          "seg_file",
@@ -121,6 +155,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                          "report"]),
                       "outputnode")
 
+    # Define and connect up the workflow
     group = Workflow(name)
     group.connect([
         (inputnode, mergecope,
@@ -166,6 +201,14 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("seg_file", "seg_file")]),
         (cluster, peaktable,
             [("localmax_txt_file", "localmax_file")]),
+        (cluster, zstatproj,
+            [("threshold_file", "source_file")]),
+        (hemisource, zstatproj,
+            [("mni_hemi", "hemi")]),
+        (makemask, maskproj,
+            [("mask_file", "source_file")]),
+        (hemisource, maskproj,
+            [("mni_hemi", "hemi")]),
         (mergecope, outputnode,
             [("merged_file", "copes")]),
         (mergevarcope, outputnode,
@@ -183,9 +226,13 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("seg_file", "seg_file"),
              ("peak_file", "peak_file"),
              ("lut_file", "lut_file")]),
+        (zstatproj, outputnode,
+            [("out_file", "surf_zstat")]),
+        (maskproj, outputnode,
+            [("out_file", "surf_mask")]),
         (report, outputnode,
             [("report", "report")]),
-                   ])
+        ])
 
     return group, inputnode, outputnode
 
@@ -331,7 +378,6 @@ def mfx_report(mask_file, zstat_file, localmax_file,
                color="white", size=13, weight="demibold")
         f.text(left + width + .01, .018, fmt % high, ha="left",
                va="center", color="white", size=13, weight="demibold")
-
 
     # Now plot the zstat image
     mask = np.where(mask_data, np.nan, 1)

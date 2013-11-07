@@ -117,6 +117,12 @@ def default_experiment_parameters():
         cluster_zthresh=2.3,
         grf_pthresh=0.05,
         peak_distance=30,
+        surf_name="inflated",
+        surf_smooth=5,
+        sampling_units="frac",
+        sampling_method="average",
+        sampling_range=(0, 1, .1),
+        surf_corr_sign="pos",
 
                )
     return exp
