@@ -179,12 +179,6 @@ def parse_args(arglist):
     surface correction does not have this constraint, and the test sign is
     configurable in the experiment file (and will thus apply to all contrasts).
 
-    For both the volume and surface modes, the inferential results can be
-    plotted on the fsaverage surface with PySurfer. In the volume case, this
-    uses a transformation that is less accurate than the surface-based stream
-    (although certainly adequate for visualization).  Because PySurfer is not
-    always guaranteed to work, it is possible to skip the visualization nodes.
-
     By default the results are written under `group` next to the subject level
     data in the lyman analysis directory, although the output directory name
     can be changed.
@@ -206,13 +200,12 @@ def parse_args(arglist):
         This will processes the subjects defined in a file at
         $LYMAN_DIR/pilot_subjects.txt as above but with the surface workflow.
         The resulting files will be stored under
-        <analysis_dir>/nback/pilot/fsaverage/<contrast>/<hemi>
+        <analysis_dir>/<experiment>/pilot/fsaverage/<contrast>/<hemi>
 
-    run_group.py -e nback -a parametric -p sge -q batch.q -nosurf
+    run_group.py -e nback -a parametric -p sge -q batch.q
 
         This will process an alternate model for the `nback` experiment using
-        the SGE plugin by submitting jobs to the batch.q queue. The surface
-        visualization nodes will be skipped, and `surfer` will not be imported.
+        the SGE plugin by submitting jobs to the batch.q queue.
 
     Usage Details
     -------------
@@ -229,9 +222,6 @@ def parse_args(arglist):
                         help="common space for group analysis")
     parser.add_argument("-output", default="group",
                         help="output directory name")
-    parser.add_argument("-nosurfviz", action="store_false",
-                        dest="surfviz",
-                        help="do not run the surface plotting nodes")
     return parser.parse_args(arglist)
 
 if __name__ == "__main__":
