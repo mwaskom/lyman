@@ -181,8 +181,6 @@ def fixedfx_model(contrasts, copes, varcopes, dofs, masks, reg_file):
 
         # Put the zstats and mask on the surface
         for hemi in ["lh", "rh"]:
-
-            # ZStat image
             projcmd = ["mri_vol2surf",
                        "--mov", "%s/zstat1.nii.gz" % contrast,
                        "--reg", reg_file,
