@@ -14,8 +14,7 @@ mpl.use("Agg")
 import matplotlib.pyplot as plt
 
 import moss
-from lyman import frontend
-
+import lyman
 
 class MaskFactory(object):
     """Class for the rapid and flexible creation of functional masks.
@@ -29,8 +28,8 @@ class MaskFactory(object):
                  orig_type, force_serial=False, debug=False):
 
         # Set up basic info
-        self.subject_list = frontend.determine_subjects(subject_list)
-        project = frontend.gather_project_info()
+        self.subject_list = lyman.determine_subjects(subject_list)
+        project = lyman.gather_project_info()
         self.experiment = experiment
         self.roi_name = roi_name
         self.orig_type = orig_type
@@ -211,7 +210,7 @@ class MaskFactory(object):
                  "--nearest"])
         self.execute(xfm_cmds, self.out_template)
 
-    def from_statistical_file(self, stat_file_temp, thresh):
+    def apply_statistical_mask(self, stat_file_temp, thresh):
         """Create a mask by binarizing an epi-space fixed effects zstat map."""
         bin_cmds = []
         for subj in self.subject_list:
@@ -220,6 +219,8 @@ class MaskFactory(object):
                    stat_file_temp % args,
                    "-thr", thresh,
                    "-bin",
+                   "-mul",
+                   self.out_template % args,
                    self.out_template % args]
             bin_cmds.append(cmd)
 

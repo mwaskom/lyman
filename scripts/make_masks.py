@@ -1,44 +1,12 @@
 #! /usr/bin/env python
 """Create masks in native functional space from a variety of sources.
-
-Currently this can start with ROIs defined as a surface label on
-fsaverage, labels defined on each subject's native surface, ROIs
-defined on the high-res volume in Freesurfer space, or a statistical
-volume from a subject-level analysis.
-
-You can always pass a filepath (possibly with ``subj`` and ``hemi``
-string format keys to -orig and the program will work out what to
-do from the file type and other arugments. Alternatively, if files
-are in expected places (Freesurfer data hierarchy, lyman analysis
-hierarchy) there are shortcuts for the corresponding image type.
-
-The processing is almost entirely dependent on external binaries
-from FSL and Freesurfer, so both must be availible.
-
-The resulting masks are defined in the space of the first functional
-run. This is also the target of the ``-regspace epi`` registration
-in the main lyman fmri workflows.
-
-The processing here is closely tied to these fmri workflows and requires
-subject-level preprocessing to have been performed. This program
-should be executed from a directory containing a project.py file
-that defines the relevant data and analysis paths.
-
-The script will also write a mosiac png with the mask overlaid on
-the mean functional image defining the epi space. Additionally, it
-will write a json file with the command line argument dictionary
-for provenence tracking.
-
-If an IPython cluster is running, the processing will be executed
-in parallel by default on all availible engines. This can be avoided
-by using the -serial option.
-
 """
 import sys
 import json
 import time
 import os.path as op
 import argparse
+from textwrap import dedent
 
 from lyman.maskfactory import MaskFactory
 
@@ -59,9 +27,7 @@ def main(arglist):
     # Otherwise we have to figure it out from the other arguments
     elif args.orig is not None and args.orig.endswith(".label"):
         orig_type = "native_label" if args.label else "fsaverage_label"
-    elif args.thresh is not None:
-        orig_type = "stat_volume"
-    elif args.roi_id is not None:
+    elif args.id is not None:
         orig_type = "index_volume"
     else:
         raise ValueError("Could not determine orig type from arguments.")
@@ -108,26 +74,23 @@ def main(arglist):
                                  "mri", "aseg.mgz")
         else:
             atlas_temp = args.orig
-        factory.from_hires_atlas(atlas_temp, args.roi_id)
+        factory.from_hires_atlas(atlas_temp, args.id)
 
-    # Thresholded statistical volume
-    elif orig_type == "stat_volume":
-        if args.orig is None:
-            smooth_dir = "unsmoothed" if args.unsmoothed else "smoothed"
-            if args.altmodel is None:
-                exp = factory.experiment
-            else:
-                exp = factory.experiment + "-" + args.altmodel
-            stat_file_temp = op.join(factory.anal_dir,
-                                     exp,
-                                     "%(subj)s",
-                                     "ffx", "epi",
-                                     smooth_dir,
-                                     args.contrast,
-                                     "zstat1.nii.gz")
+    # Combine mask image with a thresholded stat volume
+    if args.contrast is not None:
+        smooth_dir = "unsmoothed" if args.unsmoothed else "smoothed"
+        if args.altmodel is None:
+            exp = factory.experiment
         else:
-            stat_file_temp = args.orig
-        factory.from_statistical_file(stat_file_temp, args.thresh)
+            exp = factory.experiment + "-" + args.altmodel
+        stat_file_temp = op.join(factory.anal_dir,
+                                 exp,
+                                 "%(subj)s",
+                                 "ffx", "epi",
+                                 smooth_dir,
+                                 args.contrast,
+                                 "zstat1.nii.gz")
+        factory.apply_statistical_mask(stat_file_temp, args.thresh)
 
     # Write an image of the mask
     factory.write_png()
@@ -143,14 +106,54 @@ def main(arglist):
 
 def parse_args(arglist):
     """Handle the command line."""
-    parser = argparse.ArgumentParser(description=__doc__,
+    help = dedent("""
+    Currently this can start with ROIs defined as a surface label on
+    fsaverage, labels defined on each subject's native surface, ROIs
+    defined on the high-res volume in Freesurfer space, or a statistical
+    volume from a subject-level analysis.
+
+    You can always pass a filepath (possibly with ``subj`` and ``hemi``
+    string format keys to -orig and the program will work out what to
+    do from the file type and other arugments. Alternatively, if files
+    are in expected places (Freesurfer data hierarchy, lyman analysis
+    hierarchy) there are shortcuts for the corresponding image type.
+
+    The processing is almost entirely dependent on external binaries
+    from FSL and Freesurfer, so both must be availible.
+
+    The resulting masks are defined in the space of the first functional
+    run. This is also the target of the ``-regspace epi`` registration
+    in the main lyman fmri workflows.
+
+    The processing here is closely tied to these fmri workflows and requires
+    subject-level preprocessing to have been performed. This program
+    should be executed from a directory containing a project.py file
+    that defines the relevant data and analysis paths.
+
+    The script will also write a mosiac png with the mask overlaid on
+    the mean functional image defining the epi space. Additionally, it
+    will write a json file with the command line argument dictionary
+    for provenence tracking.
+
+    If an IPython cluster is running, the processing will be executed
+    in parallel by default on all availible engines. This can be avoided
+    by using the -serial option.
+
+    Usage Details
+    -------------
+
+    """)
+
+    parser = argparse.ArgumentParser(description=help,
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Necessary arguments
     parser.add_argument("-s", "-subjects", nargs="*", dest="subjects",
-                        help="subject ids or path to text file")
+                        help="lyman subjects argument")
     parser.add_argument("-roi", required=True,
-                        help="will form name out output mask file")
+                        help="will form name of output mask file")
+
+    # Optional argument (that always applies)
     parser.add_argument("-exp",
                         help="experiment (can use default from project.py)")
 
@@ -175,7 +178,7 @@ def parse_args(arglist):
     # Atlas-type image relevant images
     parser.add_argument("-aseg", action="store_true",
                         help="atlas image is aseg.mgz")
-    parser.add_argument("-roi_id", type=int, nargs="*",
+    parser.add_argument("-id", type=int, nargs="*",
                         help="roi id(s) if orig is index volume")
 
     # Thresholded statistic relevant arguments
