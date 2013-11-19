@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 """Make static images of lyman results using PySurfer."""
 import os
 import os.path as op
