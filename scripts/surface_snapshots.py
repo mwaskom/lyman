@@ -175,10 +175,12 @@ def save_view_panes(b, sign, hemi):
 
         # Handle the colorbar
         if "stat" in b.overlays:
-            if sign in ("pos", "abs") and hemi == "rh":
-                b.overlays["stat"].pos_bar.visible = view == "ven"
-            if sign in ("neg", "abs") and hemi == "lh":
-                b.overlays["stat"].neg_bar.visible = view == "ven"
+            show_pos = hemi == "rh" and view == "ven"
+            show_neg = hemi == "lh" and view == "ven"
+            if sign in ("pos", "abs"):
+                b.overlays["stat"].pos_bar.visible = show_pos
+            if sign in ("neg", "abs"):
+                b.overlays["stat"].neg_bar.visible = show_neg
 
         # Set the view and screenshot
         b.show_view(view, distance=330)
