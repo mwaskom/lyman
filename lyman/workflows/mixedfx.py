@@ -75,7 +75,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
     flameo = Node(fsl.FLAMEO(run_mode=exp_info["flame_mode"]), "flameo")
 
     # Estimate the smoothness of the data
-    smoothest = Node(fsl.SmoothEstimate(), "zstat_file")
+    smoothest = Node(fsl.SmoothEstimate(), "smoothest")
 
     # Correct for multiple comparisons
     cluster = Node(fsl.Cluster(threshold=exp_info["cluster_zthresh"],
