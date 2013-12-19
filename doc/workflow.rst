@@ -37,7 +37,8 @@ for each of your experiments.
 If you want to have a list of default subjects to perform processing over, put
 their subject ids in a plain text file called ``subjects.txt`` within this
 directory. You can define different groups of subjects too in files called
-``<groupname>.txt``.
+``<groupname>.txt``. These files should have one subject id per row, and each
+subject id should correspond to a subdirectory in your *data_dir*.
 
 Prepare the Data
 ----------------
