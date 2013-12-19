@@ -106,6 +106,8 @@ def default_experiment_parameters():
 
         design_name=None,
         condition_names=None,
+        regressor_file=None,
+        regressor_names=None,
         hrf_model="GammaDifferenceHRF",
         temporal_deriv=False,
         regressors=None,

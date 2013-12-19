@@ -28,22 +28,26 @@ imports = ["import os.path as op",
 
 def create_timeseries_model_workflow(name="model", exp_info=None):
 
-    # Define the workflow inputs
-    inputnode = Node(IdentityInterface(["design_file",
-                                        "realign_file",
-                                        "artifact_file",
-                                        "timeseries"]),
-                     "inputs")
-
     # Default experiment parameters for generating graph inamge, testing, etc.
     if exp_info is None:
         exp_info = default_experiment_parameters()
+
+    # Define constant inputs
+    inputs = ["design_file", "realign_file", "artifact_file", "timeseries"]
+
+    # Possibly add the regressor file to the inputs
+    if exp_info["regressor_file"] is not None:
+        inputs.append("regressor_file")
+
+    # Define the workflow inputs
+    inputnode = Node(IdentityInterface(inputs), "inputs")
 
     # Set up the experimental design
     modelsetup = MapNode(Function(["exp_info",
                                    "design_file",
                                    "realign_file",
                                    "artifact_file",
+                                   "regressor_file",
                                    "run"],
                                   ["design_matrix_file",
                                    "contrast_file",
@@ -54,6 +58,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                           ["realign_file", "artifact_file", "run"],
                           "modelsetup")
     modelsetup.inputs.exp_info = exp_info
+    if exp_info["regressor_file"] is None:
+        modelsetup.inputs.regressor_file = None
 
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
@@ -180,7 +186,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
 # ========================
 
 
-def setup_model(design_file, realign_file, artifact_file, exp_info, run):
+def setup_model(design_file, realign_file, artifact_file, regressor_file,
+                exp_info, run):
     """Build the model design."""
     design = pd.read_csv(design_file)
     design = design[design.run == run]
@@ -192,6 +199,13 @@ def setup_model(design_file, realign_file, artifact_file, exp_info, run):
     ntp = len(artifacts)
     tr = exp_info["TR"]
 
+    if regressor_file is None:
+        regressors = None
+    else:
+        regressors = pd.read_csv(regressor_file)
+        if exp_info["regressor_names"] is not None:
+            regressors = regressors[regressors]
+
     # Set up the HRF model
     hrf = getattr(glm, exp_info["hrf_model"])
     hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
@@ -199,6 +213,7 @@ def setup_model(design_file, realign_file, artifact_file, exp_info, run):
     # Keep tabs on the keyword arguments for the design matrix
     design_kwargs = dict(confounds=realign,
                          artifacts=artifacts,
+                         regressors=regressors,
                          tr=tr,
                          condition_names=exp_info["condition_names"],
                          confound_pca=exp_info["confound_pca"],

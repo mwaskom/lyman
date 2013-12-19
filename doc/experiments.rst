@@ -104,6 +104,23 @@ Model Parameters
     used. Otherwise, the design matrix will include only the conditions named
     in this list (in the order provided here).
 
+   regressor_file
+    The name of a file containing information about other regressors to add to
+    the timeseries model. This value should fill in a template that is
+    <data_dir>/<subject_id>/design/<regressor_file>.csv. The format is a csv
+    where column names are regressor names, and rows are observations of the
+    regressor at each timepoint in the timeseries. This information is not
+    transformed in any way when building the design matrix. This is intended
+    to allow the use of, e.g., BOLD timeseres information from seed ROIs.
+    The regressors are considered elements "of interest" in the design matrix,
+    can be included in contrasts, and contribute to the "main model" R^2
+    calculation.
+
+   regressor_names
+    A list of strings that can be used to select specific columns from the
+    regressor file specified above. If None, all columns in the csv file
+    are used.
+
    hrf_model
     A string corresponding to the name of the HRF model class. Currently
     only ``GammaDifferenceHRF`` is supported.
