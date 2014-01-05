@@ -106,15 +106,7 @@ Model Parameters
 
    regressor_file
     The name of a file containing information about other regressors to add to
-    the timeseries model. This value should fill in a template that is
-    <data_dir>/<subject_id>/design/<regressor_file>.csv. The format is a csv
-    where column names are regressor names, and rows are observations of the
-    regressor at each timepoint in the timeseries. This information is not
-    transformed in any way when building the design matrix. This is intended
-    to allow the use of, e.g., BOLD timeseres information from seed ROIs.
-    The regressors are considered elements "of interest" in the design matrix,
-    can be included in contrasts, and contribute to the "main model" R^2
-    calculation.
+    the timeseries model (see below).
 
    regressor_names
     A list of strings that can be used to select specific columns from the
@@ -208,8 +200,11 @@ module will be included in this archive. Note that if you preprocess your data,
 change the experiment definition, and then run the model without rerunning
 preproc, the preprocessing parameters in this archived file will be inaccurate.
 
-The Design File
----------------
+Detailed Design Information
+---------------------------
+
+The design file
+~~~~~~~~~~~~~~~
 
 You also have to generate a file in ``csv`` format for each subject specifying
 what actually happened during the scan. This file should live at
@@ -270,6 +265,41 @@ above would read
     1,hard,12,0,1,1.217
     2,easy,0,0,1,0.993
     2,hard,12,0,1,1.328
+
+The regressors file
+~~~~~~~~~~~~~~~~~~~
+
+A secondary and optional way to add design information uses a ``regressor``
+file.  This file, like the ``design`` file, should be a ``csv`` and should live
+at ``<data_dir>/<subject_id>/design/<regressor_file>.csv``, where
+``regressor_file`` is specified in the experiment file. The format is a csv
+where column names are regressor names and rows are observations of the
+regressors at each timepoint in the experiment. Additionally, the file must
+have a ``run`` column, specifying the 1-based run number for each observation.
+This information is not transformed in any way when building the design matrix.
+This is intended to allow the use of, e.g., BOLD timeseries information
+extracted from seed ROIs for functional connectivity analyses. The regressors
+are considered elements "of interest" in the design matrix, can be included in
+contrasts, and contribute to the "main model" R^2 calculation.
+
+An example file for an experiment where each run has 3 TRs and the experimenter
+is interested in functional connectivity early visual areas might look like
+
+::
+
+    run,V1,V2
+    1,104.9,107.2
+    1,111.4,102.3
+    1,109.3,103.2
+    2,121.3,119.8
+    2,124.7,115.3
+    2,119.5,118.1
+
+Each experiment can take information from at most one regressor file, but you
+can create multiple regressor files for different experiments. It is also
+possible to include all possible regressors in a single file and select the
+specific columns for each experiment using the ``regressor_names`` field in
+the experiment definition.
 
 Specifying Alternate Models
 ---------------------------

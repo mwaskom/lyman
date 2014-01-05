@@ -190,7 +190,7 @@ def setup_model(design_file, realign_file, artifact_file, regressor_file,
                 exp_info, run):
     """Build the model design."""
     design = pd.read_csv(design_file)
-    design = design[design.run == run]
+    design = design[design["run"] == run]
 
     realign = pd.read_csv(realign_file)
     realign = realign.filter(regex="rot|trans").apply(stats.zscore)
@@ -203,6 +203,7 @@ def setup_model(design_file, realign_file, artifact_file, regressor_file,
         regressors = None
     else:
         regressors = pd.read_csv(regressor_file)
+        regressors = regressors[regressors["run"] == run].drop("run", axis=1)
         if exp_info["regressor_names"] is not None:
             regressors = regressors[regressors]
 
@@ -271,6 +272,9 @@ def setup_model(design_file, realign_file, artifact_file, regressor_file,
     design_matrix_file = op.abspath("design.mat")
     contrast_file = op.abspath("design.con")
     X.to_fsl_files("design", exp_info["contrasts"])
+
+    # Close the open figures
+    plt.close("all")
 
     return design_matrix_file, contrast_file, design_matrix_pkl, report
 
