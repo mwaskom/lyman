@@ -211,7 +211,7 @@ def setup_model(design_file, realign_file, artifact_file, regressor_file,
         regressors = pd.read_csv(regressor_file)
         regressors = regressors[regressors["run"] == run].drop("run", axis=1)
         if exp_info["regressor_names"] is not None:
-            regressors = regressors[exp_info["regressors"]]
+            regressors = regressors[exp_info["regressor_names"]]
         regressors.index = np.arange(ntp) * tr
 
     # Set up the HRF model
