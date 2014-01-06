@@ -67,7 +67,8 @@ def main(arglist):
                 os.makedirs(subj_dir)
             link_dir = op.join(analysis_dir, subj, "preproc")
             if not op.exists(link_dir):
-                os.symlink("../../preproc", link_dir)
+                preproc_dir = op.join("../..", exp_base, subj, "preproc")
+                os.symlink(preproc_dir, link_dir)
 
     # For later processing steps, are we using smoothed inputs?
     smoothing = "unsmoothed" if args.unsmoothed else "smoothed"
