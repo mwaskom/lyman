@@ -179,6 +179,12 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
             [("report", "report")]),
         ])
 
+    if exp_info["regressor_file"] is not None:
+        model.connect([
+            (inputnode, modelsetup,
+                [("regressor_file", "regressor_file")])
+                       ])
+
     return model, inputnode, outputnode
 
 
