@@ -280,20 +280,22 @@ This information is not transformed in any way when building the design matrix.
 This is intended to allow the use of, e.g., BOLD timeseries information
 extracted from seed ROIs for functional connectivity analyses. The regressors
 are considered elements "of interest" in the design matrix, can be included in
-contrasts, and contribute to the "main model" R^2 calculation.
+contrasts, and contribute to the "main model" R^2 calculation. Note that it is
+probably advisable to de-mean these values before writing them to the file.
 
 An example file for an experiment where each run has 3 TRs and the experimenter
 is interested in functional connectivity early visual areas might look like
 
 ::
 
-    run,V1,V2
-    1,104.9,107.2
-    1,111.4,102.3
-    1,109.3,103.2
-    2,121.3,119.8
-    2,124.7,115.3
-    2,119.5,118.1
+    V1,V2,run
+    1.46,1.55,1
+    0.80,-0.37,1
+    -1.91,-1.01,1
+    -0.65,0.38,2
+    1.00,1.01,2
+    -0.88,-2.00,2
+
 
 Each experiment can take information from at most one regressor file, but you
 can create multiple regressor files for different experiments. It is also
