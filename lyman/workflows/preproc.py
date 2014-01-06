@@ -669,7 +669,7 @@ def detect_artifacts(timeseries, mask_file, motion_file,
     art_motion = rel_motion > motion_thresh
 
     # Plot the timecourses with outliers
-    blue, green, red, _, _ = seaborn.color_palette("deep")
+    blue, green, red = seaborn.color_palette("deep", 3)
     f, (ax_int, ax_mot) = plt.subplots(2, 1, sharex=True,
                                        figsize=(8, 3.75))
     ax_int.axhline(-intensity_thresh, c="gray", ls="--")
