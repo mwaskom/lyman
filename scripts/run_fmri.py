@@ -125,13 +125,17 @@ def main(arglist):
         name=smoothing + "_model", exp_info=exp)
 
     model_base = op.join(analysis_dir, "{subject_id}/preproc/run_*/")
-    design_file = "%s.csv" % exp["design_name"]
+    design_file = exp["design_name"] + ".csv"
     model_templates = dict(
         design_file=op.join(data_dir, "{subject_id}/design", design_file),
         realign_file=op.join(model_base, "realignment_params.csv"),
         artifact_file=op.join(model_base, "artifacts.csv"),
         timeseries=op.join(model_base, smoothing + "_timeseries.nii.gz"),
                            )
+    if exp["regressor_file"] is not None:
+        regressor_file = exp["regressor_file"] + ".csv"
+        model_templates["regressor_file"] = op.join(data_dir, "{subject_id}",
+                                                    "design", regressor_file)
 
     model_source = Node(SelectFiles(model_templates), "model_source")
 

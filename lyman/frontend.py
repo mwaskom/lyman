@@ -80,9 +80,6 @@ def gather_experiment_info(exp_name=None, altmodel=None):
     # Build contrasts list if neccesary
     exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
 
-    if "regressors" not in exp_dict:
-        exp_dict["regressors"] = []
-
     return exp_dict
 
 
@@ -106,9 +103,10 @@ def default_experiment_parameters():
 
         design_name=None,
         condition_names=None,
+        regressor_file=None,
+        regressor_names=None,
         hrf_model="GammaDifferenceHRF",
         temporal_deriv=False,
-        regressors=None,
         confound_pca=False,
         hrf_params={},
         contrasts=[],
