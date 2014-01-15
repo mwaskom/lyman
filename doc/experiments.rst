@@ -276,12 +276,11 @@ at ``<data_dir>/<subject_id>/design/<regressor_file>.csv``, where
 where column names are regressor names and rows are observations of the
 regressors at each timepoint in the experiment. Additionally, the file must
 have a ``run`` column, specifying the 1-based run number for each observation.
-This information is not transformed in any way when building the design matrix.
-This is intended to allow the use of, e.g., BOLD timeseries information
-extracted from seed ROIs for functional connectivity analyses. The regressors
-are considered elements "of interest" in the design matrix, can be included in
-contrasts, and contribute to the "main model" R^2 calculation. Note that it is
-probably advisable to de-mean these values before writing them to the file.
+This information is not transformed when building the design matrix beyond
+de-meaning by run.  This is intended to allow the use of, e.g., BOLD timeseries
+information extracted from seed ROIs for functional connectivity analyses. The
+regressors are considered elements "of interest" in the design matrix, can be
+included in contrasts, and contribute to the "main model" R^2 calculation.
 
 An example file for an experiment where each run has 3 TRs and the experimenter
 is interested in functional connectivity early visual areas might look like
