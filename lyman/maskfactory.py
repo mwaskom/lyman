@@ -175,7 +175,7 @@ class MaskFactory(object):
         # Execute the final step
         self.execute(combine_cmds, self.out_template)
 
-    def from_hires_atlas(self, hires_atlas_template, region_ids,erode):
+    def from_hires_atlas(self, hires_atlas_template, region_ids, erode):
         """Create epi space mask from index volume (e.g. aseg.mgz"""
         hires_mask_template = op.join(self.temp_dir,
                                       "%(subj)s_hires_mask.nii.gz")
@@ -186,10 +186,11 @@ class MaskFactory(object):
             args = dict(subj=subj)
             cmd_list = ["mri_binarize",
                         "--i", hires_atlas_template % args,
-                        "--o", hires_mask_template % args,
-                        "--erode",str(erode)]
+                        "--o", hires_mask_template % args]
             for id in region_ids:
                 cmd_list.extend(["--match", str(id)])
+            if erode is not None:
+                cmd_list.extend(["--erode", str(erode)])
             bin_cmds.append(cmd_list)
         self.execute(bin_cmds, hires_mask_template)
 

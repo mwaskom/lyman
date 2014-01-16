@@ -74,24 +74,7 @@ def main(arglist):
                                  "mri", "aseg.mgz")
         else:
             atlas_temp = args.orig
-        
-        if not args.aseg and (args.wm or args.ven or args.wmcsf):
-            raise ValueError("-wm, -ven, and -wmcsf only make sense in the context of the freesurfer aseg.")
-        #ids from: https://github.com/neurodebian/freesurfer/blob/master/mri_binarize/mri_binarize.c
-        WM_ids = [2, 41, 77, 251, 252, 253, 254, 255, 7, 46]
-        ven_ids = [4, 5, 14, 43, 44, 72, 31, 63]
-        WM_CSF_ids = WM_ids + ven_ids + [14, 43, 44, 72, 31, 63]
 
-        if args.wm:
-           args.id =  WM_ids
-        if args.ven:
-           args.id = ven_ids
-        if args.wmcsf:
-           args.id = WM_CSF_ids
-           
-        if not args.erode:
-           args.erode = 0
-       
         factory.from_hires_atlas(atlas_temp, args.id, args.erode)
 
     # Combine mask image with a thresholded stat volume
@@ -197,17 +180,9 @@ def parse_args(arglist):
     parser.add_argument("-aseg", action="store_true",
                         help="atlas image is aseg.mgz")
     parser.add_argument("-erode", type=int,
-                        help="value to pass to mri_binarize if orig is index volume (default 0)")
-    group = parser.add_mutually_exclusive_group()
+                        help="erode the hires volume with this many steps.")
     group.add_argument("-id", type=int, nargs="*",
-                        help="roi id(s) if orig is index volume")
-    group.add_argument("-wm", action="store_true",
-                        help="use freesurfer white matter ROI IDs (overrides -id)")
-    group.add_argument("-ven", action="store_true",
-                        help="use freesurfer ventricle ROI IDs (overrides -id)")
-    group.add_argument("-wmcsf", action="store_true",
-                        help="use freesurfer WM+CSF ROI IDs (overrides -id)")
-    
+                       help="roi id(s) if orig is index volume")
 
     # Thresholded statistic relevant arguments
     parser.add_argument("-contrast",
