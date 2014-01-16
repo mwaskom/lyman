@@ -1,6 +1,5 @@
 #! /usr/bin/env python
-"""Create masks in native functional space from a variety of sources.
-"""
+"""Create masks in native functional space from a variety of sources."""
 import sys
 import json
 import time
@@ -163,14 +162,14 @@ def parse_args(arglist):
         thickness between the white and pial surfaces and label any intersected
         voxels.
 
-    make_masks.py -roi V1 -orig labels/%(hemi)s.%(subj)_V1.label -native \
+    make_masks.py -roi V1 -orig labels/%(hemi)s.%(subj)_V1.label -native \ 
                   -sample graymid -s labeled_subjects
 
         Create masks from labels defined on native surfaces and stored outside
         the Freesurfer subjects directory hierarchy. Masks will be generated
         for all subjects defined in $LYMAN_DIR/labeled_subjects.txt.
 
-    make_masks.py -roi ifs_hard -label ifs -contrast hard \
+    make_masks.py -roi ifs_hard -label ifs -contrast hard \ 
                   -thresh 2.3 -sample white
 
         Create a mask defined from the bilateral 'ifs' label as above that is
@@ -184,7 +183,7 @@ def parse_args(arglist):
         volume) for the default set of subjects. The hires mask will be eroded
         in 3 iterations before transformation to functional space.
 
-    make_masks.py -roi caudate_hard -aseg -id 11 50 \
+    make_masks.py -roi caudate_hard -aseg -id 11 50 \ 
                   -exp stroop -contrast name_color -thresh 4
 
         Create a mask by intersecting activations in the 'name_color' contrast
