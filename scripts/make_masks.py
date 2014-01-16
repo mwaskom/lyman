@@ -232,8 +232,8 @@ def parse_args(arglist):
                         help="atlas image is aseg.mgz")
     parser.add_argument("-erode", type=int,
                         help="erode the hires volume with this many steps.")
-    group.add_argument("-id", type=int, nargs="*",
-                       help="roi id(s) if orig is index volume")
+    parser.add_argument("-id", type=int, nargs="*",
+                        help="roi id(s) if orig is index volume")
 
     # Thresholded statistic relevant arguments
     parser.add_argument("-contrast",
