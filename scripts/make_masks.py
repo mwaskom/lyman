@@ -74,7 +74,8 @@ def main(arglist):
                                  "mri", "aseg.mgz")
         else:
             atlas_temp = args.orig
-        factory.from_hires_atlas(atlas_temp, args.id)
+        
+        factory.from_hires_atlas(atlas_temp, args.id, args.erode)
 
     # Combine mask image with a thresholded stat volume
     if args.contrast is not None:
@@ -178,8 +179,12 @@ def parse_args(arglist):
     # Atlas-type image relevant images
     parser.add_argument("-aseg", action="store_true",
                         help="atlas image is aseg.mgz")
+    parser.add_argument("-erode",
+                        help="amount of mask erosion performed \
+                        by mri_binarize (default: None)")
     parser.add_argument("-id", type=int, nargs="*",
                         help="roi id(s) if orig is index volume")
+    
 
     # Thresholded statistic relevant arguments
     parser.add_argument("-contrast",
