@@ -26,7 +26,7 @@ def main(arglist):
         orig_type = "index_volume"
     # Otherwise we have to figure it out from the other arguments
     elif args.orig is not None and args.orig.endswith(".label"):
-        orig_type = "native_label" if args.label else "fsaverage_label"
+        orig_type = "native_label" if args.native else "fsaverage_label"
     elif args.id is not None:
         orig_type = "index_volume"
     else:
@@ -108,6 +108,8 @@ def main(arglist):
 def parse_args(arglist):
     """Handle the command line."""
     help = dedent("""
+    Create masks in native functional space from a variety of sources.
+
     Currently this can start with ROIs defined as a surface label on
     fsaverage, labels defined on each subject's native surface, ROIs
     defined on the high-res volume in Freesurfer space, or a statistical
@@ -115,12 +117,12 @@ def parse_args(arglist):
 
     You can always pass a filepath (possibly with ``subj`` and ``hemi``
     string format keys to -orig and the program will work out what to
-    do from the file type and other arugments. Alternatively, if files
+    do from the file type and other arguments. Alternatively, if files
     are in expected places (Freesurfer data hierarchy, lyman analysis
     hierarchy) there are shortcuts for the corresponding image type.
 
     The processing is almost entirely dependent on external binaries
-    from FSL and Freesurfer, so both must be availible.
+    from FSL and Freesurfer, so both must be available.
 
     The resulting masks are defined in the space of the first functional
     run. This is also the target of the ``-regspace epi`` registration
@@ -132,13 +134,62 @@ def parse_args(arglist):
     that defines the relevant data and analysis paths.
 
     The script will also write a mosiac png with the mask overlaid on
-    the mean functional image defining the epi space. Additionally, it
-    will write a json file with the command line argument dictionary
-    for provenence tracking.
+    the mean functional image defining the epi space. This image can be
+    viewed in ziegler. Additionally, it will write a json file with the command
+    line argument dictionary for provenance tracking.
 
     If an IPython cluster is running, the processing will be executed
-    in parallel by default on all availible engines. This can be avoided
+    in parallel by default on all available engines. This can be avoided
     by using the -serial option.
+
+    Examples
+    --------
+
+    make_masks.py -s subj1 -roi ifs -label ifs -sample graymid
+
+        Create a mask that will be saved to <data_dir>/subj1/masks/ifs.nii.gz
+        that is defined on the common surface in bilateral files at
+        <data_dir>/fsaverage/label/$hemi.ifs.label. When transforming from
+        surface to volume space, project halfway from the white surface to
+        the pial surface at each vertex and label all intersected voxels.
+
+    make_masks.py -roi lh.ifs -label ifs -hemi lh -proj frac 0 1 .1
+
+        Create a mask and save to <data_dir>/subj1/masks/lh.ifs.nii.gz
+        that is defined on the common surface in the single, unilateral file
+        <data_dir>/fsaverage/label/lh.ifs.label. This will create a mask for
+        each subject defined in $LYMAN_DIR/subjects.txt. When transforming from
+        surface to volume space, take samples in steps of 10% of the cortical
+        thickness between the white and pial surfaces and label any intersected
+        voxels.
+
+    make_masks.py -roi V1 -orig labels/%(hemi)s.%(subj)_V1.label -native \
+                  -sample graymid -s labeled_subjects
+
+        Create masks from labels defined on native surfaces and stored outside
+        the Freesurfer subjects directory hierarchy. Masks will be generated
+        for all subjects defined in $LYMAN_DIR/labeled_subjects.txt.
+
+    make_masks.py -roi ifs_hard -label ifs -contrast hard \
+                  -thresh 2.3 -sample white
+
+        Create a mask defined from the bilateral 'ifs' label as above that is
+        intersected with a mask created by thresholding the fixed effect zstat
+        for the 'hard' contrast of the default experiment at 2.3. This requires
+        that registration and fixed effects have been run in the `epi` space.
+
+    make_masks.py -roi wm -aseg -id 2 41 -erode 3
+
+        Create a white matter mask from the aseg (Freesurfer auto-segmentation
+        volume) for the default set of subjects. The hires mask will be eroded
+        in 3 iterations before transformation to functional space.
+
+    make_masks.py -roi caudate_hard -aseg -id 11 50 \
+                  -exp stroop -contrast name_color -thresh 4
+
+        Create a mask by intersecting activations in the 'name_color' contrast
+        for the 'stroop' experiment with a caudate mask from the automatic
+        segmentation.
 
     Usage Details
     -------------
