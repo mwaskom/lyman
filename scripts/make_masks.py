@@ -240,7 +240,7 @@ def parse_args(arglist):
     parser.add_argument("-contrast",
                         help="first-level contrast to binarize z-stat map")
     parser.add_argument("-thresh", help="z-stat threshold")
-    parser.add_argument("-nvoxels", help="take top <n> voxels based on z-stat")
+    parser.add_argument("-nvoxels", type=int, help="take top <n> voxels from z-stat")
     parser.add_argument("-unsmoothed", action="store_true",
                         help="use unsmoothed fixed effects zstats")
     parser.add_argument("-altmodel",
