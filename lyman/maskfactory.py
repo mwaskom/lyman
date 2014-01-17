@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import moss
 import lyman
 
+
 class MaskFactory(object):
     """Class for the rapid and flexible creation of functional masks.
 
@@ -212,8 +213,11 @@ class MaskFactory(object):
                  "--nearest"])
         self.execute(xfm_cmds, self.out_template)
 
-    def apply_statistical_mask(self, stat_file_temp, thresh):
+    def apply_statistical_mask(self, stat_file_temp, thresh=None, n_voxels=None):
         """Create a mask by binarizing an epi-space fixed effects zstat map."""
+        if n_voxels is not None:
+            return self._take_top_voxels(stat_file_temp, n_voxels)
+
         bin_cmds = []
         for subj in self.subject_list:
             args = dict(subj=subj)
@@ -227,6 +231,19 @@ class MaskFactory(object):
             bin_cmds.append(cmd)
 
         self.execute(bin_cmds, self.out_template)
+
+    def _take_top_voxels(self, stat_file_temp, n_voxels):
+        """Create take the top n voxels within a mask based on a stat map."""
+        for subj in self.subject_list:
+            args = dict(subj=subj)
+            mask_file = self.out_template % args
+            stat_file = stat_file_temp % args
+            img = nib.load(mask_file).get_data()
+            mask = img.get_data().astype(bool)
+            stat = nib.load(stat_file).get_data()[mask]
+            mask.flat[np.argsort(stat.flat) < n_voxels] = 0
+            new_img = nib.Nifti1Image(mask, img.get_affine(), img.get_header())
+            new_img.to_filename(mask_file)
 
     def write_png(self):
         """Write a mosiac png showing the masked voxels."""
@@ -259,6 +276,7 @@ class MaskFactory(object):
             f.subplots_adjust(hspace=1e-5, wspace=1e-5)
             plt.savefig(slices_temp % args, dpi=100, bbox_inches="tight",
                         facecolor="k", edgecolor="k")
+            plt.close(f)
 
     def execute(self, cmd_list, out_temp):
         """Exceute a list of commands and verify output file existence."""
