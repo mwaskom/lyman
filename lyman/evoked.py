@@ -211,8 +211,8 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
 
     """
     project = gather_project_info()
-    event_template = op.join(project["data_dir"], "%s",
-                             "events/%s.csv" % problem)
+    design_template = op.join(project["data_dir"], "%s",
+                              "design/%s.csv" % problem)
 
     evoked = []
     for i, data_i in enumerate(data):
@@ -220,7 +220,7 @@ def calculate_evoked(data, n_bins, problem=None, events=None, tr=2,
         # Can get event information in one of two ways
         if problem is not None:
             subj = data_i["subj"]
-            events_i = pd.read_csv(event_template % subj)
+            events_i = pd.read_csv(design_template % subj)
         else:
             events_i = events[i]
 
