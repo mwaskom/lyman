@@ -15,7 +15,7 @@ LICENSE = 'BSD (3-clause)'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
 VERSION = '0.1.dev'
 
-from numpy.distutils.core import setup
+from setuptools import setup
 
 
 if __name__ == "__main__":
