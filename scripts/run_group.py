@@ -75,7 +75,9 @@ def main(arglist):
 
     # Mixed effects inputs
     ffxspace = "mni" if space == "mni" else "epi"
-    mfx_base = op.join("{subject_id}/ffx/%s/smoothed/{l1_contrast}" % ffxspace)
+    ffxsmooth = "unsmoothed" if args.unsmoothed else "smoothed"
+    mfx_base = op.join("{subject_id}/ffx/%s/%s/{l1_contrast}" % (ffxspace,
+                                                                 ffxsmooth))
     templates = dict(copes=op.join(mfx_base, "cope1.nii.gz"))
     if space == "mni":
         templates.update(dict(
@@ -195,11 +197,12 @@ def parse_args(arglist):
         subjects defined in $LYMAN_DIR/subjects.txt in the MNI space using the
         MultiProc plugin with 4 processes.
 
-    run_group.py -s pilot_subjects -r fsaverage -o pilot
+    run_group.py -s pilot_subjects -r fsaverage -o pilot -unsmoothed
 
         This will processes the subjects defined in a file at
         $LYMAN_DIR/pilot_subjects.txt as above but with the surface workflow.
-        The resulting files will be stored under
+        Unsmoothed fixed effects parameter estimates will be sampled to the
+        surface and smoothed there. The resulting files will be stored under
         <analysis_dir>/<experiment>/pilot/fsaverage/<contrast>/<hemi>
 
     run_group.py -e nback -a parametric -p sge -q batch.q
@@ -220,6 +223,8 @@ def parse_args(arglist):
     parser.add_argument("-regspace", default="mni",
                         choices=["mni", "fsaverage"],
                         help="common space for group analysis")
+    parser.add_argument("-unsmoothed", action="store_true",
+                        help="used unsmoothed fixed effects outputs")
     parser.add_argument("-output", default="group",
                         help="output directory name")
     return parser.parse_args(arglist)
