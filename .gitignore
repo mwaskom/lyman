@@ -1,5 +1,6 @@
 *.pyc
 *.sw*
 build/
+*.egg-info/
 doc/_build/
 doc/commandline/
