@@ -10,7 +10,8 @@ import moss
 from moss import glm
 import seaborn as sns
 
-from nipype import fsl, Node, MapNode, Workflow, IdentityInterface, Function
+from nipype import Node, MapNode, Workflow, IdentityInterface, Function
+from nipype.interfaces import fsl
 
 from lyman import default_experiment_parameters
 

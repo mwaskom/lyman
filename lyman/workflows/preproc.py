@@ -12,8 +12,8 @@ import matplotlib.pyplot as plt
 import moss
 import seaborn
 
-from nipype import fsl
-from nipype import freesurfer as fs
+from nipype.interfaces import fsl
+from nipype.interfaces import freesurfer as fs
 from nipype import (Node, MapNode, Workflow,
                     IdentityInterface, Function)
 from nipype.workflows.fmri.fsl import create_susan_smooth

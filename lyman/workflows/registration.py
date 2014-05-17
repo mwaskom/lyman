@@ -11,14 +11,15 @@ import shutil
 import subprocess as sub
 import numpy as np
 
-from nipype import fsl, Workflow, Node, Function, IdentityInterface
+from nipype import Workflow, Node, Function, IdentityInterface
+from nipype.interfaces import fsl
 
 imports = ["import os",
            "import os.path as op",
            "import shutil",
            "import subprocess as sub",
            "import numpy as np",
-           "from nipype import fsl",
+           "from nipype.interfaces import fsl",
            ]
 
 spaces = ["epi", "mni"]

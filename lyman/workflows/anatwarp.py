@@ -17,8 +17,8 @@ from nipy.labs import viz
 import seaborn as sns
 
 from nipype import IdentityInterface, Function, DataGrabber, DataSink
-from nipype import fsl
-from nipype import freesurfer as fs
+from nipype.interfaces import fsl
+from nipype.interfaces import freesurfer as fs
 from nipype import Node, Workflow
 
 

@@ -9,7 +9,7 @@ from scipy import stats
 import nibabel as nib
 
 from nipype import IdentityInterface, Function, Node, MapNode, Workflow
-from nipype import freesurfer as fs
+from nipype.interfaces import freesurfer as fs
 
 import lyman
 
