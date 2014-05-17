@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import moss
 
-from nipype import fsl, Workflow, Node, IdentityInterface, Function
+from nipype import Workflow, Node, IdentityInterface, Function
+from nipype.interfaces import fsl
 
 imports = ["import os",
            "import os.path as op",
@@ -20,7 +21,7 @@ imports = ["import os",
            "import matplotlib.pyplot as plt",
            "import seaborn as sns",
            "import moss",
-           "from nipype import fsl"]
+           "from nipype.interfaces import fsl"]
 
 
 def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):

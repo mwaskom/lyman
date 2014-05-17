@@ -9,8 +9,9 @@ from skimage import morphology
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from nipype import (fsl, freesurfer, IdentityInterface, Function, Rename,
+from nipype import (IdentityInterface, Function, Rename,
                     Node, MapNode, Workflow)
+from nipype.interfaces import fsl, freesurfer
 
 import seaborn
 from moss import locator
@@ -26,7 +27,7 @@ imports = ["import os",
            "import matplotlib as mpl",
            "import matplotlib.pyplot as plt",
            "from skimage import morphology",
-           "from nipype import fsl",
+           "from nipype.interfaces import fsl",
            "from moss import locator",
            "import seaborn"]
 
