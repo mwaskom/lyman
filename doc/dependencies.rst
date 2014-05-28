@@ -18,19 +18,9 @@ unit tests and the ``-dontrun`` switch for the command line interfaces can be
 useful for finding missing dependencies.
 
 Lyman requires Python 2.7, and does not run on Python 3. We strongly recommend
-starting with one of the scientific Python distributions as a base, either
-`Canopy <https://www.enthought.com/products/canopy/>`_ or `Anaconda
-<https://store.continuum.io/cshop/anaconda/>`_. These are largely
-interchangeable, although we have had problems installing PySurfer on OSX with
-Anaconda (due to these issues, PySurfer is somewhat cordoned off from the rest
-of the package, so Anaconda will likely work for most things). Lyman is
-primarily developed with Canopy on OS X. If using Canopy, you should avail
-yourself of the academic license rather than using the limited Free version.
-
-The Python dependencies are separated into those that are officially released
-and can be installed using ``easy_install``/``pip`` (although in most cases they
-ship with Canopy/Anaconda) and those that are part of the broader lyman
-ecosystem and currently must be installed from Github.
+using the `Anaconda <https://store.continuum.io/cshop/anaconda/>`_
+distribution, which ships with the majority of the Python packages needed to
+run lyman.
 
 Non-Python Software
 -------------------
@@ -44,7 +34,7 @@ Released Python Packages
 
 - Python 2.7
 
-- IPython 1.0
+- IPython 2.0
 
 - numpy 1.7
 

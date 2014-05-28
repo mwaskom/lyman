@@ -37,9 +37,7 @@ Dependencies
 
 - [statsmodels](https://github.com/statsmodels/statsmodels)
 
-- My utility packages: [moss](https://github.com/mwaskom/moss) and [seaborn](https://github.com/mwaskom/seaborn)
-
-Some of the core dependencies require developmet code in Github master
+- My utility packages: [seaborn](https://github.com/mwaskom/seaborn) and [moss](https://github.com/mwaskom/moss)
 
 Basic Workflow
 --------------
@@ -56,7 +54,7 @@ Basic Workflow
 License
 -------
 
-Simplified BSD
+BSD (3 Clause)
 
 Notes
 -----

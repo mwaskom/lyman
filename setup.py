@@ -1,11 +1,11 @@
 #! /usr/bin/env python
 #
-# Copyright (C) 2012 Michael Waskom <mwaskom@stanford.edu>
+# Copyright (C) 2012-2014 Michael Waskom <mwaskom@stanford.edu>
 
 descr = """Lyman: Tools for analyzing neuroimaging data."""
 
 import os
-
+from setuptools import setup
 
 DISTNAME = 'lyman'
 DESCRIPTION = descr
@@ -15,12 +15,32 @@ LICENSE = 'BSD (3-clause)'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
 VERSION = '0.1.dev'
 
-from setuptools import setup
+def check_dependencies():
 
+    # Just make sure dependencies exist, I haven't rigorously
+    # tested what the minimal versions that will work are
+    needed_deps = ["IPython", "numpy", "scipy", "matplotlib",
+                   "sklearn", "skimage", "pandas", "statsmodels", 
+                   "nibabel", "nipype", "nipy", "seaborn", "moss"]
+    missing_deps = []
+    for dep in needed_deps:
+        try:
+            __import__(dep)
+        except ImportError:
+            missing_deps.append(dep)
+
+    if missing_deps:
+        missing = (", ".join(missing_deps)
+                   .replace("sklearn", "scikit-learn")
+                   .replace("skimage", "scikit-image"))
+        raise ImportError("Missing dependencies: %s" % missing)
 
 if __name__ == "__main__":
+
     if os.path.exists('MANIFEST'):
         os.remove('MANIFEST')
+
+    check_dependencies()
 
     setup(name=DISTNAME,
         maintainer=MAINTAINER,
