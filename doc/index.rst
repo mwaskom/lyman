@@ -26,13 +26,8 @@ companion `zielger <https://github.com/mwaskom/ziegler>`_ webapp, which is
 tightly integrated with the lyman results and makes it very easy to understand
 what has happened with your data.
 
-It is important to note that these tools are not officially released in any
-capacity. You'll have to get the code from the `Github repository
-<https://github.com/mwaskom/lyman>`_ and be aware that things may change or
-break (possibly without warning). So, it's good practice to keep on top of the
-Github commit log if you're updating while actively analyzing data. With that
-said, the main body of code has about three years of development under it, and
-much of the package has gotten quite mature and stable.
+To check out the code, please see the `github repository
+<https://github.com/mwaskom/lyman>`_
 
 Documentation Contents:
 -----------------------

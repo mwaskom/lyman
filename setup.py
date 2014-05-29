@@ -2,7 +2,7 @@
 #
 # Copyright (C) 2012-2014 Michael Waskom <mwaskom@stanford.edu>
 
-descr = """Lyman: Tools for analyzing neuroimaging data."""
+descr = """Lyman: A reproducible ecosystem for analyzing neuroimaging data."""
 
 import os
 from setuptools import setup
@@ -12,8 +12,9 @@ DESCRIPTION = descr
 MAINTAINER = 'Michael Waskom'
 MAINTAINER_EMAIL = 'mwaskom@stanford.edu'
 LICENSE = 'BSD (3-clause)'
+URL = 'http://stanford.edu/~mwaskom/software/lyman/'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
-VERSION = '0.1.dev'
+VERSION = '0.0.1'
 
 def check_dependencies():
 
@@ -40,7 +41,13 @@ if __name__ == "__main__":
     if os.path.exists('MANIFEST'):
         os.remove('MANIFEST')
 
-    check_dependencies()
+    import sys
+    if not (len(sys.argv) >= 2 and ('--help' in sys.argv[1:] or
+            sys.argv[1] in ('--help-commands',
+                            '--version',
+                            'egg_info',
+                            'clean'))):
+        check_dependencies()
 
     setup(name=DISTNAME,
         maintainer=MAINTAINER,
@@ -48,6 +55,7 @@ if __name__ == "__main__":
         description=DESCRIPTION,
         license=LICENSE,
         version=VERSION,
+        url=URL,
         download_url=DOWNLOAD_URL,
         packages=['lyman', 'lyman.tests',
                   'lyman.workflows', 'lyman.workflows.tests',
@@ -56,4 +64,11 @@ if __name__ == "__main__":
                  'scripts/run_warp.py', 'scripts/setup_project.py',
                  'scripts/make_masks.py', 'scripts/anatomy_snapshots.py',
                  'scripts/surface_snapshots.py'],
+        classifiers=[
+                     'Intended Audience :: Science/Research',
+                     'Programming Language :: Python :: 2.7',
+                     'License :: OSI Approved :: BSD License',
+                     'Operating System :: POSIX',
+                     'Operating System :: Unix',
+                     'Operating System :: MacOS'],
     )
