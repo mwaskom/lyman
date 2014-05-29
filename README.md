@@ -1,16 +1,22 @@
-Python fMRI Analysis Ecosystem
-==============================
+Lyman: a Python fMRI Analysis Ecosystem
+=======================================
 
-This repository contains a set of Python-based code for analyzing
-functional MRI data using FSL and Freesurfer tools and Nipype.
+Lyman is a high-level ecosystem for analyzing neuroimaging data using
+open-source software. It aims to support an analysis workflow that is powerful,
+flexible, and reproducible, while automating as much of the processing as
+possible.
+
 
 Documentation
 -------------
 
-Online documentation can be found [here](http://www.stanford.edu/~mwaskom/software/lyman)
+Online documentation can be found
+[here](http://www.stanford.edu/~mwaskom/software/lyman)
 
 Dependencies
 ------------
+
+Python 2.7
 
 ### External
 
@@ -37,7 +43,20 @@ Dependencies
 
 - [statsmodels](https://github.com/statsmodels/statsmodels)
 
-- My utility packages: [seaborn](https://github.com/mwaskom/seaborn) and [moss](https://github.com/mwaskom/moss)
+- [seaborn](https://github.com/mwaskom/seaborn)
+
+- [moss](https://github.com/mwaskom/moss)
+
+Installation
+------------
+
+To install the released version, just do
+
+    pip install lyman
+
+You may instead want to use the development version from Github, by running
+
+    pip install git+git://github.com/mwaskom/lyman.git#egg=lyman
 
 Basic Workflow
 --------------
@@ -51,17 +70,16 @@ Basic Workflow
 
 - `run_group.py`: perform basic group level mixed effects analyses
 
+Development
+-----------
+
+https://github.com/mwaskom/lyman
+
+Please [submit](https://github.com/mwaskom/lyman/issues/new) any bugs you
+encounter to the Github issue tracker.
+
 License
 -------
 
-BSD (3 Clause)
-
-Notes
------
-
-Although all are welcome to use this code in their own work, it is not officially
-"released" in any capacity and many elements of it are under active development and
-subject to change at any time.
-
-Please submit bug reports/feature ideas through the Github issues framework.
+Released under a BSD (3-clause) license
 
