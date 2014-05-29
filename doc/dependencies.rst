@@ -1,3 +1,5 @@
+.. _dependencies:
+
 Lyman Dependencies
 ==================
 

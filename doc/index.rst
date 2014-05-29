@@ -26,11 +26,26 @@ companion `zielger <https://github.com/mwaskom/ziegler>`_ webapp, which is
 tightly integrated with the lyman results and makes it very easy to understand
 what has happened with your data.
 
-To check out the code, please see the `github repository
-<https://github.com/mwaskom/lyman>`_
+Installing
+----------
 
-Documentation Contents:
------------------------
+To install lyman, you can run
+
+    pip install lyman
+
+This will install the stable version. To get the development version, you
+should run
+
+   pip install git+git://github.com/mwaskom/lyman.git#egg=lyman
+
+However, there are a number of :ref:`dependencies <dependencies>` that should
+be installed first, in either case.
+
+To check out the code, please see the `github repository
+<https://github.com/mwaskom/lyman>`_.
+
+Documentation Contents
+----------------------
 
 .. toctree::
    :maxdepth: 2
