@@ -5,10 +5,47 @@ import lyman
 from lyman import tools
 from lyman.workflows import anatwarp
 
+help = """
+Estimate a volume-based normalization to the MNI template.
+
+This script can use either FSL tools (FLIRT and FNIRT) or ANTS to estimate a
+nonlinear warp from the native anatomy to the MNI152 (nonlinear) template.
+
+Using ANTS can provide substantially improved accuracy, although ANTS can be
+difficult to install, so this is not the default. The two methods are mutually
+exclusive, and the outputs will overwrite each other.
+
+Unlike other lyman scripts, the out is written to the `data_dir`, rather than
+the `analysis_dir`.
+
+This script will also produce a static image of the target overlaid on the
+moving image for quality control. This is best viewed using ziegler.
+
+Examples
+--------
+
+run_warp.py
+
+    With no arugments, this will estimate the warp for all subjects using
+    multiprocessing.
+
+run_warp.py -s subj1 -ants
+
+    Estimate the warp using ANTS for increased accuracy. Only process subj1.
+
+Usage Details
+-------------
+
+"""
+
 
 def main(arglist):
 
     # Process cmdline args
+    parser = tools.parser
+    parser.description = help
+    parser.add_argument("-ants", action="store_true",
+                        help="Use ANTS for normalization.")
     args = tools.parser.parse_args(arglist)
     plugin, plugin_args = lyman.determine_engine(args)
 
@@ -17,8 +54,9 @@ def main(arglist):
     project = lyman.gather_project_info()
 
     # Create the workflow object
-    normalize = anatwarp.create_anatwarp_workflow(
-                    project["data_dir"], subject_list)
+    method = "ants" if args.ants else "fnirt"
+    wf_func = getattr(anatwarp, "create_{}_workflow".format(method))
+    normalize = wf_func(project["data_dir"], subject_list)
     normalize.base_dir = project["working_dir"]
     normalize.config["execution"]["crashdump_dir"] = "/tmp"
 
@@ -30,4 +68,4 @@ def main(arglist):
         shutil.rmtree(normalize.base_dir)
 
 if __name__ == "__main__":
-   main(sys.argv[1:])
+    main(sys.argv[1:])
