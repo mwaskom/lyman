@@ -66,23 +66,20 @@ def create_fnirt_workflow(data_dir=None, subjects=None, name="fnirtwarp"):
                       "datasource")
 
     # Convert images to nifti storage and float representation
-    cvtaseg = Node(fs.MRIConvert(out_type="niigz"),
-                   name="convertaseg")
+    cvtaseg = Node(fs.MRIConvert(out_type="niigz"), "convertaseg")
 
-    cvthead = Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
-                   name="converthead")
+    cvthead = Node(fs.MRIConvert(out_type="niigz",
+                                 out_datatype="float"),
+                   "converthead")
 
     # Turn the aparc+aseg into a brainmask
-    makemask = Node(fs.Binarize(dilate=4, erode=3, min=0.5),
-                    name="makemask")
+    makemask = Node(fs.Binarize(dilate=1, min=0.5), "makemask")
 
     # Extract the brain from the orig.mgz using the mask
-    skullstrip = Node(fsl.ApplyMask(),
-                      name="skullstrip")
+    skullstrip = Node(fsl.ApplyMask(), "skullstrip")
 
     # FLIRT brain to MNI152_brain
-    flirt = Node(fsl.FLIRT(reference=target_brain),
-                 name="flirt")
+    flirt = Node(fsl.FLIRT(reference=target_brain), "flirt")
 
     sw = [-180, 180]
     for dim in ["x", "y", "z"]:
@@ -93,18 +90,18 @@ def create_fnirt_workflow(data_dir=None, subjects=None, name="fnirtwarp"):
                            refmask_file=target_mask,
                            config_file=fnirt_cfg,
                            fieldcoeff_file=True),
-                 name="fnirt")
+                 "fnirt")
 
     # Warp and rename the images
     warpbrain = Node(fsl.ApplyWarp(ref_file=target_head,
                                    interp="spline",
                                    out_file="brain_warp.nii.gz"),
-                     name="warpbrain")
+                     "warpbrain")
 
     warpbrainhr = Node(fsl.ApplyWarp(ref_file=hires_head,
                                      interp="spline",
                                      out_file="brain_warp_hires.nii.gz"),
-                       name="warpbrainhr")
+                       "warpbrainhr")
 
     # Generate a png summarizing the registration
     warpreport = Node(WarpReport(), "warpreport")
@@ -117,7 +114,7 @@ def create_fnirt_workflow(data_dir=None, subjects=None, name="fnirtwarp"):
                                  ("orig_out_fieldwarp", "warpfield"),
                                  ("orig_out_masked", "brain"),
                                  ("orig_out", "T1")]),
-                    name="datasink")
+                    "datasink")
 
     # Define and connect the workflow
     # -------------------------------
