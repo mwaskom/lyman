@@ -318,20 +318,20 @@ class ANTSIntroduction(BaseInterface):
             message += "Return code: " + str(runtime.returncode)
             raise RuntimeError(message)
 
-        os.rename("ants_affine.txt", "affine.txt")
-        os.rename("ants_InverseWarp.nii.gz", "inverse_warpfield.nii.gz")
+        os.rename("ants_affine.txt", "affine.mat")
         os.rename("ants_Warp.nii.gz", "warpfield.nii.gz")
         os.rename("ants_deformed.nii.gz", "brain_warp.nii.gz")
+        os.rename("ants_InverseWarp.nii.gz", "inverse_warpfield.nii.gz")
 
         return runtime
 
     def _list_outputs(self):
 
         outputs = self._outputs().get()
-        outputs["brain_file"] = op.realpath("brain_warp.nii.gz")
-        outputs["warp_file"] = op.realpath("warpfield.nii.gz")
-        outputs["inv_warp_file"] = op.realpath("inverse_warpfield.nii.gz")
         outputs["affine_file"] = op.realpath("affine.txt")
+        outputs["warp_file"] = op.realpath("warpfield.nii.gz")
+        outputs["brain_file"] = op.realpath("brain_warp.nii.gz")
+        outputs["inv_warp_file"] = op.realpath("inverse_warpfield.nii.gz")
 
         return outputs
 
