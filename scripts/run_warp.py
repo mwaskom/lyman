@@ -1,6 +1,9 @@
 #! /usr/bin/env python
+import os
 import sys
+import time
 import shutil
+import nipype
 import lyman
 from lyman import tools
 from lyman.workflows import anatwarp
@@ -10,6 +13,7 @@ Estimate a volume-based normalization to the MNI template.
 
 This script can use either FSL tools (FLIRT and FNIRT) or ANTS to estimate a
 nonlinear warp from the native anatomy to the MNI152 (nonlinear) template.
+The normalization method is controlled through a variable in the project file.
 
 Using ANTS can provide substantially improved accuracy, although ANTS can be
 difficult to install, so this is not the default. The two methods are mutually
@@ -29,10 +33,6 @@ run_warp.py
     With no arugments, this will estimate the warp for all subjects using
     multiprocessing.
 
-run_warp.py -s subj1 -ants
-
-    Estimate the warp using ANTS for increased accuracy. Only process subj1.
-
 Usage Details
 -------------
 
@@ -44,8 +44,6 @@ def main(arglist):
     # Process cmdline args
     parser = tools.parser
     parser.description = help
-    parser.add_argument("-ants", action="store_true",
-                        help="Use ANTS for normalization.")
     args = tools.parser.parse_args(arglist)
     plugin, plugin_args = lyman.determine_engine(args)
 
@@ -54,11 +52,15 @@ def main(arglist):
     project = lyman.gather_project_info()
 
     # Create the workflow object
-    method = "ants" if args.ants else "fnirt"
+    method = project["normalization"]
     wf_func = getattr(anatwarp, "create_{}_workflow".format(method))
     normalize = wf_func(project["data_dir"], subject_list)
     normalize.base_dir = project["working_dir"]
-    normalize.config["execution"]["crashdump_dir"] = "/tmp"
+    
+    # Put crashdumps in a unique /tmp directory
+    nipype.config.set("execution", "crashdump_dir",
+                      "/tmp/%s-nipype_crashes-%d" % (os.getlogin(),
+                                                     time.time()))
 
     # Execute the workflow
     lyman.run_workflow(normalize, args=args)
