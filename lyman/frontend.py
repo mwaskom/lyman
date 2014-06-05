@@ -26,9 +26,9 @@ def gather_project_info():
 
     if hasattr(project, "ants_normalization"):
         use_ants = project.ants_normalization
-        project_dict["normalization"] = "ants" if use_ants else "fnirt"
+        project_dict["normalization"] = "ants" if use_ants else "fsl"
     else:
-        project_dict["normalization"] = "fnirt"
+        project_dict["normalization"] = "fsl"
 
     return project_dict
 

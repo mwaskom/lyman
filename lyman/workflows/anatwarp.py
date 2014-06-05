@@ -20,7 +20,7 @@ from nipype.interfaces.base import (BaseInterface,
                                     TraitedSpec, File)
 
 
-def create_fnirt_workflow(data_dir=None, subjects=None, name="fnirtwarp"):
+def create_fsl_workflow(data_dir=None, subjects=None, name="fslwarp"):
     """Set up the anatomical normalzation workflow using FNIRT.
 
     Your anatomical data must have been processed in Freesurfer.
@@ -336,20 +336,20 @@ class ANTSIntroduction(BaseInterface):
         return outputs
 
 
-class WarpReportInputSpec(BaseInterfaceInputSpec):
+class WarpReportInput(BaseInterfaceInputSpec):
 
     in_file = File(exists=True)
 
 
-class WarpReportOutputSpec(TraitedSpec):
+class WarpReportOutput(TraitedSpec):
 
     out_file = File(exitsts=True)
 
 
 class WarpReport(BaseInterface):
 
-    input_spec = WarpReportInputSpec
-    output_spec = WarpReportOutputSpec
+    input_spec = WarpReportInput
+    output_spec = WarpReportOutput
 
     def _run_interface(self, runtime):
 
