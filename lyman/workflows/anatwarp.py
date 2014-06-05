@@ -8,7 +8,6 @@ information about the processing.
 """
 import os
 import os.path as op
-import subprocess as sp
 from moss.mosaic import Mosaic
 
 from nipype import (IdentityInterface,
@@ -18,6 +17,8 @@ from nipype.interfaces import fsl, freesurfer as fs
 from nipype.interfaces.base import (BaseInterface,
                                     BaseInterfaceInputSpec,
                                     TraitedSpec, File)
+
+from lyman.tools import submit_cmdline
 
 
 def create_fsl_workflow(data_dir=None, subjects=None, name="fslwarp"):
@@ -297,26 +298,7 @@ class ANTSIntroduction(BaseInterface):
                             "-o", "ants_"])
 
         runtime.environ["ITK_NUM_THREADS"] = 1
-        proc = sp.Popen(cmdline,
-                        stdout=sp.PIPE,
-                        stderr=sp.PIPE,
-                        shell=True,
-                        cwd=runtime.cwd,
-                        env=runtime.environ)
-
-        stdout, stderr = proc.communicate()
-
-        runtime.stdout = stdout
-        runtime.stderr = stderr
-        runtime.cmdline = cmdline
-        runtime.returncode = proc.returncode
-
-        if proc.returncode is None or proc.returncode != 0:
-            message = "Command:\n" + runtime.cmdline + "\n"
-            message += "Standard output:\n" + runtime.stdout + "\n"
-            message += "Standard error:\n" + runtime.stderr + "\n"
-            message += "Return code: " + str(runtime.returncode)
-            raise RuntimeError(message)
+        runtime = submit_cmdline(runtime, cmdline)
 
         os.rename("ants_affine.txt", "affine.mat")
         os.rename("ants_Warp.nii.gz", "warpfield.nii.gz")
