@@ -4,223 +4,430 @@ There are two possible spaces:
 - epi: linear transform of several runs into the first run's space
 - mni: nonlinear warp to FSL's MNI152 space
 
+A registration can be performed over two different classes of inputs
+- timeseries: the preprocessed 4D timeseries
+- model: 3D images of first-level model outputs
+
+For normalizations to mni space, two different warps can be used
+- fsl: a standard FLIRT and FNIRT based normalization
+- ants: a superior normalization using SyN
+
 """
 import os
 import os.path as op
-import shutil
-import subprocess as sub
 import numpy as np
 
-from nipype import Workflow, Node, Function, IdentityInterface
+from nipype import Workflow, Node, IdentityInterface
 from nipype.interfaces import fsl
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec,
+                                    InputMultiPath, OutputMultiPath,
+                                    TraitedSpec, File, Directory, traits)
 
-imports = ["import os",
-           "import os.path as op",
-           "import shutil",
-           "import subprocess as sub",
-           "import numpy as np",
-           "from nipype.interfaces import fsl",
-           ]
+from lyman.tools import add_suffix, submit_cmdline
 
 spaces = ["epi", "mni"]
 
 
-def create_reg_workflow(name="reg", space="mni", regtype="model"):
+def create_reg_workflow(name="reg", space="mni",
+                        regtype="model", method="fsl"):
     """Flexibly register files into one of several common spaces."""
+
+    # Define the input fields flexibly
     if regtype == "model":
-        fields = ["copes", "varcopes", "ss_files"]
+        fields = ["copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
-    fields.extend(["masks", "affines"])
+    fields.extend(["masks", "rigids"])
 
     if space == "mni":
-        fields.append("warpfield")
+        fields.extend(["affine", "warpfield"])
 
     inputnode = Node(IdentityInterface(fields), "inputnode")
 
-    func = globals()["%s_%s_transform" % (space, regtype)]
-
-    transform = Node(Function(fields, ["out_files"],
-                              func, imports),
-                     "transform")
-
-    regflow = Workflow(name=name)
+    # Grap the correct interface class dynamically
+    interface_name = "{}{}Registration".format(space.upper(),
+                                               regtype.capitalize())
+    reg_interface = globals()[interface_name]
+    transform = Node(reg_interface(method=method), "transform")
 
     outputnode = Node(IdentityInterface(["out_files"]), "outputnode")
+
+    # Define the workflow
+    regflow = Workflow(name=name)
+
+    # Connect the inputs programatically
     for field in fields:
         regflow.connect(inputnode, field, transform, field)
+
+    # The transform node only ever has one output
     regflow.connect(transform, "out_files", outputnode, "out_files")
 
     return regflow, inputnode, outputnode
 
 
-# Interface functions
-# ===================
+# =============================================================================#
+# This is perhaps too complex, but it handles a rather tricky bit of logic
 
-def epi_model_transform(copes, varcopes, ss_files, masks, affines):
-    """Take model outputs into the 'epi' space in a workflow context."""
-    n_runs = len(affines)
+class RegistrationInput(BaseInterfaceInputSpec):
 
-    ref_file = copes[0]
-    copes = map(list, np.split(np.array(copes), n_runs))
-    varcopes = map(list, np.split(np.array(varcopes), n_runs))
-    ss_files = map(list, np.split(np.array(ss_files), n_runs))
-
-    # Invert the first run's affine
-    run_1_inv_mat = op.basename(affines[0]).replace(".mat", "_inv.mat")
-    sub.check_output(["convert_xfm", "-omat", run_1_inv_mat,
-                      "-inverse", affines[0]])
-
-    # Iterate through the runs
-    for n in range(n_runs):
-
-        # Make the output directories
-        out_dir = "run_%d" % (n + 1)
-        os.mkdir(out_dir)
-
-        run_copes = copes[n]
-        run_varcopes = varcopes[n]
-        run_ss_files = ss_files[n]
-        run_mask = masks[n]
-        run_affine = affines[n]
-
-        files = [run_mask] + run_copes + run_varcopes + run_ss_files
-
-        if not n:
-            # Just copy the first run files over
-            for f in files:
-                to = op.join(out_dir, op.basename(f).replace(".nii.gz",
-                                                             "_xfm.nii.gz"))
-                shutil.copyfile(f, to)
-
-        else:
-            # Otherwise apply the transformation
-            full_affine = op.basename(run_affine).replace(".mat", "_to_epi.mat")
-            sub.check_output(["convert_xfm", "-omat", full_affine,
-                              "-concat", run_1_inv_mat, run_affine])
-
-            interps = ["nn"] + (["trilinear"] * (len(files) - 1))
-            for f, interp in zip(files, interps):
-                out_file = op.join(out_dir,
-                                   op.basename(f).replace(".nii.gz",
-                                                          "_xfm.nii.gz"))
-                cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
-                       "--interp=%s" % interp, "--premat=%s" % full_affine]
-                sub.check_output(cmd)
-
-    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
-    return out_files
+    masks = InputMultiPath(File(exists=True))
+    rigids = InputMultiPath(File(exists=True))
+    method = traits.Enum("ants", "fsl")
 
 
-def epi_timeseries_transform(timeseries, masks, affines):
-    """Take a set of timeseries files into the 'epi' space."""
-    n_runs = len(affines)
-    ref_file = timeseries[0]
+class ModelRegInput(BaseInterfaceInputSpec):
 
-    # Invert the first run's affine
-    run_1_inv_mat = op.basename(affines[0]).replace(".mat", "_inv.mat")
-    sub.check_output(["convert_xfm", "-omat", run_1_inv_mat,
-                      "-inverse", affines[0]])
-
-    for n in range(n_runs):
-
-        # Make the output directory
-        out_dir = "run_%d" % (n + 1)
-        os.mkdir(out_dir)
-
-        run_timeseries = timeseries[n]
-        run_mask = masks[n]
-        run_affine = affines[n]
-
-        if not n:
-            # Just copy the first run files over
-            to_timeseries = op.join(out_dir, "timeseries_xfm.nii.gz")
-            shutil.copyfile(run_timeseries, to_timeseries)
-            to_mask = op.join(out_dir, "functional_mask_xfm.nii.gz")
-            shutil.copyfile(run_mask, to_mask)
-
-        else:
-            # Otherwise apply the transformation
-            full_affine = op.basename(run_affine).replace(".mat", "_to_epi.mat")
-            sub.check_output(["convert_xfm", "-omat", full_affine,
-                              "-concat", run_1_inv_mat, run_affine])
-
-            files = [run_mask, run_timeseries]
-            interps = ["nn", "spline"]
-            for f, interp in zip(files, interps):
-                out_file = op.join(out_dir, "timeseries_xfm.nii.gz")
-                cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
-                       "--interp=%s" % interp, "--premat=%s" % full_affine]
-                sub.check_output(cmd)
-
-    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
-    return out_files
+    copes = InputMultiPath(File(exists=True))
+    varcopes = InputMultiPath(File(exists=True))
+    sumsquares = InputMultiPath(File(exists=True))
 
 
-def mni_model_transform(copes, varcopes, ss_files, masks, affines, warpfield):
-    """Take model outputs into the FSL MNI space."""
-    n_runs = len(affines)
+class TimeseriesRegInput(BaseInterfaceInputSpec):
+
+    timeseries = InputMultiPath(File(exists=True))
+
+
+class MNIRegInput(BaseInterfaceInputSpec):
+
+    warpfield = File(exists=True)
+    affine = File(exists=True)
+
+
+class EPIRegInput(BaseInterfaceInputSpec):
+
+    rigids = InputMultiPath(File(exists=True))
+
+
+class MNIModelRegInput(MNIRegInput,
+                       ModelRegInput,
+                       RegistrationInput):
+
+    pass
+
+
+class EPIModelRegInput(EPIRegInput,
+                       ModelRegInput,
+                       RegistrationInput):
+
+    pass
+
+
+class MNITimeseriesRegInput(MNIRegInput,
+                            TimeseriesRegInput,
+                            RegistrationInput):
+
+    pass
+
+
+class EPITimeseriesRegInput(EPIRegInput,
+                            TimeseriesRegInput,
+                            RegistrationInput):
+
+    pass
+
+
+class RegistrationOutput(TraitedSpec):
+
+    out_files = OutputMultiPath(Directory(exists=True))
+
+
+class Registration(BaseInterface):
+
+    output_spec = RegistrationOutput
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_files"] = self.out_files
+        return outputs
+
+    def apply_ants_warp(self, runtime, in_file, out_file, rigid):
+
+        out_rigid = op.basename(add_suffix(out_file, "anat"))
+
+        continuous_interp = dict(trilinear="trilin",
+                                 spline="cubic")[self.interp]
+        interp = "nearest" if "mask" in in_file else continuous_interp
+        cmdline_rigid = ["mri_vol2vol",
+                         "--mov", in_file,
+                         "--reg", rigid,
+                         "--fstarg",
+                         "--" + interp,
+                         "--o", out_rigid,
+                         "--no-save-reg"]
+        runtime = submit_cmdline(runtime, cmdline_rigid)
+
+        continuous_interp = dict(trilinear="trilin",
+                                 spline="BSpline")[self.interp]
+        interp = "NN" if "mask" in in_file else continuous_interp
+        cmdline_warp = ["WarpImageMultiTransform",
+                        "3",
+                        out_rigid,
+                        out_file,
+                        "-R", self.ref_file]
+        if interp != "trilin":
+            cmdline_warp.append("--use-" + interp)
+        runtime = submit_cmdline(runtime, cmdline_warp)
+        return runtime
+
+    def apply_fsl_warp(self, runtime, in_file, out_file, rigid):
+
+        interp = "nn" if "mask" in in_file else self.interp
+        cmdline = ["applywarp",
+                   "-i", in_file,
+                   "-o", out_file,
+                   "-r", self.ref_file,
+                   "-w", self.inputs.warpfield,
+                   "--interp={}".format(interp),
+                   "--premat={}".format(rigid)]
+        runtime = submit_cmdline(runtime, cmdline)
+        return runtime
+
+    def apply_fsl_rigid(self, runtime, in_file, out_file, rigid):
+
+        interp = "nn" if "mask" in in_file else self.interp
+        cmdline = ["applywarp",
+                   "-i", in_file,
+                   "-o", out_file,
+                   "-r", self.ref_file,
+                   "--interp={}".format(interp),
+                   "--premat={}".format(rigid)]
+        runtime = submit_cmdline(runtime, cmdline)
+        return runtime
+
+
+class MNIRegistration(object):
 
     ref_file = fsl.Info.standard_image("avg152T1_brain.nii.gz")
-    copes = map(list, np.split(np.array(copes), n_runs))
-    varcopes = map(list, np.split(np.array(varcopes), n_runs))
-    ss_files = map(list, np.split(np.array(ss_files), n_runs))
-
-    # Iterate through the runs
-    for n in range(n_runs):
-
-        # Make the output directories
-        out_dir = "run_%d" % (n + 1)
-        os.mkdir(out_dir)
-
-        run_copes = copes[n]
-        run_varcopes = varcopes[n]
-        run_ss_files = ss_files[n]
-        run_mask = masks[n]
-        run_affine = affines[n]
-
-        files = [run_mask] + run_copes + run_varcopes + run_ss_files
-
-        # Otherwise apply the transformation
-        interps = ["nn"] + (["trilinear"] * (len(files) - 1))
-        for f, interp in zip(files, interps):
-            out_file = op.join(out_dir,
-                               op.basename(f).replace(".nii.gz",
-                                                      "_warp.nii.gz"))
-            cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
-                   "--interp=%s" % interp, "--premat=%s" % run_affine,
-                   "-w", warpfield]
-            sub.check_output(cmd)
-
-    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
-    return out_files
 
 
-def mni_timeseries_transform(timeseries, masks, affines, warpfield):
-    """Take timeseries files into the FSL MNI space."""
-    n_runs = len(affines)
-    ref_file = fsl.Info.standard_image("avg152T1_brain.nii.gz")
+class EPIRegistration(object):
 
-    # Iterate through the runs
-    for n in range(n_runs):
+    def combine_rigids(self, runtime, first_rigid, second_rigid):
+        """Invert the first rigid and combine with the second.
 
-        # Make the output directory
-        out_dir = "run_%d" % (n + 1)
-        os.mkdir(out_dir)
+        This creates a transformation from run n to run 1 space,
+        through the anatomical coregistration.
 
-        run_timeseries = timeseries[n]
-        run_mask = masks[n]
-        run_affine = affines[n]
+        """
+        first_inv = op.basename(add_suffix(first_rigid, "inv"))
+        cmdline_inv = ["convert_xfm",
+                       "-omat", first_inv,
+                       "-inverse",
+                       first_rigid]
+        runtime = submit_cmdline(runtime, cmdline_inv)
 
-        files = [run_mask, run_timeseries]
-        interps = ["nn", "spline"]
+        full_rigid = op.basename(add_suffix(second_rigid, "to_epi"))
+        cmdline_full = ["convert_xfm",
+                        "-omat", full_rigid,
+                        "-concat", first_inv,
+                        second_rigid]
+        runtime = submit_cmdline(runtime, cmdline_full)
 
-        for f, interp in zip(files, interps):
-            out_file = op.join(out_dir, "timeseries_warp.nii.gz")
-            cmd = ["applywarp", "-i", f, "-r", ref_file, "-o", out_file,
-                   "--interp=%s" % interp, "--premat=%s" % run_affine,
-                   "-w", warpfield]
-            sub.check_output(cmd)
+        return runtime, full_rigid
 
-    out_files = [op.abspath("run_%d/" % (i + 1)) for i in range(n_runs)]
-    return out_files
+
+class ModelRegistration(object):
+
+    interp = "trilinear"
+
+    def unpack_files(self, field, n_runs):
+        """Transform a long list into a list of lists.
+
+        The model outputs are grabbed as a list of file_ij where i is
+        the run number and j is the contrast number. j indexes fastest.
+
+        """
+        files = getattr(self.inputs, field)
+        files = map(list, np.split(np.array(files), n_runs))
+        return files
+
+
+class TimeseriesRegistration(object):
+
+    interp = "spline"
+
+
+class MNIModelRegistration(MNIRegistration,
+                           ModelRegistration,
+                           Registration):
+
+    input_spec = MNIModelRegInput
+
+    def _run_interface(self, runtime):
+
+        # Get a reference to either the ANTS or FSL function
+        method_name = "apply_{}_warp".format(self.inputs.method)
+        warp_func = getattr(self, method_name)
+
+        # Unpack the long file lists to be ordered by run
+        n_runs = len(self.inputs.rigids)
+        copes = self.unpack_files("copes", n_runs)
+        varcopes = self.unpack_files("varcopes", n_runs)
+        sumsquares = self.unpack_files("sumsquares", n_runs)
+
+        out_files = []
+        for i in range(n_runs):
+
+            # Set up the output directory
+            out_dir = "run_{}/".format(i + 1)
+            os.mkdir(out_dir)
+            out_files.append(op.realpath(out_dir))
+
+            # Select the files for this run
+            run_rigid = self.inputs.rigids[i]
+            run_copes = copes[i]
+            run_varcopes = varcopes[i]
+            run_sumsquares = sumsquares[i]
+            run_mask = [self.inputs.masks[i]]
+            all_files = run_copes + run_varcopes + run_sumsquares + run_mask
+
+            # Apply the transformation to each file
+            for in_file in all_files:
+
+                out_fname = op.basename(add_suffix(in_file, "xfm"))
+                out_file = op.join(out_dir, out_fname)
+                runtime = warp_func(runtime, in_file, out_file, run_rigid)
+
+        self.out_files = out_files
+        return runtime
+
+
+class EPIModelRegistration(EPIRegistration,
+                           ModelRegistration,
+                           Registration):
+
+    input_spec = EPIModelRegInput
+
+    @property
+    def ref_file(self):
+
+        return self.inputs.copes[0]
+
+    def _run_interface(self, runtime):
+
+        n_runs = len(self.inputs.rigids)
+        first_rigid = self.inputs.rigids[0]
+
+        # Unpack the long file lists to be ordered by run
+        copes = self.unpack_files("copes", n_runs)
+        varcopes = self.unpack_files("varcopes", n_runs)
+        sumsquares = self.unpack_files("sumsquares", n_runs)
+
+        out_files = []
+        for i in range(n_runs):
+
+            # Set up the output directory
+            out_dir = "run_{}/".format(i + 1)
+            os.mkdir(out_dir)
+            out_files.append(op.realpath(out_dir))
+
+            # Combine the transformations
+            run_rigid = self.inputs.rigids[i]
+            runtime, full_rigid = self.combine_rigids(runtime,
+                                                      first_rigid,
+                                                      run_rigid)
+
+            # Select the files for this run
+            run_copes = copes[i]
+            run_varcopes = varcopes[i]
+            run_sumsquares = sumsquares[i]
+            run_mask = [self.inputs.masks[i]]
+            all_files = run_copes + run_varcopes + run_sumsquares + run_mask
+
+            # Apply the transformation to each file
+            for in_file in all_files:
+
+                out_fname = op.basename(add_suffix(in_file, "xfm"))
+                out_file = op.join(out_dir, out_fname)
+                runtime = self.apply_fsl_rigid(runtime, in_file,
+                                               out_file, full_rigid)
+
+        self.out_files = out_files
+        return runtime
+
+
+class MNITimeseriesRegistration(MNIRegistration,
+                                TimeseriesRegistration,
+                                Registration):
+
+    input_spec = MNITimeseriesRegInput
+
+    def _run_interface(self, runtime):
+
+        # Get a reference to either the ANTS or FSL function
+        method_name = "apply_{}_warp".format(self.inputs.method)
+        warp_func = getattr(self, method_name)
+
+        n_runs = len(self.inputs.rigids)
+        out_files = []
+        for i in range(n_runs):
+
+            # Set up the output directory
+            out_dir = "run_{}/".format(i + 1)
+            os.mkdir(out_dir)
+            out_files.append(op.realpath(out_dir))
+
+            # Warp the timeseries files
+            run_timeseries = self.inputs.timeseries[i]
+            out_timeseries = op.join(out_dir, "timeseries_xfm.nii.gz")
+            run_rigid = self.inputs.rigids[i]
+            runtime = warp_func(runtime, run_timeseries,
+                                out_timeseries, run_rigid)
+
+            # Warp the mask file
+            run_mask = self.inputs.masks[i]
+            out_mask_fname = op.basename(add_suffix(run_mask, "xfm"))
+            out_mask = op.join(out_dir, out_mask_fname)
+            runtime = warp_func(runtime, run_mask, out_mask, run_rigid)
+
+        self.out_files = out_files
+        return runtime
+
+
+class EPITimeseriesRegistration(EPIRegistration,
+                                TimeseriesRegistration,
+                                Registration):
+
+    input_spec = EPITimeseriesRegInput
+
+    @property
+    def ref_file(self):
+
+        return self.inputs.timeseries[0]
+
+    def _run_interface(self, runtime):
+
+        n_runs = len(self.inputs.rigids)
+        first_rigid = self.inputs.rigids[0]
+
+        out_files = []
+        for i in range(n_runs):
+
+            # Set up the output directory
+            out_dir = "run_{}/".format(i + 1)
+            os.mkdir(out_dir)
+            out_files.append(op.realpath(out_dir))
+
+            # Combine the transformations
+            run_rigid = self.inputs.rigids[i]
+            runtime, full_rigid = self.combine_rigids(runtime,
+                                                      first_rigid,
+                                                      run_rigid)
+
+            # Warp the timeseries files
+            run_timeseries = self.inputs.timeseries[i]
+            out_timeseries = op.join(out_dir, "timeseries_xfm.nii.gz")
+            runtime = self.apply_fsl_rigid(runtime, run_timeseries,
+                                           out_timeseries, full_rigid)
+
+            # Warp the mask file
+            run_mask = self.inputs.masks[i]
+            out_mask_fname = op.basename(add_suffix(run_mask, "xfm"))
+            out_mask = op.join(out_dir, out_mask_fname)
+            runtime = self.apply_fsl_rigid(runtime, run_mask,
+                                           out_mask, full_rigid)
+
+        self.out_files = out_files
+        return runtime

@@ -20,9 +20,11 @@ Python 2.7
 
 ### External
 
-- FSL
+- [FSL](http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/)
 
-- Freesurfer
+- [Freesurfer](https://surfer.nmr.mgh.harvard.edu/)
+
+- [ANTS](http://stnava.github.io/ANTs/) (optional)
 
 ### Python
 
@@ -61,14 +63,23 @@ You may instead want to use the development version from Github, by running
 Basic Workflow
 --------------
 
-- All stages of processing assume that your anatomical data have been
-  processed in Freesurfer (recon-all)
+All stages of processing assume that your anatomical data have been
+processed in Freesurfer (recon-all)
 
-- `run_warp.py`: perform anatomical normalization
+- `run_warp.py`: estimate anatomical normalization
 
-- `run_fmri.py`: perform subject-level functional analyses
+- `anatomy_snapshots.py`: generate static images summarizing the Freesurfer reconstruction.
 
-- `run_group.py`: perform basic group level mixed effects analyses
+- `run_fmri.py`: perform subject-level functional preprocessing and analyses
+
+- `run_group.py`: perform basic group-level mixed effects analyses
+
+- `surface_snapshots.py`: plot the results of the subject- and group-level models on a surface mesh
+
+Ziegler
+-------
+
+The processing scripts generate a variety of static images that can be used for quality control and understanding the analysis. The best way to browse these is with the [ziegler](https://github.com/mwaskom/ziegler) app, which runs in the browser and makes it easy to visualize the data.
 
 Development
 -----------

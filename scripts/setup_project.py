@@ -121,6 +121,9 @@ working_dir = '%(working_dir)s'
 # Set this to True to remove the working directory after each excecution
 rm_working_dir = %(rm_work_dir)s
 
+# Should normalization be performed using ANTS?
+ants_normalization = %(ants_norm)s
+
 """
 
 def mkdir_p(dir):
@@ -256,6 +259,9 @@ Please use relative paths.
 
     do_prompt(d, "rm_work_dir", "Remove working directory after execution? (Y/n)",
               "y", boolean)
+
+    do_prompt(d, "ants_norm", "Use ANTS for normalization? (y/N)",
+              "n", boolean)
 
 
     # Record the time this happened

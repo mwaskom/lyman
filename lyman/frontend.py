@@ -24,6 +24,12 @@ def gather_project_info():
     project_dict["default_exp"] = project.default_exp
     project_dict["rm_working_dir"] = project.rm_working_dir
 
+    if hasattr(project, "ants_normalization"):
+        use_ants = project.ants_normalization
+        project_dict["normalization"] = "ants" if use_ants else "fsl"
+    else:
+        project_dict["normalization"] = "fsl"
+
     return project_dict
 
 

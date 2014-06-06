@@ -8,22 +8,21 @@ information about the processing.
 """
 import os
 import os.path as op
-import numpy as np
-import scipy as sp
-import matplotlib.pyplot as plt
-import matplotlib.image as mplimg
-import nibabel as nib
-from nipy.labs import viz
-import seaborn as sns
+from moss.mosaic import Mosaic
 
-from nipype import IdentityInterface, Function, DataGrabber, DataSink
-from nipype.interfaces import fsl
-from nipype.interfaces import freesurfer as fs
-from nipype import Node, Workflow
+from nipype import (IdentityInterface,
+                    SelectFiles, DataSink,
+                    Node, Workflow)
+from nipype.interfaces import fsl, freesurfer as fs
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec,
+                                    TraitedSpec, File)
+
+from lyman.tools import submit_cmdline
 
 
-def create_anatwarp_workflow(data_dir=None, subjects=None, name="anatwarp"):
-    """Set up the anatomical normalzation workflow.
+def create_fsl_workflow(data_dir=None, subjects=None, name="fslwarp"):
+    """Set up the anatomical normalzation workflow using FNIRT.
 
     Your anatomical data must have been processed in Freesurfer.
     Unlike most lyman workflows, the DataGrabber and DataSink
@@ -61,33 +60,27 @@ def create_anatwarp_workflow(data_dir=None, subjects=None, name="anatwarp"):
                          name="subjectsource")
 
     # Grab recon-all outputs
-    datasource = Node(DataGrabber(infields=["subject_id"],
-                                  outfields=["aseg", "head"],
-                                  base_directory=data_dir,
-                                  sort_filelist=True,
-                                  template="%s/mri/%s.mgz"),
-                      name="datagrabber")
-    datasource.inputs.template_args = dict(aseg=[["subject_id", "aparc+aseg"]],
-                                           head=[["subject_id", "orig"]])
+    templates = dict(aseg="{subject_id}/mri/aparc+aseg.mgz",
+                     head="{subject_id}/mri/T1.mgz")
+    datasource = Node(SelectFiles(templates,
+                                  base_directory=data_dir),
+                      "datasource")
 
     # Convert images to nifti storage and float representation
-    cvtaseg = Node(fs.MRIConvert(out_type="niigz"),
-                   name="convertaseg")
+    cvtaseg = Node(fs.MRIConvert(out_type="niigz"), "convertaseg")
 
-    cvthead = Node(fs.MRIConvert(out_type="niigz", out_datatype="float"),
-                   name="converthead")
+    cvthead = Node(fs.MRIConvert(out_type="niigz",
+                                 out_datatype="float"),
+                   "converthead")
 
     # Turn the aparc+aseg into a brainmask
-    makemask = Node(fs.Binarize(dilate=4, erode=3, min=0.5),
-                    name="makemask")
+    makemask = Node(fs.Binarize(dilate=1, min=0.5), "makemask")
 
     # Extract the brain from the orig.mgz using the mask
-    skullstrip = Node(fsl.ApplyMask(),
-                      name="skullstrip")
+    skullstrip = Node(fsl.ApplyMask(), "skullstrip")
 
     # FLIRT brain to MNI152_brain
-    flirt = Node(fsl.FLIRT(reference=target_brain),
-                 name="flirt")
+    flirt = Node(fsl.FLIRT(reference=target_brain), "flirt")
 
     sw = [-180, 180]
     for dim in ["x", "y", "z"]:
@@ -98,44 +91,31 @@ def create_anatwarp_workflow(data_dir=None, subjects=None, name="anatwarp"):
                            refmask_file=target_mask,
                            config_file=fnirt_cfg,
                            fieldcoeff_file=True),
-                 name="fnirt")
+                 "fnirt")
 
     # Warp and rename the images
     warpbrain = Node(fsl.ApplyWarp(ref_file=target_head,
                                    interp="spline",
                                    out_file="brain_warp.nii.gz"),
-                     name="warpbrain")
+                     "warpbrain")
 
     warpbrainhr = Node(fsl.ApplyWarp(ref_file=hires_head,
                                      interp="spline",
                                      out_file="brain_warp_hires.nii.gz"),
-                       name="warpbrainhr")
+                       "warpbrainhr")
 
     # Generate a png summarizing the registration
-    checkreg = Node(Function(input_names=["in_file"],
-                             output_names=["out_file"],
-                             function=warp_report,
-                             imports=[
-                                "import os",
-                                "import os.path as op",
-                                "import numpy as np",
-                                "import scipy as sp",
-                                "import matplotlib.pyplot as plt",
-                                "import matplotlib.image as mplimg",
-                                "import nibabel as nib",
-                                "from nipy.labs import viz",
-                                "import seaborn as sns"]),
-                    name="checkreg")
+    warpreport = Node(WarpReport(), "warpreport")
 
     # Save relevant files to the data directory
     datasink = Node(DataSink(base_directory=data_dir,
                              parameterization=False,
                              substitutions=[
-                             ("orig_out_masked_flirt.mat", "affine.mat"),
-                             ("orig_out_fieldwarp", "warpfield"),
-                             ("orig_out_masked", "brain"),
-                             ("orig_out", "T1")]),
-                    name="datasink")
+                                 ("orig_out_masked_flirt.mat", "affine.mat"),
+                                 ("orig_out_fieldwarp", "warpfield"),
+                                 ("orig_out_masked", "brain"),
+                                 ("orig_out", "T1")]),
+                    "datasink")
 
     # Define and connect the workflow
     # -------------------------------
@@ -169,7 +149,7 @@ def create_anatwarp_workflow(data_dir=None, subjects=None, name="anatwarp"):
             [("out_file", "in_file")]),
         (fnirt, warpbrainhr,
             [("fieldcoeff_file", "field_file")]),
-        (warpbrainhr, checkreg,
+        (warpbrain, warpreport,
             [("out_file", "in_file")]),
         (subjectsource, datasink,
             [("subject_id", "container")]),
@@ -187,87 +167,183 @@ def create_anatwarp_workflow(data_dir=None, subjects=None, name="anatwarp"):
             [("out_file", "normalization.@brain_hires")]),
         (fnirt, datasink,
             [("fieldcoeff_file", "normalization.@warpfield")]),
-        (checkreg, datasink,
-            [("out_file", "normalization.@reg_png")]),
+        (warpreport, datasink,
+            [("out_file", "normalization.@report")]),
     ])
 
     return normalize
 
 
-def warp_report(in_file):
-    """Plot the registration summary using nipy contours"""
-    mni_file = op.join(os.environ["FSL_DIR"],
-                       "data/standard/MNI152_T1_1mm_brain.nii.gz")
-    mni_img = nib.load(mni_file)
-    mni_data, mni_aff = mni_img.get_data(), mni_img.get_affine()
-    sub_img = nib.load(in_file)
-    sub_data, sub_aff = sub_img.get_data(), sub_img.get_affine()
-    sub_data[sub_data < 1] = 0
+def create_ants_workflow(data_dir=None, subjects=None, name="antswarp"):
+    """Set up the anatomical normalzation workflow using ANTS.
 
-    kwargs = dict(draw_cross=False, annotate=False)
-    cut_coords = dict(x=(-45, -12, 12, 45),
-                      y=(-55, -25, 5, 45),
-                      z=(-30, -5, 20, 40))
+    Your anatomical data must have been processed in Freesurfer.
+    Unlike most lyman workflows, the DataGrabber and DataSink
+    nodes are hardwired within the returned workflow, as this
+    tightly integrates with the Freesurfer subjects directory
+    structure.
 
-    colors = sns.color_palette("bright")
-    im_data = dict()
-    for axis in ["x", "y", "z"]:
-        f = plt.figure(figsize=(10, 2.5))
-        coords = cut_coords[axis]
-        slicer = viz.plot_anat(sub_data, sub_aff, slicer=axis,
-                               cut_coords=coords, figure=f, **kwargs)
-        slicer.contour_map(mni_data, mni_aff, colors=colors)
-        fname = "slices_%s.png" % axis
-        f.savefig(fname, facecolor="k", edgecolor="k")
-        im_data[axis] = mplimg.imread(fname)
+    Parameters
+    ----------
+    data_dir : path
+        top level of data hierarchy/FS subjects directory
+    subjects : list of strings
+        list of subject IDs
+    name : alphanumeric string, optional
+        workflow name
 
-    concat_data = [im_data[axis] for axis in ["x", "y", "z"]]
-    concat_data = np.concatenate(concat_data, axis=0)
-    mplimg.imsave("warp_report.png", concat_data)
-    return op.abspath("warp_report.png")
+    """
+    if data_dir is None:
+        data_dir = os.environ["SUBJECTS_DIR"]
+    if subjects is None:
+        subjects = []
+
+    # Subject source node
+    subjectsource = Node(IdentityInterface(fields=["subject_id"]),
+                         iterables=("subject_id", subjects),
+                         name="subjectsource")
+
+    # Grab recon-all outputs
+    templates = dict(aseg="{subject_id}/mri/aparc+aseg.mgz",
+                     head="{subject_id}/mri/brain.mgz")
+    datasource = Node(SelectFiles(templates,
+                                  base_directory=data_dir),
+                      "datasource")
+
+    # Convert images to nifti storage and float representation
+    cvtaseg = Node(fs.MRIConvert(out_type="niigz"), "convertaseg")
+
+    cvtbrain = Node(fs.MRIConvert(out_type="niigz",
+                                  out_datatype="float"),
+                    "converbrain")
+
+    # Turn the aparc+aseg into a brainmask
+    makemask = Node(fs.Binarize(dilate=4, erode=3, min=0.5), "makemask")
+
+    # Extract the brain from the orig.mgz using the mask
+    skullstrip = Node(fsl.ApplyMask(), "skullstrip")
+
+    # Normalize using ANTS
+    antswarp = Node(ANTSIntroduction(), "antswarp")
+
+    # Generate a png summarizing the registration
+    warpreport = Node(WarpReport(), "warpreport")
+
+    # Save relevant files to the data directory
+    datasink = Node(DataSink(base_directory=data_dir,
+                             parameterization=False),
+                    name="datasink")
+
+    # Define and connect the workflow
+    # -------------------------------
+
+    normalize = Workflow(name=name)
+
+    normalize.connect([
+        (subjectsource, datasource,
+            [("subject_id", "subject_id")]),
+        (datasource, cvtaseg,
+            [("aseg", "in_file")]),
+        (datasource, cvtbrain,
+            [("head", "in_file")]),
+        (cvtaseg, makemask,
+            [("out_file", "in_file")]),
+        (cvtbrain, skullstrip,
+            [("out_file", "in_file")]),
+        (makemask, skullstrip,
+            [("binary_file", "mask_file")]),
+        (skullstrip, antswarp,
+            [("out_file", "in_file")]),
+        (antswarp, warpreport,
+            [("brain_file", "in_file")]),
+        (subjectsource, datasink,
+            [("subject_id", "container")]),
+        (antswarp, datasink,
+            [("warp_file", "normalization.@warpfield"),
+             ("inv_warp_file", "normalization.@inverse_warpfield"),
+             ("affine_file", "normalization.@affine"),
+             ("brain_file", "normalization.@brain")]),
+        (warpreport, datasink,
+            [("out_file", "normalization.@report")]),
+    ])
+
+    return normalize
 
 
-def mni_reg_qc(in_file):
-    """Plot the registration using external FSL routines."""
-    import os.path as op
-    from subprocess import call
-    from nipype.interfaces import fsl
+class ANTSIntroductionInputSpec(BaseInterfaceInputSpec):
 
-    mni_targ = fsl.Info.standard_image("MNI152_T1_1mm_brain.nii.gz")
+    in_file = File(exists=True)
 
-    planes = ["x", "y", "z"]
-    options = []
-    for plane in planes:
-        for slice in ["%.2f" % i for i in .15, .3, .45, .5, .55, .7, .85]:
-            if not(plane == "x" and slice == "0.50"):
-                options.append((plane, slice))
 
-    shots = ["%s-%s.png" % i for i in options]
+class ANTSIntroductionOutputSpec(TraitedSpec):
 
-    for i, shot in enumerate(shots):
-        cmd = ["slicer",
-               in_file,
-               mni_targ,
-               "-s .8",
-               "-%s" % options[i][0],
-               options[i][1],
-               shot]
+    brain_file = File(exitsts=True)
+    warp_file = File(exitsts=True)
+    inv_warp_file = File(exitsts=True)
+    affine_file = File(exitsts=True)
 
-        call(cmd)
 
-    for i in range(3):
-        cmd = ["pngappend"]
-        cmd.append(" + ".join(
-            [s for s in shots if op.split(s)[1].startswith(planes[i])]))
-        rowimg = "row-%d.png" % i
-        cmd.append(rowimg)
-        shots.append(rowimg)
-        call(" ".join(cmd), shell=True)
+class ANTSIntroduction(BaseInterface):
 
-    cmd = ["pngappend"]
-    cmd.append(" - ".join(["row-%d.png" % i for i in range(3)]))
-    out_file = op.join(op.abspath("."), "brain_warp_to_mni.png")
-    cmd.append(out_file)
-    call(" ".join(cmd), shell=True)
+    input_spec = ANTSIntroductionInputSpec
+    output_spec = ANTSIntroductionOutputSpec
 
-    return out_file
+    def _run_interface(self, runtime):
+
+        target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
+        cmdline = " ".join(["antsIntroduction.sh",
+                            "-d", "3",
+                            "-r", target_brain,
+                            "-i", self.inputs.in_file,
+                            "-o", "ants_"])
+
+        runtime.environ["ITK_NUM_THREADS"] = "1"
+        runtime = submit_cmdline(runtime, cmdline)
+
+        os.rename("ants_affine.txt", "affine.mat")
+        os.rename("ants_Warp.nii.gz", "warpfield.nii.gz")
+        os.rename("ants_deformed.nii.gz", "brain_warp.nii.gz")
+        os.rename("ants_InverseWarp.nii.gz", "inverse_warpfield.nii.gz")
+
+        return runtime
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["affine_file"] = op.realpath("affine.txt")
+        outputs["warp_file"] = op.realpath("warpfield.nii.gz")
+        outputs["brain_file"] = op.realpath("brain_warp.nii.gz")
+        outputs["inv_warp_file"] = op.realpath("inverse_warpfield.nii.gz")
+
+        return outputs
+
+
+class WarpReportInput(BaseInterfaceInputSpec):
+
+    in_file = File(exists=True)
+
+
+class WarpReportOutput(TraitedSpec):
+
+    out_file = File(exitsts=True)
+
+
+class WarpReport(BaseInterface):
+
+    input_spec = WarpReportInput
+    output_spec = WarpReportOutput
+
+    def _run_interface(self, runtime):
+
+        target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
+        m = Mosaic(self.inputs.in_file, target_brain, n_col=8)
+        m.plot_contours("Reds", 2)
+        m.fig.savefig("warp_report.png", facecolor="k", edgecolor="k")
+
+        return runtime
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_file"] = op.realpath("warp_report.png")
+        return outputs
