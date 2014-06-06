@@ -8,6 +8,8 @@ def submit_cmdline(runtime, cmdline):
             setattr(runtime, attr, "")
     if not hasattr(runtime, "returncode"):
         runtime.returncode = 0
+    elif runtime.returncode is None:
+        runtime.returncode = 0
 
     if isinstance(cmdline, list):
         cmdline = " ".join(cmdline)
