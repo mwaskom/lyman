@@ -166,10 +166,12 @@ def main(arglist):
 
     # Retrieve the right workflow function for registration
     # Get the workflow function dynamically based on the space
+    warp_method = project["normalization"]
     flow_name = "%s_%s_reg" % (space, regtype)
     reg, reg_input, reg_output = wf.create_reg_workflow(flow_name,
                                                         space,
-                                                        regtype)
+                                                        regtype,
+                                                        warp_method)
 
     # Define a smoothing info node here. Use an iterable so that running
     # with/without smoothing doesn't clobber working directory files
@@ -181,15 +183,14 @@ def main(arglist):
     # Set up the registration inputs and templates
     reg_templates = dict(
         masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
-        affines="{subject_id}/preproc/run_*/func2anat_flirt.mat"
-                          )
+                         )
 
     if regtype == "model":
         reg_base = "{subject_id}/model/{smoothing}/run_*/"
         reg_templates.update(dict(
             copes=op.join(reg_base, "cope*.nii.gz"),
             varcopes=op.join(reg_base, "varcope*.nii.gz"),
-            ss_files=op.join(reg_base, "ss*.nii.gz"),
+            sumsquares=op.join(reg_base, "ss*.nii.gz"),
                                   ))
     else:
         reg_templates.update(dict(
@@ -201,6 +202,14 @@ def main(arglist):
     if space == "mni":
         reg_templates["warpfield"] = op.join(data_dir, "{subject_id}",
                                              "normalization/warpfield.nii.gz")
+        reg_templates["affine"] = op.join(data_dir, "{subject_id}",
+                                          "normalization/affine.mat")
+
+    rigid_stem = "{subject_id}/preproc/run_*/func2anat_"
+    if warp_method == "ants" and space == "mni":
+        reg_templates["rigids"] = rigid_stem + "tkreg.dat"
+    else:
+        reg_templates["rigids"] = rigid_stem + "flirt.mat"
 
     # Define the registration data source node
     reg_source = Node(SelectFiles(reg_templates,
