@@ -2,19 +2,24 @@ import os
 import os.path as op
 
 import numpy as np
-import scipy as sp
 import pandas as pd
 import nibabel as nib
+from scipy.ndimage import binary_dilation
 from skimage import morphology
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from nipype import (IdentityInterface, Function, Rename,
-                    Node, MapNode, Workflow)
+from nipype import IdentityInterface, Function, Node, Workflow
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec,
+                                    OutputMultiPath,
+                                    TraitedSpec, File, traits)
 from nipype.interfaces import fsl, freesurfer
+from nipype.utils.filemanip import fname_presuffix
 
-import seaborn
+import seaborn as sns
 from moss import locator
+from moss.mosaic import Mosaic
 
 import lyman
 
@@ -29,7 +34,7 @@ imports = ["import os",
            "from skimage import morphology",
            "from nipype.interfaces import fsl",
            "from moss import locator",
-           "import seaborn"]
+           "import seaborn as sns"]
 
 
 def create_volume_mixedfx_workflow(name="volume_group",
@@ -128,16 +133,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
         "maskproj")
 
     # Make static report images in the volume
-    report = Node(Function(["mask_file",
-                            "zstat_file",
-                            "localmax_file",
-                            "cope_file",
-                            "seg_file",
-                            "subjects"],
-                           ["report"],
-                           mfx_report,
-                           imports),
-                  "report")
+    report = Node(MFXReport(), "report")
     report.inputs.subjects = subject_list
 
     # Define the workflow outputs
@@ -193,8 +189,10 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("localmax_txt_file", "localmax_file")]),
         (makemask, report,
             [("mask_file", "mask_file")]),
+        (flameo, report,
+            [("zstats", "zstat_file")]),
         (cluster, report,
-            [("threshold_file", "zstat_file"),
+            [("threshold_file", "zstat_thresh_file"),
              ("localmax_txt_file", "localmax_file")]),
         (mergecope, report,
             [("merged_file", "cope_file")]),
@@ -232,7 +230,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
         (maskproj, outputnode,
             [("out_file", "surf_mask")]),
         (report, outputnode,
-            [("report", "report")]),
+            [("out_files", "report")]),
         ])
 
     return group, inputnode, outputnode
@@ -301,7 +299,7 @@ def watershed_segment(zstat_file, localmax_file):
     # Write a lookup-table in Freesurfer format so we can
     # view the segmentation in Freeview
     n = int(markers.max())
-    colors = [[0, 0, 0]] + seaborn.husl_palette(n)
+    colors = [[0, 0, 0]] + sns.husl_palette(n)
     colors = np.hstack([colors, np.zeros((n + 1, 1))])
     lut_data = pd.DataFrame(columns=["#ID", "ROI", "R", "G", "B", "A"],
                             index=np.arange(n + 1))
@@ -473,6 +471,192 @@ def mfx_report(mask_file, zstat_file, localmax_file,
     np.savetxt(subj_file, subjects, "%s")
 
     return [mask_png, zstat_png, peaks_png, boxplot_png, seg_png, subj_file]
+
+
+class MFXReportInput(BaseInterfaceInputSpec):
+
+    mask_file = File(exits=True)
+    zstat_file = File(exsts=True)
+    zstat_thresh_file = File(exsts=True)
+    localmax_file = File(exists=True)
+    cope_file = File(exists=True)
+    seg_file = File(exists=True)
+    subjects = traits.List()
+
+
+class MFXReportOutput(TraitedSpec):
+
+    out_files = OutputMultiPath(File(exists=True))
+
+
+class MFXReport(BaseInterface):
+
+    input_spec = MFXReportInput
+    output_spec = MFXReportOutput
+
+    def _run_interface(self, runtime):
+
+        self.out_files = []
+
+        self.save_subject_list()
+        self.plot_mask()
+        self.plot_full_zstat()
+        self.plot_thresh_zstat()
+
+        self.peaks = peaks = self._load_peaks()
+        if len(peaks):
+
+            self.plot_watershed(peaks)
+            self.plot_peaks(peaks)
+            self.plot_boxes(peaks)
+
+        else:
+            fnames = [self._png_name(self.inputs.seg_file),
+                      self._png_name(self.inputs.zstat_thresh_file, "_peaks"),
+                      op.realpath("peak_boxplot.png")]
+            self.out_files.extend(fnames)
+            for name in fnames:
+                with open(name, "wb"):
+                    pass
+
+        return runtime
+
+    def save_subject_list(self):
+        """Save the subject list for this analysis."""
+        subjects_fname = op.realpath("subjects.txt")
+        np.savetxt(subjects_fname, self.inputs.subjects, "%s")
+        self.out_files.append(subjects_fname)
+
+    def plot_mask(self):
+        """Plot the analysis mask."""
+        m = Mosaic(stat=self.inputs.mask_file)
+        m.plot_mask()
+        out_fname = self._png_name(self.inputs.mask_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_full_zstat(self):
+        """Plot the unthresholded zstat."""
+        m = Mosaic(stat=self.inputs.zstat_file, mask=self.inputs.mask_file)
+        m.plot_overlay(cmap="coolwarm", center=True, alpha=.9)
+        out_fname = self._png_name(self.inputs.zstat_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_thresh_zstat(self):
+        """Plot the thresholded zstat."""
+        m = Mosaic(stat=self.inputs.zstat_thresh_file,
+                   mask=self.inputs.mask_file)
+        m.plot_activation(pos_cmap="OrRd_r", vfloor=3.3, alpha=.9)
+        out_fname = self._png_name(self.inputs.zstat_thresh_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_watershed(self, peaks):
+        """Plot the watershed segmentation."""
+        palette = sns.husl_palette(len(peaks))
+        cmap = mpl.colors.ListedColormap(palette)
+
+        m = Mosaic(stat=self.inputs.seg_file, mask=self.inputs.mask_file)
+        m.plot_overlay(thresh=.5, cmap=cmap, vmin=1, vmax=len(peaks))
+        out_fname = self._png_name(self.inputs.seg_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_peaks(self, peaks):
+        """Plot the peaks."""
+        palette = sns.husl_palette(len(peaks))
+        cmap = mpl.colors.ListedColormap(palette)
+
+        disk_img = self._peaks_to_disks(peaks)
+        m = Mosaic(stat=disk_img, mask=self.inputs.mask_file)
+        m.plot_overlay(thresh=.5, cmap=cmap, vmin=1, vmax=len(peaks))
+        out_fname = self._png_name(self.inputs.zstat_thresh_file, "_peaks")
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_boxes(self, peaks):
+        """Draw a boxplot to show the distribution of copes at peaks."""
+        cope_data = nib.load(self.inputs.cope_file).get_data()
+        peak_spheres = self._peaks_to_spheres(peaks).get_data()
+        peak_dists = np.zeros((cope_data.shape[-1], len(peaks)))
+        for i, peak in enumerate(peaks, 1):
+            sphere_mean = cope_data[peak_spheres == i].mean(axis=(0))
+            peak_dists[:, i - 1] =  sphere_mean
+
+        with sns.axes_style("whitegrid"):
+            f, ax = plt.subplots(figsize=(9, float(len(peaks)) / 3 + 0.33))
+        sns.boxplot(peak_dists[::-1], ax=ax, vert=False)
+        sns.despine(left=True, bottom=True)
+        ax.axvline(0, c=".3", ls="--")
+        labels = np.arange(len(peaks))[::-1] + 1
+        ax.set(yticklabels=labels, ylabel="Local Maximum", xlabel="COPE Value")
+
+        out_fname = op.realpath("peak_boxplot.png")
+        self.out_files.append(out_fname)
+        f.savefig(out_fname, bbox_inches="tight")
+        plt.close(f)
+
+    def _load_peaks(self):
+
+        peak_df = pd.read_table(self.inputs.localmax_file, "\t")
+        peaks = peak_df[["x", "y", "z"]].values
+        return peaks
+
+    def _peaks_to_disks(self, peaks, r=4):
+
+        zstat_img = nib.load(self.inputs.zstat_file)
+
+        x, y = np.ogrid[-r:r + 1, -r:r + 1]
+        disk = x ** 2 + y ** 2 <= r ** 2
+        dilator = np.dstack([disk, disk, np.zeros_like(disk)])
+        disk_data = self._dilate_peaks(zstat_img.shape, peaks, dilator)
+
+        disk_img = nib.Nifti1Image(disk_data, zstat_img.get_affine())
+        return disk_img
+
+    def _peaks_to_spheres(self, peaks, r=4):
+
+        zstat_img = nib.load(self.inputs.zstat_file)
+
+        x, y, z = np.ogrid[-r:r + 1, -r:r + 1, -r:r + 1]
+        dilator = x ** 2 + y ** 2 + z ** 2 <= r ** 2
+        sphere_data = self._dilate_peaks(zstat_img.shape, peaks, dilator)
+
+        sphere_img = nib.Nifti1Image(sphere_data, zstat_img.get_affine())
+        return sphere_img
+
+    def _dilate_peaks(self, shape, peaks, dilator):
+
+        peak_data = np.zeros(shape)
+        disk_data = np.zeros(shape)
+
+        for i, peak in enumerate(peaks, 1):
+            spot = np.zeros(shape, np.bool)
+            spot[tuple(peak)] = 1
+            peak_data += spot
+            disk = binary_dilation(spot, dilator)
+            disk_data[disk] = i
+
+        return disk_data
+
+    def _png_name(self, fname, suffix=""):
+        """Convert a nifti filename to a png filename in this dir."""
+        out_fname = fname_presuffix(fname, suffix=suffix + ".png",
+                                    newpath=os.getcwd(),
+                                    use_ext=False)
+        return out_fname
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_files"] = self.out_files
+        return outputs
 
 
 def cluster_table(localmax_file):
