@@ -84,37 +84,15 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                use_mm=True),
                    "cluster")
 
+    # Project the mask and thresholded zstat onto the surface
+    surfproj = create_surface_projection_workflow(exp_info=exp_info)
+
     # Segment the z stat image with a watershed algorithm
     watershed = Node(Function(["zstat_file", "localmax_file"],
                               ["seg_file", "peak_file", "lut_file"],
                               watershed_segment,
                               imports),
                      "watershed")
-
-    # Sample the zstat image to the surface
-    hemisource = Node(IdentityInterface(["mni_hemi"]), "hemisource")
-    hemisource.iterables = ("mni_hemi", ["lh", "rh"])
-
-    zstatproj = Node(freesurfer.SampleToSurface(
-        sampling_method=exp_info["sampling_method"],
-        sampling_range=exp_info["sampling_range"],
-        sampling_units=exp_info["sampling_units"],
-        smooth_surf=exp_info["surf_smooth"],
-        subject_id="fsaverage",
-        mni152reg=True,
-        target_subject="fsaverage"),
-        "zstatproj")
-
-    # Sample the mask to the surface
-    maskproj = Node(freesurfer.SampleToSurface(
-        sampling_method="max",
-        sampling_range=exp_info["sampling_range"],
-        sampling_units=exp_info["sampling_units"],
-        smooth_surf=exp_info["surf_smooth"],
-        subject_id="fsaverage",
-        mni152reg=True,
-        target_subject="fsaverage"),
-        "maskproj")
 
     # Make static report images in the volume
     report = Node(MFXReport(), "report")
@@ -173,14 +151,10 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("localmax_txt_file", "localmax_file")]),
         (watershed, report,
             [("seg_file", "seg_file")]),
-        (cluster, zstatproj,
-            [("threshold_file", "source_file")]),
-        (hemisource, zstatproj,
-            [("mni_hemi", "hemi")]),
-        (merge, maskproj,
-            [("mask_file", "source_file")]),
-        (hemisource, maskproj,
-            [("mni_hemi", "hemi")]),
+        (merge, surfproj,
+            [("mask_file", "inputs.mask_file")]),
+        (cluster, surfproj,
+            [("threshold_file", "inputs.zstat_file")]),
         (merge, outputnode,
             [("cope_file", "copes"),
              ("varcope_file", "varcopes"),
@@ -194,15 +168,68 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("seg_file", "seg_file"),
              ("peak_file", "peak_file"),
              ("lut_file", "lut_file")]),
-        (zstatproj, outputnode,
-            [("out_file", "surf_zstat")]),
-        (maskproj, outputnode,
-            [("out_file", "surf_mask")]),
+        (surfproj, outputnode,
+            [("outputs.surf_zstat", "surf_zstat"),
+             ("outputs.surf_mask", "surf_mask")]),
         (report, outputnode,
             [("out_files", "report")]),
         ])
 
     return group, inputnode, outputnode
+
+
+def create_surface_projection_workflow(name="surfproj", exp_info=None):
+    """Project the group mask and thresholded zstat file onto the surface."""
+    if exp_info is None:
+        exp_info = lyman.default_experiment_parameters()
+
+    inputnode = Node(IdentityInterface(["zstat_file", "mask_file"]), "inputs")
+
+    # Sample the zstat image to the surface
+    hemisource = Node(IdentityInterface(["mni_hemi"]), "hemisource")
+    hemisource.iterables = ("mni_hemi", ["lh", "rh"])
+
+    zstatproj = Node(freesurfer.SampleToSurface(
+        sampling_method=exp_info["sampling_method"],
+        sampling_range=exp_info["sampling_range"],
+        sampling_units=exp_info["sampling_units"],
+        smooth_surf=exp_info["surf_smooth"],
+        subject_id="fsaverage",
+        mni152reg=True,
+        target_subject="fsaverage"),
+        "zstatproj")
+
+    # Sample the mask to the surface
+    maskproj = Node(freesurfer.SampleToSurface(
+        sampling_method="max",
+        sampling_range=exp_info["sampling_range"],
+        sampling_units=exp_info["sampling_units"],
+        smooth_surf=exp_info["surf_smooth"],
+        subject_id="fsaverage",
+        mni152reg=True,
+        target_subject="fsaverage"),
+        "maskproj")
+
+    outputnode = Node(IdentityInterface(["surf_zstat", "surf_mask"]), "outputs")
+
+    # Define and connect the workflow
+    proj = Workflow(name)
+    proj.connect([
+        (inputnode, zstatproj,
+            [("zstat_file", "source_file")]),
+        (inputnode, maskproj,
+            [("mask_file", "source_file")]),
+        (hemisource, zstatproj,
+            [("mni_hemi", "hemi")]),
+        (hemisource, maskproj,
+            [("mni_hemi", "hemi")]),
+        (zstatproj, outputnode,
+            [("out_file", "surf_zstat")]),
+        (maskproj, outputnode,
+            [("out_file", "surf_mask")]),
+        ])
+
+    return proj 
 
 
 def watershed_segment(zstat_file, localmax_file):
