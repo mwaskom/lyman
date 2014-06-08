@@ -1,12 +1,13 @@
 """Save graphical representations of all the lyman workflows."""
 import os
 import re
+import sys
 from glob import glob
 from lyman import workflows as wf
 from nipype import config
 
 
-def main():
+def main(arglist):
 
     config.set('logging', 'workflow_level', 'CRITICAL')
 
@@ -27,7 +28,11 @@ def main():
 
         # Write the graphs
         name = flow.name
-        flow.write_graph("graphs/%s.dot" % name, "orig")
+        if arglist:
+            if name in arglist:
+                flow.write_graph("graphs/%s.dot" % name, "orig")
+        else:
+            flow.write_graph("graphs/%s.dot" % name, "orig")
 
     # Remove the .dot files as they are not of use to us
     files = glob("graphs/*")
@@ -37,4 +42,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
