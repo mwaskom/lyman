@@ -1,35 +1,26 @@
-import os
 import os.path as op
 
 import numpy as np
-import scipy as sp
 import pandas as pd
 import nibabel as nib
+from scipy.ndimage import binary_dilation
 from skimage import morphology
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from nipype import (IdentityInterface, Function, Rename,
-                    Node, MapNode, Workflow)
+from nipype import IdentityInterface, Node, Workflow
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec,
+                                    InputMultiPath, OutputMultiPath,
+                                    TraitedSpec, File, traits)
 from nipype.interfaces import fsl, freesurfer
 
-import seaborn
+import seaborn as sns
 from moss import locator
+from moss.mosaic import Mosaic
 
 import lyman
-
-imports = ["import os",
-           "import os.path as op",
-           "import numpy as np",
-           "import scipy as sp",
-           "import pandas as pd",
-           "import nibabel as nib",
-           "import matplotlib as mpl",
-           "import matplotlib.pyplot as plt",
-           "from skimage import morphology",
-           "from nipype.interfaces import fsl",
-           "from moss import locator",
-           "import seaborn"]
+from lyman.tools import add_suffix, nii_to_png
 
 
 def create_volume_mixedfx_workflow(name="volume_group",
@@ -56,21 +47,12 @@ def create_volume_mixedfx_workflow(name="volume_group",
                      "inputnode")
 
     # Merge the fixed effect summary images into one 4D image
-    mergecope = Node(fsl.Merge(dimension="t"), "mergecope")
-    mergevarcope = Node(fsl.Merge(dimension="t"), "mergevarcope")
-    mergedof = Node(fsl.Merge(dimension="t"), "mergedof")
+    merge = Node(MergeAcrossSubjects(), "merge")
 
     # Make a simple design
     design = Node(fsl.MultipleRegressDesign(regressors=regressors,
                                             contrasts=contrasts),
                   "design")
-
-    # Find the intersection of masks across subjects
-    makemask = Node(Function(["varcope_file"],
-                             ["mask_file"],
-                             make_group_mask,
-                             imports),
-                    "makemask")
 
     # Fit the mixed effects model
     flameo = Node(fsl.FLAMEO(run_mode=exp_info["flame_mode"]), "flameo")
@@ -88,19 +70,102 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                use_mm=True),
                    "cluster")
 
-    # Deal with FSL's poorly formatted table of peaks
-    peaktable = Node(Function(["localmax_file"],
-                              ["out_file"],
-                              imports=imports,
-                              function=cluster_table),
-                     "peaktable")
+    # Project the mask and thresholded zstat onto the surface
+    surfproj = create_surface_projection_workflow(exp_info=exp_info)
 
     # Segment the z stat image with a watershed algorithm
-    watershed = Node(Function(["zstat_file", "localmax_file"],
-                              ["seg_file", "peak_file", "lut_file"],
-                              watershed_segment,
-                              imports),
-                     "watershed")
+    watershed = Node(Watershed(), "watershed")
+
+    # Make static report images in the volume
+    report = Node(MFXReport(), "report")
+    report.inputs.subjects = subject_list
+
+    # Define the workflow outputs
+    outputnode = Node(IdentityInterface(["copes",
+                                         "varcopes",
+                                         "mask_file",
+                                         "flameo_stats",
+                                         "thresh_zstat",
+                                         "surf_zstat",
+                                         "surf_mask",
+                                         "cluster_image",
+                                         "seg_file",
+                                         "peak_file",
+                                         "lut_file",
+                                         "report"]),
+                      "outputnode")
+
+    # Define and connect up the workflow
+    group = Workflow(name)
+    group.connect([
+        (inputnode, merge,
+            [("copes", "cope_files"),
+             ("varcopes", "varcope_files"),
+             ("dofs", "dof_files")]),
+        (merge, flameo,
+            [("cope_file", "cope_file"),
+             ("varcope_file", "var_cope_file"),
+             ("dof_file", "dof_var_cope_file"),
+             ("mask_file", "mask_file")]),
+        (design, flameo,
+            [("design_con", "t_con_file"),
+             ("design_grp", "cov_split_file"),
+             ("design_mat", "design_file")]),
+        (flameo, smoothest,
+            [("zstats", "zstat_file")]),
+        (merge, smoothest,
+            [("mask_file", "mask_file")]),
+        (smoothest, cluster,
+            [("dlh", "dlh"),
+             ("volume", "volume")]),
+        (flameo, cluster,
+            [("zstats", "in_file")]),
+        (cluster, watershed,
+            [("threshold_file", "zstat_file"),
+             ("localmax_txt_file", "localmax_file")]),
+        (merge, report,
+            [("mask_file", "mask_file"),
+             ("cope_file", "cope_file")]),
+        (flameo, report,
+            [("zstats", "zstat_file")]),
+        (cluster, report,
+            [("threshold_file", "zstat_thresh_file"),
+             ("localmax_txt_file", "localmax_file")]),
+        (watershed, report,
+            [("seg_file", "seg_file")]),
+        (merge, surfproj,
+            [("mask_file", "inputs.mask_file")]),
+        (cluster, surfproj,
+            [("threshold_file", "inputs.zstat_file")]),
+        (merge, outputnode,
+            [("cope_file", "copes"),
+             ("varcope_file", "varcopes"),
+             ("mask_file", "mask_file")]),
+        (flameo, outputnode,
+            [("stats_dir", "flameo_stats")]),
+        (cluster, outputnode,
+            [("threshold_file", "thresh_zstat"),
+             ("index_file", "cluster_image")]),
+        (watershed, outputnode,
+            [("seg_file", "seg_file"),
+             ("peak_file", "peak_file"),
+             ("lut_file", "lut_file")]),
+        (surfproj, outputnode,
+            [("outputs.surf_zstat", "surf_zstat"),
+             ("outputs.surf_mask", "surf_mask")]),
+        (report, outputnode,
+            [("out_files", "report")]),
+        ])
+
+    return group, inputnode, outputnode
+
+
+def create_surface_projection_workflow(name="surfproj", exp_info=None):
+    """Project the group mask and thresholded zstat file onto the surface."""
+    if exp_info is None:
+        exp_info = lyman.default_experiment_parameters()
+
+    inputnode = Node(IdentityInterface(["zstat_file", "mask_file"]), "inputs")
 
     # Sample the zstat image to the surface
     hemisource = Node(IdentityInterface(["mni_hemi"]), "hemisource")
@@ -127,370 +192,397 @@ def create_volume_mixedfx_workflow(name="volume_group",
         target_subject="fsaverage"),
         "maskproj")
 
-    # Make static report images in the volume
-    report = Node(Function(["mask_file",
-                            "zstat_file",
-                            "localmax_file",
-                            "cope_file",
-                            "seg_file",
-                            "subjects"],
-                           ["report"],
-                           mfx_report,
-                           imports),
-                  "report")
-    report.inputs.subjects = subject_list
+    outputnode = Node(IdentityInterface(["surf_zstat",
+                                         "surf_mask"]), "outputs")
 
-    # Define the workflow outputs
-    outputnode = Node(IdentityInterface(["copes",
-                                         "varcopes",
-                                         "mask_file",
-                                         "flameo_stats",
-                                         "thresh_zstat",
-                                         "surf_zstat",
-                                         "surf_mask",
-                                         "cluster_image",
-                                         "cluster_peaks",
-                                         "seg_file",
-                                         "peak_file",
-                                         "lut_file",
-                                         "report"]),
-                      "outputnode")
-
-    # Define and connect up the workflow
-    group = Workflow(name)
-    group.connect([
-        (inputnode, mergecope,
-            [("copes", "in_files")]),
-        (inputnode, mergevarcope,
-            [("varcopes", "in_files")]),
-        (inputnode, mergedof,
-            [("dofs", "in_files")]),
-        (mergecope, flameo,
-            [("merged_file", "cope_file")]),
-        (mergevarcope, flameo,
-            [("merged_file", "var_cope_file")]),
-        (mergevarcope, makemask,
-            [("merged_file", "varcope_file")]),
-        (mergedof, flameo,
-            [("merged_file", "dof_var_cope_file")]),
-        (makemask, flameo,
-            [("mask_file", "mask_file")]),
-        (design, flameo,
-            [("design_con", "t_con_file"),
-             ("design_grp", "cov_split_file"),
-             ("design_mat", "design_file")]),
-        (flameo, smoothest,
-            [("zstats", "zstat_file")]),
-        (makemask, smoothest,
-            [("mask_file", "mask_file")]),
-        (smoothest, cluster,
-            [("dlh", "dlh"),
-             ("volume", "volume")]),
-        (flameo, cluster,
-            [("zstats", "in_file")]),
-        (cluster, watershed,
-            [("threshold_file", "zstat_file"),
-             ("localmax_txt_file", "localmax_file")]),
-        (makemask, report,
-            [("mask_file", "mask_file")]),
-        (cluster, report,
-            [("threshold_file", "zstat_file"),
-             ("localmax_txt_file", "localmax_file")]),
-        (mergecope, report,
-            [("merged_file", "cope_file")]),
-        (watershed, report,
-            [("seg_file", "seg_file")]),
-        (cluster, peaktable,
-            [("localmax_txt_file", "localmax_file")]),
-        (cluster, zstatproj,
-            [("threshold_file", "source_file")]),
+    # Define and connect the workflow
+    proj = Workflow(name)
+    proj.connect([
+        (inputnode, zstatproj,
+            [("zstat_file", "source_file")]),
+        (inputnode, maskproj,
+            [("mask_file", "source_file")]),
         (hemisource, zstatproj,
             [("mni_hemi", "hemi")]),
-        (makemask, maskproj,
-            [("mask_file", "source_file")]),
         (hemisource, maskproj,
             [("mni_hemi", "hemi")]),
-        (mergecope, outputnode,
-            [("merged_file", "copes")]),
-        (mergevarcope, outputnode,
-            [("merged_file", "varcopes")]),
-        (makemask, outputnode,
-            [("mask_file", "mask_file")]),
-        (flameo, outputnode,
-            [("stats_dir", "flameo_stats")]),
-        (cluster, outputnode,
-            [("threshold_file", "thresh_zstat"),
-             ("index_file", "cluster_image")]),
-        (peaktable, outputnode,
-            [("out_file", "cluster_peaks")]),
-        (watershed, outputnode,
-            [("seg_file", "seg_file"),
-             ("peak_file", "peak_file"),
-             ("lut_file", "lut_file")]),
         (zstatproj, outputnode,
             [("out_file", "surf_zstat")]),
         (maskproj, outputnode,
             [("out_file", "surf_mask")]),
-        (report, outputnode,
-            [("report", "report")]),
         ])
 
-    return group, inputnode, outputnode
+    return proj
 
 
-def make_group_mask(varcope_file):
-    """Find the intersection of the MNI brain and var > 0 voxels."""
-    mni_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
-    mni_img = nib.load(mni_mask)
-    mask_data = mni_img.get_data().astype(bool)
-
-    # Find the voxels with positive variance
-    var_data = nib.load(varcope_file).get_data()
-    good_var = var_data.all(axis=-1)
-
-    # Find the intersection
-    mask_data *= good_var
-
-    # Save the mask file
-    new_img = nib.Nifti1Image(mask_data,
-                              mni_img.get_affine(),
-                              mni_img.get_header())
-    new_img.set_data_dtype(np.int16)
-    mask_file = os.path.abspath("group_mask.nii.gz")
-    new_img.to_filename(mask_file)
-    return mask_file
+# =========================================================================== #
 
 
-def watershed_segment(zstat_file, localmax_file):
-    """Segment the thresholded zstat image."""
-    z_img = nib.load(zstat_file)
-    z_data = z_img.get_data()
+class MergeInput(BaseInterfaceInputSpec):
 
-    # Set up the output filenames
-    seg_file = op.basename(zstat_file).replace(".nii.gz", "_seg.nii.gz")
-    seg_file = op.abspath(seg_file)
-    peak_file = op.basename(zstat_file).replace(".nii.gz", "_peaks.nii.gz")
-    peak_file = op.abspath(peak_file)
-    lut_file = seg_file.replace(".nii.gz", ".txt")
+    cope_files = InputMultiPath(File(exists=True))
+    varcope_files = InputMultiPath(File(exists=True))
+    dof_files = InputMultiPath(File(exists=True))
 
-    # Read in the peak txt file from FSL cluster
-    peaks = pd.read_table(localmax_file, "\t")[["x", "y", "z"]].values
-    markers = np.zeros_like(z_data)
 
-    # Do the watershed, or not, depending on whether we had peaks
-    if len(peaks):
+class MergeOutput(TraitedSpec):
+
+    cope_file = File(exists=True)
+    varcope_file = File(exists=True)
+    dof_file = File(exists=True)
+    mask_file = File(exists=True)
+
+
+class MergeAcrossSubjects(BaseInterface):
+
+    input_spec = MergeInput
+    output_spec = MergeOutput
+
+    def _run_interface(self, runtime):
+
+        for ftype in ["cope", "varcope", "dof"]:
+
+            in_files = getattr(self.inputs, ftype + "_files")
+            in_imgs = [nib.load(f) for f in in_files]
+            out_img = self._merge_subject_images(in_imgs)
+            out_img.to_filename(ftype + "_merged.nii.gz")
+
+            # Use the varcope image to make a gropu mask
+            if ftype == "varcope":
+                mask_img = self._create_group_mask(out_img)
+                mask_img.to_filename("group_mask.nii.gz")
+
+        return runtime
+
+    def _merge_subject_images(self, images):
+        """Stack a list of 3D images into 4D image."""
+        in_data = [i.get_data() for i in images]
+        out_data = np.asarray(in_data).transpose(1, 2, 3, 0)
+        out_img = nib.Nifti1Image(out_data,
+                                  images[0].get_affine(),
+                                  images[0].get_header())
+        return out_img
+
+    def _create_group_mask(self, var_img):
+
+        mni_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
+        mni_img = nib.load(mni_mask)
+        mask_data = mni_img.get_data().astype(bool)
+
+        # Find the voxels with positive variance
+        var_data = var_img.get_data()
+        good_var = (var_data > 0).all(axis=-1)
+
+        # Find the intersection
+        mask_data &= good_var
+
+        # Create and return the 3D mask image
+        mask_img = nib.Nifti1Image(mask_data,
+                                   mni_img.get_affine(),
+                                   mni_img.get_header())
+        mask_img.set_data_dtype(np.int16)
+        return mask_img
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        for ftype in ["cope", "varcope", "dof"]:
+            outputs[ftype + "_file"] = op.realpath(ftype + "_merged.nii.gz")
+        outputs["mask_file"] = op.realpath("group_mask.nii.gz")
+        return outputs
+
+
+class WatershedInput(BaseInterfaceInputSpec):
+
+    zstat_file = File(exists=True)
+    localmax_file = File(exsits=True)
+
+
+class WatershedOutput(TraitedSpec):
+
+    seg_file = File(exists=True)
+    peak_file = File(exists=True)
+    lut_file = File(exists=True)
+
+
+class Watershed(BaseInterface):
+
+    input_spec = WatershedInput
+    output_spec = WatershedOutput
+
+    def _run_interface(self, runtime):
+
+        # Load the zstat data
+        z_img = nib.load(self.inputs.zstat_file)
+        z_data = z_img.get_data()
+
+        # Load the peaks
+        peaks_df = pd.read_table(self.inputs.localmax_file, "\t")
+        peaks = peaks_df[["x", "y", "z"]].values
+
+        # Possibly do the segmentation, if there are peaks
+        if len(peaks):
+            seg, markers = self.segment(z_data, peaks)
+        else:
+            seg, markers = np.zeros_like(z_data), np.zeros_like(z_data)
+
+        # Set up the output names
+        seg_fname = op.basename(add_suffix(self.inputs.zstat_file, "seg"))
+        peak_fname = op.basename(add_suffix(self.inputs.zstat_file, "peaks"))
+        lut_fname = seg_fname.replace(".nii.gz", ".txt")
+
+        self._seg_fname = seg_fname
+        self._peak_fname = peak_fname
+        self._lut_fname = lut_fname
+
+        # Write the output images
+        self.write_output(seg, seg_fname)
+        self.write_output(markers, peak_fname)
+
+        # Create a LUT and save it
+        lut_data = self.create_lut(markers)
+        lut_data.to_csv(lut_fname, "\t", index=False)
+
+        return runtime
+
+    def segment(self, data, peaks):
+        """Perform a watershed segmentation based on local maxima."""
+        markers = np.zeros_like(data)
         markers[tuple(peaks.T)] = np.arange(len(peaks)) + 1
-        seg = morphology.watershed(-z_data, markers, mask=z_data > 0)
-    else:
-        seg = np.zeros_like(z_data)
+        seg = morphology.watershed(-data, markers, mask=data > 0)
 
-    # Create a Nifti image with the segmentation and save it
-    seg_img = nib.Nifti1Image(seg.astype(np.int16),
-                              z_img.get_affine(),
-                              z_img.get_header())
-    seg_img.set_data_dtype(np.int16)
-    seg_img.to_filename(seg_file)
+        return seg, markers
 
-    # Create a Nifti image with just the peaks and save it
-    peak_img = nib.Nifti1Image(markers.astype(np.int16),
-                               z_img.get_affine(),
-                               z_img.get_header())
-    peak_img.set_data_dtype(np.int16)
-    peak_img.to_filename(peak_file)
+    def create_lut(self, markers):
+        """Create a Freesurfer-style lookup tabke for the segmentation."""
+        n = int(markers.max())
+        colors = [[0, 0, 0]] + sns.husl_palette(n)
+        colors = np.hstack([colors, np.zeros((n + 1, 1))])
+        lut_data = pd.DataFrame(columns=["#ID", "ROI", "R", "G", "B", "A"],
+                                index=np.arange(n + 1))
+        names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
+        lut_data["ROI"] = np.array(names)
+        lut_data["#ID"] = np.arange(n + 1)
+        lut_data.loc[:, "R":"A"] = (colors * 255).astype(int)
 
-    # Write a lookup-table in Freesurfer format so we can
-    # view the segmentation in Freeview
-    n = int(markers.max())
-    colors = [[0, 0, 0]] + seaborn.husl_palette(n)
-    colors = np.hstack([colors, np.zeros((n + 1, 1))])
-    lut_data = pd.DataFrame(columns=["#ID", "ROI", "R", "G", "B", "A"],
-                            index=np.arange(n + 1))
-    names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
-    lut_data["ROI"] = np.array(names)
-    lut_data["#ID"] = np.arange(n + 1)
-    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int)
-    lut_data.to_csv(lut_file, "\t", index=False)
+        return lut_data
 
-    return seg_file, peak_file, lut_file
+    def write_output(self, data, fname):
+        """Save an array of data to an image like the input z stat."""
+        template = nib.load(self.inputs.zstat_file)
+        out_img = nib.Nifti1Image(data.astype(np.int16),
+                                  template.get_affine(),
+                                  template.get_header())
+        out_img.set_data_dtype(np.int16)
+        out_img.to_filename(fname)
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["seg_file"] = op.realpath(self._seg_fname)
+        outputs["peak_file"] = op.realpath(self._peak_fname)
+        outputs["lut_file"] = op.realpath(self._lut_fname)
+        return outputs
 
 
-def mfx_report(mask_file, zstat_file, localmax_file,
-               cope_file, seg_file, subjects):
-    """Plot various information related to the results."""
-    mni_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
-    mni_data = nib.load(mni_brain).get_data()
+class MFXReportInput(BaseInterfaceInputSpec):
 
-    mask_data = nib.load(mask_file).get_data()
-    mask = np.where(mask_data, 1, np.nan)
+    mask_file = File(exits=True)
+    zstat_file = File(exsts=True)
+    zstat_thresh_file = File(exsts=True)
+    localmax_file = File(exists=True)
+    cope_file = File(exists=True)
+    seg_file = File(exists=True)
+    subjects = traits.List()
 
-    z_stat = nib.load(zstat_file).get_data()
-    z_plot = z_stat.copy()
-    z_plot[z_stat == 0] = np.nan
 
-    peaks = pd.read_table(localmax_file, "\t")[["x", "y", "z"]].values
+class MFXReportOutput(TraitedSpec):
 
-    seg_data = nib.load(seg_file).get_data().astype(float)
+    out_files = OutputMultiPath(File(exists=True))
 
-    # Set up the output names
-    mask_png = os.path.abspath("group_mask.png")
-    zname = os.path.basename(zstat_file).replace(".nii.gz", "")
-    zstat_png = os.path.abspath("%s.png" % zname)
-    peaks_png = os.path.abspath("%s_peaks.png" % zname)
-    boxplot_png = os.path.abspath("peak_boxplot.png")
-    seg_png = os.path.abspath(seg_file.replace(".nii.gz", ".png"))
 
-    # Find the plot parameters
-    xdata = np.flatnonzero(mni_data.any(axis=1).any(axis=1))
-    xmin, xmax = xdata.min(), xdata.max() + 1
-    ydata = np.flatnonzero(mni_data.any(axis=0).any(axis=1))
-    ymin, ymax = ydata.min(), ydata.max() + 1
-    zdata = np.flatnonzero(mni_data.any(axis=0).any(axis=0))
-    zmin, zmax = zdata.min(), zdata.max() + 1
+class MFXReport(BaseInterface):
 
-    n_slices = (zmax - zmin) // 2
-    n_row, n_col = n_slices // 8, 8
-    start = n_slices % n_col // 2 + zmin + 4
-    figsize = (10, 1.375 * n_row)
-    slices = (start + np.arange(zmax - zmin))[::2][:n_slices]
-    pltkws = dict(nrows=int(n_row), ncols=int(n_col),
-                  figsize=figsize, facecolor="k")
-    pngkws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
+    input_spec = MFXReportInput
+    output_spec = MFXReportOutput
 
-    vmin, vmax = 0, mni_data.max()
+    def _run_interface(self, runtime):
 
-    # First plot the mask image
-    f, axes = plt.subplots(**pltkws)
-    cmap = mpl.colors.ListedColormap(["MediumSpringGreen"])
-    for i, ax in zip(slices, axes.ravel()):
-        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
-                  cmap="gray", vmin=vmin, vmax=vmax)
-        ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
-                  alpha=.7, cmap=cmap, interpolation="nearest")
-        ax.axis("off")
-    plt.savefig(mask_png, **pngkws)
-    plt.close(f)
+        self.out_files = []
 
-    def add_colorbar(f, cmap, low, high, left, width, fmt):
-        cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
-        cbar_ax = f.add_axes([left, 0, width, .03])
-        cbar_ax.imshow(cbar.T, aspect="auto", cmap=cmap)
-        cbar_ax.axis("off")
-        f.text(left - .01, .018, fmt % low, ha="right", va="center",
-               color="white", size=13, weight="demibold")
-        f.text(left + width + .01, .018, fmt % high, ha="left",
-               va="center", color="white", size=13, weight="demibold")
+        self.save_subject_list()
+        self.plot_mask()
+        self.plot_full_zstat()
+        self.plot_thresh_zstat()
+        self.reformat_cluster_table()
 
-    # Now plot the zstat image
-    mask = np.where(mask_data, np.nan, 1)
-    mask_cmap = mpl.colors.ListedColormap(["#160016"])
-    zlow = 2.3
-    zhigh = max(3.71, z_stat.max())
-    f, axes = plt.subplots(**pltkws)
-    for i, ax in zip(slices, axes.ravel()):
-        ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
-                  cmap="gray", vmin=vmin, vmax=vmax)
-        ax.imshow(z_plot[xmin:xmax, ymin:ymax, i].T,
-                  cmap="Reds_r", vmin=zlow, vmax=zhigh)
-        ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
-                  cmap=mask_cmap, alpha=.5, interpolation="nearest")
-        ax.axis("off")
-    add_colorbar(f, "Reds_r", zlow, zhigh, .35, .3, "%.1f")
-    plt.savefig(zstat_png, **pngkws)
-    plt.close(f)
+        self.peaks = peaks = self._load_peaks()
+        if len(peaks):
 
-    # Everything else is dependent on there being some peak data
-    if len(peaks):
+            self.plot_watershed(peaks)
+            self.plot_peaks(peaks)
+            self.plot_boxes(peaks)
 
-        # Now plot the peak centroids
-        peak_data = np.zeros_like(z_stat)
-        disk_data = np.zeros_like(z_stat)
-        y, x = np.ogrid[-4: 4 + 1, -4:4 + 1]
-        disk = x ** 2 + y ** 2 <= 4 ** 2
-        dilator = np.dstack([disk, disk, np.zeros_like(disk)])
+        else:
+            fnames = [nii_to_png(self.inputs.seg_file),
+                      nii_to_png(self.inputs.zstat_thresh_file, "_peaks"),
+                      op.realpath("peak_boxplot.png")]
+            self.out_files.extend(fnames)
+            for name in fnames:
+                with open(name, "wb"):
+                    pass
+
+        return runtime
+
+    def save_subject_list(self):
+        """Save the subject list for this analysis."""
+        subjects_fname = op.realpath("subjects.txt")
+        np.savetxt(subjects_fname, self.inputs.subjects, "%s")
+        self.out_files.append(subjects_fname)
+
+    def plot_mask(self):
+        """Plot the analysis mask."""
+        m = Mosaic(stat=self.inputs.mask_file)
+        m.plot_mask()
+        out_fname = nii_to_png(self.inputs.mask_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_full_zstat(self):
+        """Plot the unthresholded zstat."""
+        m = Mosaic(stat=self.inputs.zstat_file, mask=self.inputs.mask_file)
+        m.plot_overlay(cmap="coolwarm", center=True, alpha=.9)
+        out_fname = nii_to_png(self.inputs.zstat_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_thresh_zstat(self):
+        """Plot the thresholded zstat."""
+        m = Mosaic(stat=self.inputs.zstat_thresh_file,
+                   mask=self.inputs.mask_file)
+        m.plot_activation(pos_cmap="OrRd_r", vfloor=3.3, alpha=.9)
+        out_fname = nii_to_png(self.inputs.zstat_thresh_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_watershed(self, peaks):
+        """Plot the watershed segmentation."""
+        palette = sns.husl_palette(len(peaks))
+        cmap = mpl.colors.ListedColormap(palette)
+
+        m = Mosaic(stat=self.inputs.seg_file, mask=self.inputs.mask_file)
+        m.plot_overlay(thresh=.5, cmap=cmap, vmin=1, vmax=len(peaks))
+        out_fname = nii_to_png(self.inputs.seg_file)
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_peaks(self, peaks):
+        """Plot the peaks."""
+        palette = sns.husl_palette(len(peaks))
+        cmap = mpl.colors.ListedColormap(palette)
+
+        disk_img = self._peaks_to_disks(peaks)
+        m = Mosaic(stat=disk_img, mask=self.inputs.mask_file)
+        m.plot_overlay(thresh=.5, cmap=cmap, vmin=1, vmax=len(peaks))
+        out_fname = nii_to_png(self.inputs.zstat_thresh_file, "_peaks")
+        self.out_files.append(out_fname)
+        m.savefig(out_fname)
+        m.close()
+
+    def plot_boxes(self, peaks):
+        """Draw a boxplot to show the distribution of copes at peaks."""
+        cope_data = nib.load(self.inputs.cope_file).get_data()
+        peak_spheres = self._peaks_to_spheres(peaks).get_data()
+        peak_dists = np.zeros((cope_data.shape[-1], len(peaks)))
         for i, peak in enumerate(peaks, 1):
-            spot = np.zeros_like(z_stat)
+            sphere_mean = cope_data[peak_spheres == i].mean(axis=(0))
+            peak_dists[:, i - 1] = sphere_mean
+
+        with sns.axes_style("whitegrid"):
+            f, ax = plt.subplots(figsize=(9, float(len(peaks)) / 3 + 0.33))
+
+        pal = sns.husl_palette(peak_dists.shape[1])[::-1]
+        sns.boxplot(peak_dists[:, ::-1], color=pal, ax=ax, vert=False)
+        sns.despine(left=True, bottom=True)
+        ax.axvline(0, c=".3", ls="--")
+        labels = np.arange(len(peaks))[::-1] + 1
+        ax.set(yticklabels=labels, ylabel="Local Maximum", xlabel="COPE Value")
+
+        out_fname = op.realpath("peak_boxplot.png")
+        self.out_files.append(out_fname)
+        f.savefig(out_fname, bbox_inches="tight")
+        plt.close(f)
+
+    def reformat_cluster_table(self):
+        """Add some info to an FSL cluster file and format it properly."""
+        in_fname = self.inputs.localmax_file
+        df = pd.read_table(in_fname, delimiter="\t")
+        df = df[["Cluster Index", "Value", "x", "y", "z"]]
+        df.columns = ["Cluster", "Value", "x", "y", "z"]
+        df.index.name = "Peak"
+
+        # Find out where the peaks most likely are
+        if len(df):
+            coords = df[["x", "y", "z"]].values
+            loc_df = locator.locate_peaks(coords)
+            df = pd.concat([df, loc_df], axis=1)
+            mni_coords = locator.vox_to_mni(coords).T
+            for i, ax in enumerate(["x", "y", "z"]):
+                df[ax] = mni_coords[i]
+
+        out_fname = op.abspath(op.basename(in_fname[:-3] + "csv"))
+        self.out_files.append(out_fname)
+        df.to_csv(out_fname)
+
+    def _load_peaks(self):
+
+        peak_df = pd.read_table(self.inputs.localmax_file, "\t")
+        peaks = peak_df[["x", "y", "z"]].values
+        return peaks
+
+    def _peaks_to_disks(self, peaks, r=4):
+
+        zstat_img = nib.load(self.inputs.zstat_file)
+
+        x, y = np.ogrid[-r:r + 1, -r:r + 1]
+        disk = x ** 2 + y ** 2 <= r ** 2
+        dilator = np.dstack([disk, disk, np.zeros_like(disk)])
+        disk_data = self._dilate_peaks(zstat_img.shape, peaks, dilator)
+
+        disk_img = nib.Nifti1Image(disk_data, zstat_img.get_affine())
+        return disk_img
+
+    def _peaks_to_spheres(self, peaks, r=4):
+
+        zstat_img = nib.load(self.inputs.zstat_file)
+
+        x, y, z = np.ogrid[-r:r + 1, -r:r + 1, -r:r + 1]
+        dilator = x ** 2 + y ** 2 + z ** 2 <= r ** 2
+        sphere_data = self._dilate_peaks(zstat_img.shape, peaks, dilator)
+
+        sphere_img = nib.Nifti1Image(sphere_data, zstat_img.get_affine())
+        return sphere_img
+
+    def _dilate_peaks(self, shape, peaks, dilator):
+
+        peak_data = np.zeros(shape)
+        disk_data = np.zeros(shape)
+
+        for i, peak in enumerate(peaks, 1):
+            spot = np.zeros(shape, np.bool)
             spot[tuple(peak)] = 1
             peak_data += spot
-            disk = sp.ndimage.binary_dilation(spot, dilator)
+            disk = binary_dilation(spot, dilator)
             disk_data[disk] = i
-        disk_data[disk_data == 0] = np.nan
 
-        husl_colors = seaborn.husl_palette(len(peaks))
-        peak_cmap = mpl.colors.ListedColormap(husl_colors)
-        f, axes = plt.subplots(**pltkws)
-        bg = np.zeros(mni_data.shape[:2])
-        for i, ax in zip(slices, axes.ravel()):
-            ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
-            ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
-                      cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
-            ax.imshow(disk_data[xmin:xmax, ymin:ymax, i].T,
-                      cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
-            ax.axis("off")
-        plt.savefig(peaks_png, **pngkws)
-        plt.close(f)
+        return disk_data
 
-        # Now make a boxplot of the peaks
-        seaborn.set()
-        cope_data = nib.load(cope_file).get_data()
-        peak_dists = list(cope_data[tuple(peaks.T)])
-        peak_dists.reverse()
-        n_peaks = len(peak_dists)
-        f, ax = plt.subplots(figsize=(8, float(n_peaks) / 3 + 0.33))
-        colors = list(reversed(husl_colors))
-        seaborn.boxplot(np.transpose(peak_dists),
-                        color=colors, vert=False, ax=ax)
-        ax.axvline(0, c="#222222", ls="--")
-        labels = np.arange(1, n_peaks + 1)[::-1]
-        ax.set_yticklabels(labels)
-        ax.set_ylabel("Local Maximum")
-        ax.set_xlabel("COPE Value")
-        plt.savefig(boxplot_png, dpi=100, bbox_inches="tight")
-        plt.close(f)
+    def _list_outputs(self):
 
-        # Watershed segmentation image
-        seg_data[seg_data == 0] = np.nan
-        f, axes = plt.subplots(**pltkws)
-        for i, ax in zip(slices, axes.ravel()):
-            ax.imshow(bg, cmap="gray", vmin=0, vmax=vmax)
-            ax.imshow(mni_data[xmin:xmax, ymin:ymax, i].T,
-                      cmap="gray", alpha=.6, vmin=vmin, vmax=vmax)
-            ax.imshow(mask[xmin:xmax, ymin:ymax, i].T,
-                      cmap=mask_cmap, alpha=.5, interpolation="nearest")
-            ax.imshow(seg_data[xmin:xmax, ymin:ymax, i].T,
-                      interpolation="nearest",
-                      cmap=peak_cmap, vmin=1, vmax=len(peaks) + 1)
-            ax.axis("off")
-        plt.savefig(seg_png, **pngkws)
-        plt.close(f)
-
-    else:
-        for fname in [peaks_png, boxplot_png, seg_png]:
-            with open(fname, "wb"):
-                pass
-
-    # Save the list of subjects in this analysis
-    subj_file = op.abspath("subjects.txt")
-    np.savetxt(subj_file, subjects, "%s")
-
-    return [mask_png, zstat_png, peaks_png, boxplot_png, seg_png, subj_file]
-
-
-def cluster_table(localmax_file):
-    """Add some info to an FSL cluster file and format it properly."""
-    df = pd.read_table(localmax_file, delimiter="\t")
-    df = df[["Cluster Index", "Value", "x", "y", "z"]]
-    df.columns = ["Cluster", "Value", "x", "y", "z"]
-    df.index.name = "Peak"
-
-    # Find out where the peaks most likely are
-    if len(df):
-        coords = df[["x", "y", "z"]].values
-        loc_df = locator.locate_peaks(coords)
-        df = pd.concat([df, loc_df], axis=1)
-        mni_coords = locator.vox_to_mni(coords).T
-        for i, ax in enumerate(["x", "y", "z"]):
-            df[ax] = mni_coords[i]
-
-    out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
-    df.to_csv(out_file)
-    return out_file
+        outputs = self._outputs().get()
+        outputs["out_files"] = self.out_files
+        return outputs

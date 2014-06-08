@@ -336,9 +336,10 @@ class WarpReport(BaseInterface):
     def _run_interface(self, runtime):
 
         target_brain = fsl.Info.standard_image("avg152T1_brain.nii.gz")
-        m = Mosaic(self.inputs.in_file, target_brain, n_col=8)
+        m = Mosaic(self.inputs.in_file, target_brain)
         m.plot_contours("Reds", 2)
-        m.fig.savefig("warp_report.png", facecolor="k", edgecolor="k")
+        m.savefig("warp_report.png")
+        m.close()
 
         return runtime
 
