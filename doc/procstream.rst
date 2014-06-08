@@ -14,7 +14,16 @@ Timeseries Model
 Anatomical Normalization
 ------------------------
 
-.. image:: ../graphs/anatwarp.dot.png
+Using ANTS
+~~~~~~~~~~
+
+.. image:: ../graphs/antswarp.dot.png
+
+Using FSL
+~~~~~~~~~
+
+.. image:: ../graphs/fslwarp.dot.png
+
 
 Coregistration
 --------------

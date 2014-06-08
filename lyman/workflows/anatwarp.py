@@ -215,7 +215,7 @@ def create_ants_workflow(data_dir=None, subjects=None, name="antswarp"):
 
     cvtbrain = Node(fs.MRIConvert(out_type="niigz",
                                   out_datatype="float"),
-                    "converbrain")
+                    "convertbrain")
 
     # Turn the aparc+aseg into a brainmask
     makemask = Node(fs.Binarize(dilate=4, erode=3, min=0.5), "makemask")
