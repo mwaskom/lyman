@@ -1,14 +1,12 @@
 import os
-from nipype.utils.filemanip import split_filename, fname_presuffix
+from nipype.utils.filemanip import fname_presuffix
 
 
 def add_suffix(fname, suffix):
     """Insert a suffix into a filename before the extension."""
-    path, name, ext = split_filename(fname)
-    if path:
-        return "{}/{}_{}{}".format(path, name, suffix, ext)
-    else:    
-        return "{}_{}{}".format(name, suffix, ext)
+    out_fname = fname_presuffix(fname, suffix="_" + suffix,
+                                use_ext=True)
+    return out_fname
 
 
 def nii_to_png(fname, suffix=""):
