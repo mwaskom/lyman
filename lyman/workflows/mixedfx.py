@@ -8,7 +8,7 @@ from skimage import morphology
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from nipype import IdentityInterface, Function, Node, Workflow
+from nipype import IdentityInterface, Node, Workflow
 from nipype.interfaces.base import (BaseInterface,
                                     BaseInterfaceInputSpec,
                                     InputMultiPath, OutputMultiPath,
@@ -20,20 +20,7 @@ from moss import locator
 from moss.mosaic import Mosaic
 
 import lyman
-from lyman.tools import nii_to_png
-
-imports = ["import os",
-           "import os.path as op",
-           "import numpy as np",
-           "import scipy as sp",
-           "import pandas as pd",
-           "import nibabel as nib",
-           "import matplotlib as mpl",
-           "import matplotlib.pyplot as plt",
-           "from skimage import morphology",
-           "from nipype.interfaces import fsl",
-           "from moss import locator",
-           "import seaborn as sns"]
+from lyman.tools import add_suffix, nii_to_png
 
 
 def create_volume_mixedfx_workflow(name="volume_group",
@@ -87,11 +74,7 @@ def create_volume_mixedfx_workflow(name="volume_group",
     surfproj = create_surface_projection_workflow(exp_info=exp_info)
 
     # Segment the z stat image with a watershed algorithm
-    watershed = Node(Function(["zstat_file", "localmax_file"],
-                              ["seg_file", "peak_file", "lut_file"],
-                              watershed_segment,
-                              imports),
-                     "watershed")
+    watershed = Node(Watershed(), "watershed")
 
     # Make static report images in the volume
     report = Node(MFXReport(), "report")
@@ -232,57 +215,7 @@ def create_surface_projection_workflow(name="surfproj", exp_info=None):
     return proj
 
 
-def watershed_segment(zstat_file, localmax_file):
-    """Segment the thresholded zstat image."""
-    z_img = nib.load(zstat_file)
-    z_data = z_img.get_data()
-
-    # Set up the output filenames
-    seg_file = op.basename(zstat_file).replace(".nii.gz", "_seg.nii.gz")
-    seg_file = op.abspath(seg_file)
-    peak_file = op.basename(zstat_file).replace(".nii.gz", "_peaks.nii.gz")
-    peak_file = op.abspath(peak_file)
-    lut_file = seg_file.replace(".nii.gz", ".txt")
-
-    # Read in the peak txt file from FSL cluster
-    peaks = pd.read_table(localmax_file, "\t")[["x", "y", "z"]].values
-    markers = np.zeros_like(z_data)
-
-    # Do the watershed, or not, depending on whether we had peaks
-    if len(peaks):
-        markers[tuple(peaks.T)] = np.arange(len(peaks)) + 1
-        seg = morphology.watershed(-z_data, markers, mask=z_data > 0)
-    else:
-        seg = np.zeros_like(z_data)
-
-    # Create a Nifti image with the segmentation and save it
-    seg_img = nib.Nifti1Image(seg.astype(np.int16),
-                              z_img.get_affine(),
-                              z_img.get_header())
-    seg_img.set_data_dtype(np.int16)
-    seg_img.to_filename(seg_file)
-
-    # Create a Nifti image with just the peaks and save it
-    peak_img = nib.Nifti1Image(markers.astype(np.int16),
-                               z_img.get_affine(),
-                               z_img.get_header())
-    peak_img.set_data_dtype(np.int16)
-    peak_img.to_filename(peak_file)
-
-    # Write a lookup-table in Freesurfer format so we can
-    # view the segmentation in Freeview
-    n = int(markers.max())
-    colors = [[0, 0, 0]] + sns.husl_palette(n)
-    colors = np.hstack([colors, np.zeros((n + 1, 1))])
-    lut_data = pd.DataFrame(columns=["#ID", "ROI", "R", "G", "B", "A"],
-                            index=np.arange(n + 1))
-    names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
-    lut_data["ROI"] = np.array(names)
-    lut_data["#ID"] = np.arange(n + 1)
-    lut_data.loc[:, "R":"A"] = (colors * 255).astype(int)
-    lut_data.to_csv(lut_file, "\t", index=False)
-
-    return seg_file, peak_file, lut_file
+# =========================================================================== #
 
 
 class MergeInput(BaseInterfaceInputSpec):
@@ -356,6 +289,99 @@ class MergeAcrossSubjects(BaseInterface):
         for ftype in ["cope", "varcope", "dof"]:
             outputs[ftype + "_file"] = op.realpath(ftype + "_merged.nii.gz")
         outputs["mask_file"] = op.realpath("group_mask.nii.gz")
+        return outputs
+
+
+class WatershedInput(BaseInterfaceInputSpec):
+
+    zstat_file = File(exists=True)
+    localmax_file = File(exsits=True)
+
+
+class WatershedOutput(TraitedSpec):
+
+    seg_file = File(exists=True)
+    peak_file = File(exists=True)
+    lut_file = File(exists=True)
+
+
+class Watershed(BaseInterface):
+
+    input_spec = WatershedInput
+    output_spec = WatershedOutput
+
+    def _run_interface(self, runtime):
+
+        # Load the zstat data
+        z_img = nib.load(self.inputs.zstat_file)
+        z_data = z_img.get_data()
+
+        # Load the peaks
+        peaks_df = pd.read_table(self.inputs.localmax_file, "\t")
+        peaks = peaks_df[["x", "y", "z"]].values
+
+        # Possibly do the segmentation, if there are peaks
+        if len(peaks):
+            seg, markers = self.segment(z_data, peaks)
+        else:
+            seg, markers = np.zeros_like(z_data), np.zeros_like(z_data)
+
+        # Set up the output names
+        seg_fname = op.basename(add_suffix(self.inputs.zstat_file, "seg"))
+        peak_fname = op.basename(add_suffix(self.inputs.zstat_file, "peaks"))
+        lut_fname = seg_fname.replace(".nii.gz", ".txt")
+
+        self._seg_fname = seg_fname
+        self._peak_fname = peak_fname
+        self._lut_fname = lut_fname
+
+        # Write the output images
+        self.write_output(seg, seg_fname)
+        self.write_output(markers, peak_fname)
+
+        # Create a LUT and save it
+        lut_data = self.create_lut(markers)
+        lut_data.to_csv(lut_fname, "\t", index=False)
+
+        return runtime
+
+    def segment(self, data, peaks):
+        """Perform a watershed segmentation based on local maxima."""
+        markers = np.zeros_like(data)
+        markers[tuple(peaks.T)] = np.arange(len(peaks)) + 1
+        seg = morphology.watershed(-data, markers, mask=data > 0)
+
+        return seg, markers
+
+    def create_lut(self, markers):
+        """Create a Freesurfer-style lookup tabke for the segmentation."""
+        n = int(markers.max())
+        colors = [[0, 0, 0]] + sns.husl_palette(n)
+        colors = np.hstack([colors, np.zeros((n + 1, 1))])
+        lut_data = pd.DataFrame(columns=["#ID", "ROI", "R", "G", "B", "A"],
+                                index=np.arange(n + 1))
+        names = ["Unknown"] + ["roi_%d" % i for i in range(1, n + 1)]
+        lut_data["ROI"] = np.array(names)
+        lut_data["#ID"] = np.arange(n + 1)
+        lut_data.loc[:, "R":"A"] = (colors * 255).astype(int)
+
+        return lut_data
+
+    def write_output(self, data, fname):
+        """Save an array of data to an image like the input z stat."""
+        template = nib.load(self.inputs.zstat_file)
+        out_img = nib.Nifti1Image(data.astype(np.int16),
+                                  template.get_affine(),
+                                  template.get_header())
+        out_img.set_data_dtype(np.int16)
+        out_img.to_filename(fname)
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["seg_file"] = op.realpath(self._seg_fname)
+        outputs["peak_file"] = op.realpath(self._peak_fname)
+        outputs["lut_file"] = op.realpath(self._lut_fname)
         return outputs
 
 
