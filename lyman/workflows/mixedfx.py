@@ -84,13 +84,6 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                use_mm=True),
                    "cluster")
 
-    # Deal with FSL's poorly formatted table of peaks
-    peaktable = Node(Function(["localmax_file"],
-                              ["out_file"],
-                              imports=imports,
-                              function=cluster_table),
-                     "peaktable")
-
     # Segment the z stat image with a watershed algorithm
     watershed = Node(Function(["zstat_file", "localmax_file"],
                               ["seg_file", "peak_file", "lut_file"],
@@ -136,7 +129,6 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                          "surf_zstat",
                                          "surf_mask",
                                          "cluster_image",
-                                         "cluster_peaks",
                                          "seg_file",
                                          "peak_file",
                                          "lut_file",
@@ -181,8 +173,6 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("localmax_txt_file", "localmax_file")]),
         (watershed, report,
             [("seg_file", "seg_file")]),
-        (cluster, peaktable,
-            [("localmax_txt_file", "localmax_file")]),
         (cluster, zstatproj,
             [("threshold_file", "source_file")]),
         (hemisource, zstatproj,
@@ -200,8 +190,6 @@ def create_volume_mixedfx_workflow(name="volume_group",
         (cluster, outputnode,
             [("threshold_file", "thresh_zstat"),
              ("index_file", "cluster_image")]),
-        (peaktable, outputnode,
-            [("out_file", "cluster_peaks")]),
         (watershed, outputnode,
             [("seg_file", "seg_file"),
              ("peak_file", "peak_file"),
@@ -296,7 +284,7 @@ class MergeAcrossSubjects(BaseInterface):
 
             in_files = getattr(self.inputs, ftype + "_files")
             in_imgs = [nib.load(f) for f in in_files]
-            out_img = self._merge_subject_files(in_imgs)
+            out_img = self._merge_subject_images(in_imgs)
             out_img.to_filename(ftype + "_merged.nii.gz")
 
             # Use the varcope image to make a gropu mask
@@ -373,6 +361,7 @@ class MFXReport(BaseInterface):
         self.plot_mask()
         self.plot_full_zstat()
         self.plot_thresh_zstat()
+        self.reformat_cluster_table()
 
         self.peaks = peaks = self._load_peaks()
         if len(peaks):
@@ -473,6 +462,27 @@ class MFXReport(BaseInterface):
         f.savefig(out_fname, bbox_inches="tight")
         plt.close(f)
 
+    def reformat_cluster_table(self):
+        """Add some info to an FSL cluster file and format it properly."""
+        in_fname = self.inputs.localmax_file
+        df = pd.read_table(in_fname, delimiter="\t")
+        df = df[["Cluster Index", "Value", "x", "y", "z"]]
+        df.columns = ["Cluster", "Value", "x", "y", "z"]
+        df.index.name = "Peak"
+
+        # Find out where the peaks most likely are
+        if len(df):
+            coords = df[["x", "y", "z"]].values
+            loc_df = locator.locate_peaks(coords)
+            df = pd.concat([df, loc_df], axis=1)
+            mni_coords = locator.vox_to_mni(coords).T
+            for i, ax in enumerate(["x", "y", "z"]):
+                df[ax] = mni_coords[i]
+
+        out_fname = op.abspath(op.basename(in_fname[:-3] + "csv"))
+        self.out_files.append(out_fname)
+        df.to_csv(out_fname)
+
     def _load_peaks(self):
 
         peak_df = pd.read_table(self.inputs.localmax_file, "\t")
@@ -530,22 +540,3 @@ class MFXReport(BaseInterface):
         return outputs
 
 
-def cluster_table(localmax_file):
-    """Add some info to an FSL cluster file and format it properly."""
-    df = pd.read_table(localmax_file, delimiter="\t")
-    df = df[["Cluster Index", "Value", "x", "y", "z"]]
-    df.columns = ["Cluster", "Value", "x", "y", "z"]
-    df.index.name = "Peak"
-
-    # Find out where the peaks most likely are
-    if len(df):
-        coords = df[["x", "y", "z"]].values
-        loc_df = locator.locate_peaks(coords)
-        df = pd.concat([df, loc_df], axis=1)
-        mni_coords = locator.vox_to_mni(coords).T
-        for i, ax in enumerate(["x", "y", "z"]):
-            df[ax] = mni_coords[i]
-
-    out_file = op.abspath(op.basename(localmax_file[:-3] + "csv"))
-    df.to_csv(out_file)
-    return out_file

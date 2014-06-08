@@ -4,4 +4,4 @@ v0.0.2 (??)
 
 - Added ANTS-based volume normalization. This provides substantial improvements over the FSL-based normalization that was previously used. However, ANTS can be difficult to install, so this is optional and off by default. It controled through a variable in the ``project.py`` file, ``ants_normalization``, which should be either ``True`` or ``False``. After enabling it, you can use the command-line tools as before, and ANTS will be used in ``run_warp.py`` and ``run_fmri.py -workflow reg``.
 
-- Updated the mixed effects model reporting.
+- Updated the mixed effects model reporting and simplified the workflow graph.
