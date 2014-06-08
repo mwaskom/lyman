@@ -35,11 +35,9 @@ Python 2.7
 
 - [scikit-learn](https://github.com/scikit-learn/scikit-learn)
 
+- [scikit-image](https://github.com/scikit-image/scikit-image)
+
 - [nipype](https://github.com/nipy/nipype)
-
-- [nibabel](https://github.com/nipy/nibabel)
-
-- [nipy](https://github.com/nipy/nipy)
 
 - [nibabel](https://github.com/nipy/nibabel)
 
