@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from nipype import IdentityInterface, Function, Node, Workflow
 from nipype.interfaces.base import (BaseInterface,
                                     BaseInterfaceInputSpec,
-                                    OutputMultiPath,
+                                    InputMultiPath, OutputMultiPath,
                                     TraitedSpec, File, traits)
 from nipype.interfaces import fsl, freesurfer
 from nipype.utils.filemanip import fname_presuffix
@@ -61,21 +61,12 @@ def create_volume_mixedfx_workflow(name="volume_group",
                      "inputnode")
 
     # Merge the fixed effect summary images into one 4D image
-    mergecope = Node(fsl.Merge(dimension="t"), "mergecope")
-    mergevarcope = Node(fsl.Merge(dimension="t"), "mergevarcope")
-    mergedof = Node(fsl.Merge(dimension="t"), "mergedof")
+    merge = Node(MergeAcrossSubjects(), "merge")
 
     # Make a simple design
     design = Node(fsl.MultipleRegressDesign(regressors=regressors,
                                             contrasts=contrasts),
                   "design")
-
-    # Find the intersection of masks across subjects
-    makemask = Node(Function(["varcope_file"],
-                             ["mask_file"],
-                             make_group_mask,
-                             imports),
-                    "makemask")
 
     # Fit the mixed effects model
     flameo = Node(fsl.FLAMEO(run_mode=exp_info["flame_mode"]), "flameo")
@@ -155,29 +146,22 @@ def create_volume_mixedfx_workflow(name="volume_group",
     # Define and connect up the workflow
     group = Workflow(name)
     group.connect([
-        (inputnode, mergecope,
-            [("copes", "in_files")]),
-        (inputnode, mergevarcope,
-            [("varcopes", "in_files")]),
-        (inputnode, mergedof,
-            [("dofs", "in_files")]),
-        (mergecope, flameo,
-            [("merged_file", "cope_file")]),
-        (mergevarcope, flameo,
-            [("merged_file", "var_cope_file")]),
-        (mergevarcope, makemask,
-            [("merged_file", "varcope_file")]),
-        (mergedof, flameo,
-            [("merged_file", "dof_var_cope_file")]),
-        (makemask, flameo,
-            [("mask_file", "mask_file")]),
+        (inputnode, merge,
+            [("copes", "cope_files"),
+             ("varcopes", "varcope_files"),
+             ("dofs", "dof_files")]),
+        (merge, flameo,
+            [("cope_file", "cope_file"),
+             ("varcope_file", "var_cope_file"),
+             ("dof_file", "dof_var_cope_file"),
+             ("mask_file", "mask_file")]),
         (design, flameo,
             [("design_con", "t_con_file"),
              ("design_grp", "cov_split_file"),
              ("design_mat", "design_file")]),
         (flameo, smoothest,
             [("zstats", "zstat_file")]),
-        (makemask, smoothest,
+        (merge, smoothest,
             [("mask_file", "mask_file")]),
         (smoothest, cluster,
             [("dlh", "dlh"),
@@ -187,15 +171,14 @@ def create_volume_mixedfx_workflow(name="volume_group",
         (cluster, watershed,
             [("threshold_file", "zstat_file"),
              ("localmax_txt_file", "localmax_file")]),
-        (makemask, report,
-            [("mask_file", "mask_file")]),
+        (merge, report,
+            [("mask_file", "mask_file"),
+             ("cope_file", "cope_file")]),
         (flameo, report,
             [("zstats", "zstat_file")]),
         (cluster, report,
             [("threshold_file", "zstat_thresh_file"),
              ("localmax_txt_file", "localmax_file")]),
-        (mergecope, report,
-            [("merged_file", "cope_file")]),
         (watershed, report,
             [("seg_file", "seg_file")]),
         (cluster, peaktable,
@@ -204,16 +187,14 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("threshold_file", "source_file")]),
         (hemisource, zstatproj,
             [("mni_hemi", "hemi")]),
-        (makemask, maskproj,
+        (merge, maskproj,
             [("mask_file", "source_file")]),
         (hemisource, maskproj,
             [("mni_hemi", "hemi")]),
-        (mergecope, outputnode,
-            [("merged_file", "copes")]),
-        (mergevarcope, outputnode,
-            [("merged_file", "varcopes")]),
-        (makemask, outputnode,
-            [("mask_file", "mask_file")]),
+        (merge, outputnode,
+            [("cope_file", "copes"),
+             ("varcope_file", "varcopes"),
+             ("mask_file", "mask_file")]),
         (flameo, outputnode,
             [("stats_dir", "flameo_stats")]),
         (cluster, outputnode,
@@ -234,29 +215,6 @@ def create_volume_mixedfx_workflow(name="volume_group",
         ])
 
     return group, inputnode, outputnode
-
-
-def make_group_mask(varcope_file):
-    """Find the intersection of the MNI brain and var > 0 voxels."""
-    mni_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
-    mni_img = nib.load(mni_mask)
-    mask_data = mni_img.get_data().astype(bool)
-
-    # Find the voxels with positive variance
-    var_data = nib.load(varcope_file).get_data()
-    good_var = var_data.all(axis=-1)
-
-    # Find the intersection
-    mask_data *= good_var
-
-    # Save the mask file
-    new_img = nib.Nifti1Image(mask_data,
-                              mni_img.get_affine(),
-                              mni_img.get_header())
-    new_img.set_data_dtype(np.int16)
-    mask_file = os.path.abspath("group_mask.nii.gz")
-    new_img.to_filename(mask_file)
-    return mask_file
 
 
 def watershed_segment(zstat_file, localmax_file):
@@ -310,6 +268,80 @@ def watershed_segment(zstat_file, localmax_file):
     lut_data.to_csv(lut_file, "\t", index=False)
 
     return seg_file, peak_file, lut_file
+
+
+class MergeInput(BaseInterfaceInputSpec):
+
+    cope_files = InputMultiPath(File(exists=True))
+    varcope_files = InputMultiPath(File(exists=True))
+    dof_files = InputMultiPath(File(exists=True))
+
+
+class MergeOutput(TraitedSpec):
+
+    cope_file = File(exists=True)
+    varcope_file = File(exists=True)
+    dof_file = File(exists=True)
+    mask_file = File(exists=True)
+
+
+class MergeAcrossSubjects(BaseInterface):
+
+    input_spec = MergeInput
+    output_spec = MergeOutput
+
+    def _run_interface(self, runtime):
+
+        for ftype in ["cope", "varcope", "dof"]:
+
+            in_files = getattr(self.inputs, ftype + "_files")
+            in_imgs = [nib.load(f) for f in in_files]
+            out_img = self._merge_subject_files(in_imgs)
+            out_img.to_filename(ftype + "_merged.nii.gz")
+
+            # Use the varcope image to make a gropu mask
+            if ftype == "varcope":
+                mask_img = self._create_group_mask(out_img)
+                mask_img.to_filename("group_mask.nii.gz")
+
+        return runtime
+
+    def _merge_subject_images(self, images):
+        """Stack a list of 3D images into 4D image."""
+        in_data = [i.get_data() for i in images]
+        out_data = np.asarray(in_data).transpose(1, 2, 3, 0)
+        out_img = nib.Nifti1Image(out_data,
+                                  images[0].get_affine(),
+                                  images[0].get_header())
+        return out_img
+
+    def _create_group_mask(self, var_img):
+
+        mni_mask = fsl.Info.standard_image("MNI152_T1_2mm_brain_mask.nii.gz")
+        mni_img = nib.load(mni_mask)
+        mask_data = mni_img.get_data().astype(bool)
+
+        # Find the voxels with positive variance
+        var_data = var_img.get_data()
+        good_var = (var_data > 0).all(axis=-1)
+
+        # Find the intersection
+        mask_data &= good_var
+
+        # Create and return the 3D mask image
+        mask_img = nib.Nifti1Image(mask_data,
+                                   mni_img.get_affine(),
+                                   mni_img.get_header())
+        mask_img.set_data_dtype(np.int16)
+        return mask_img
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        for ftype in ["cope", "varcope", "dof"]:
+            outputs[ftype + "_file"] = op.realpath(ftype + "_merged.nii.gz")
+        outputs["mask_file"] = op.realpath("group_mask.nii.gz")
+        return outputs
 
 
 class MFXReportInput(BaseInterfaceInputSpec):
@@ -426,7 +458,7 @@ class MFXReport(BaseInterface):
         peak_dists = np.zeros((cope_data.shape[-1], len(peaks)))
         for i, peak in enumerate(peaks, 1):
             sphere_mean = cope_data[peak_spheres == i].mean(axis=(0))
-            peak_dists[:, i - 1] =  sphere_mean
+            peak_dists[:, i - 1] = sphere_mean
 
         with sns.axes_style("whitegrid"):
             f, ax = plt.subplots(figsize=(9, float(len(peaks)) / 3 + 0.33))
