@@ -1,4 +1,3 @@
-import os
 import os.path as op
 
 import numpy as np
@@ -15,13 +14,13 @@ from nipype.interfaces.base import (BaseInterface,
                                     InputMultiPath, OutputMultiPath,
                                     TraitedSpec, File, traits)
 from nipype.interfaces import fsl, freesurfer
-from nipype.utils.filemanip import fname_presuffix
 
 import seaborn as sns
 from moss import locator
 from moss.mosaic import Mosaic
 
 import lyman
+from lyman.tools import nii_to_png
 
 imports = ["import os",
            "import os.path as op",
@@ -210,7 +209,8 @@ def create_surface_projection_workflow(name="surfproj", exp_info=None):
         target_subject="fsaverage"),
         "maskproj")
 
-    outputnode = Node(IdentityInterface(["surf_zstat", "surf_mask"]), "outputs")
+    outputnode = Node(IdentityInterface(["surf_zstat",
+                                         "surf_mask"]), "outputs")
 
     # Define and connect the workflow
     proj = Workflow(name)
@@ -229,7 +229,7 @@ def create_surface_projection_workflow(name="surfproj", exp_info=None):
             [("out_file", "surf_mask")]),
         ])
 
-    return proj 
+    return proj
 
 
 def watershed_segment(zstat_file, localmax_file):
@@ -398,8 +398,8 @@ class MFXReport(BaseInterface):
             self.plot_boxes(peaks)
 
         else:
-            fnames = [self._png_name(self.inputs.seg_file),
-                      self._png_name(self.inputs.zstat_thresh_file, "_peaks"),
+            fnames = [nii_to_png(self.inputs.seg_file),
+                      nii_to_png(self.inputs.zstat_thresh_file, "_peaks"),
                       op.realpath("peak_boxplot.png")]
             self.out_files.extend(fnames)
             for name in fnames:
@@ -418,7 +418,7 @@ class MFXReport(BaseInterface):
         """Plot the analysis mask."""
         m = Mosaic(stat=self.inputs.mask_file)
         m.plot_mask()
-        out_fname = self._png_name(self.inputs.mask_file)
+        out_fname = nii_to_png(self.inputs.mask_file)
         self.out_files.append(out_fname)
         m.savefig(out_fname)
         m.close()
@@ -427,7 +427,7 @@ class MFXReport(BaseInterface):
         """Plot the unthresholded zstat."""
         m = Mosaic(stat=self.inputs.zstat_file, mask=self.inputs.mask_file)
         m.plot_overlay(cmap="coolwarm", center=True, alpha=.9)
-        out_fname = self._png_name(self.inputs.zstat_file)
+        out_fname = nii_to_png(self.inputs.zstat_file)
         self.out_files.append(out_fname)
         m.savefig(out_fname)
         m.close()
@@ -437,7 +437,7 @@ class MFXReport(BaseInterface):
         m = Mosaic(stat=self.inputs.zstat_thresh_file,
                    mask=self.inputs.mask_file)
         m.plot_activation(pos_cmap="OrRd_r", vfloor=3.3, alpha=.9)
-        out_fname = self._png_name(self.inputs.zstat_thresh_file)
+        out_fname = nii_to_png(self.inputs.zstat_thresh_file)
         self.out_files.append(out_fname)
         m.savefig(out_fname)
         m.close()
@@ -449,7 +449,7 @@ class MFXReport(BaseInterface):
 
         m = Mosaic(stat=self.inputs.seg_file, mask=self.inputs.mask_file)
         m.plot_overlay(thresh=.5, cmap=cmap, vmin=1, vmax=len(peaks))
-        out_fname = self._png_name(self.inputs.seg_file)
+        out_fname = nii_to_png(self.inputs.seg_file)
         self.out_files.append(out_fname)
         m.savefig(out_fname)
         m.close()
@@ -462,7 +462,7 @@ class MFXReport(BaseInterface):
         disk_img = self._peaks_to_disks(peaks)
         m = Mosaic(stat=disk_img, mask=self.inputs.mask_file)
         m.plot_overlay(thresh=.5, cmap=cmap, vmin=1, vmax=len(peaks))
-        out_fname = self._png_name(self.inputs.zstat_thresh_file, "_peaks")
+        out_fname = nii_to_png(self.inputs.zstat_thresh_file, "_peaks")
         self.out_files.append(out_fname)
         m.savefig(out_fname)
         m.close()
@@ -553,17 +553,8 @@ class MFXReport(BaseInterface):
 
         return disk_data
 
-    def _png_name(self, fname, suffix=""):
-        """Convert a nifti filename to a png filename in this dir."""
-        out_fname = fname_presuffix(fname, suffix=suffix + ".png",
-                                    newpath=os.getcwd(),
-                                    use_ext=False)
-        return out_fname
-
     def _list_outputs(self):
 
         outputs = self._outputs().get()
         outputs["out_files"] = self.out_files
         return outputs
-
-
