@@ -504,7 +504,9 @@ class MFXReport(BaseInterface):
 
         with sns.axes_style("whitegrid"):
             f, ax = plt.subplots(figsize=(9, float(len(peaks)) / 3 + 0.33))
-        sns.boxplot(peak_dists[::-1], ax=ax, vert=False)
+
+        pal = sns.husl_palette(peak_dists.shape[1])[::-1]
+        sns.boxplot(peak_dists[:, ::-1], color=pal, ax=ax, vert=False)
         sns.despine(left=True, bottom=True)
         ax.axvline(0, c=".3", ls="--")
         labels = np.arange(len(peaks))[::-1] + 1
