@@ -34,6 +34,7 @@ Documentation Contents
    :maxdepth: 2
 
    installing
+   releases
    workflow
    experiments
    glossary
