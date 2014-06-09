@@ -1,3 +1,5 @@
+.. _commandline:
+
 Lyman Command-Line Interface
 ============================
 
@@ -19,7 +21,6 @@ run_warp.py
 -----------
 
 .. literalinclude:: commandline/run_warp.txt
-
 
 make_masks.py
 -------------

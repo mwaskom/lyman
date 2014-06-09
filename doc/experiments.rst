@@ -1,3 +1,5 @@
+.. _experiments:
+
 Defining Experimental Details
 =============================
 
@@ -199,6 +201,8 @@ file called ``experiment_info.json``). Any comments in the docstring to this
 module will be included in this archive. Note that if you preprocess your data,
 change the experiment definition, and then run the model without rerunning
 preproc, the preprocessing parameters in this archived file will be inaccurate.
+
+.. _design:
 
 Detailed Design Information
 ---------------------------

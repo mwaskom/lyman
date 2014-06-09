@@ -9,11 +9,10 @@ information about many of these steps elsewhere in the documentation.
 Install Lyman
 -------------
 
-If you haven't already done this, clone the lyman repository from Github and
-install it (``python setup.py install``). You'll also need to install the lyman
-dependencies. If you're starting a new analysis and already have an older
-version of lyman, it's probably a good idea to check the commit log on Github
-and then update (``git pull origin master``) and re-install. 
+If you haven't already done this, you'll need to :ref:`install <installing>`
+lyman and its dependencies. The current development approach aims for
+relatively small, incremental releases, so if you're starting a new project it
+might be good to check if there is an update.
 
 Lyman's unit-test suite can be run by executing the command ``nosetests`` in
 the source directory. Because it is difficult to unit-test high-level scripting
@@ -32,7 +31,7 @@ of basic information. The output of this script is a file called
 again unless you move things around.
 
 Next, set up one or more *experiment* files describing the processing parameters
-for each of your experiments.
+for each of your experiments. There is information on how to do that :ref:`here <experiments>`.
 
 If you want to have a list of default subjects to perform processing over, put
 their subject ids in a plain text file called ``subjects.txt`` within this
@@ -54,7 +53,7 @@ you have more than 9 runs of data, you should zero-pad the run number.
 Lyman also relies on the outputs from `Freesurfer
 <http://surfer.nmr.mgh.harvard.edu/>`_. Before using the lyman tools, you
 should processes your anatomical data using ``recon-all``. The lyman *data_dir*
-should be synonymous with your Freesurfer *SUBJECTS_DIR*, and you should use
+should be synonymous with your Freesurfer ``$SUBJECTS_DIR``, and you should use
 the same subject ids with both tools. The ``anatomy_snapshots.py`` script that
 ships with lyman can be useful for performing quality control on these
 outputs.
@@ -65,12 +64,13 @@ for this is a file living at ``<data_dir>/<subject>/design/<design name>.csv``
 that, at a minimum, contains the run number, onset time, and condition name for
 each event in your design. This information can be augmented with details about
 the length of presentation and one or more parametric values associated with
-each event.
+each event. See the :ref:`design docs <design>` for more information.
 
 Process the Data
 ----------------
 
-The command-line interface to lyman is made up of three scripts:
+At this point, you're ready to process your data. This primarily happens
+through a command-line interface, which is made up of three scripts:
 ``run_fmri.py``, ``run_warp.py``, and  ``run_group.py``. The first performs all
 of the single-subject functional processing and analysis, the second estimates
 the volume-based anatomical normalization parameters, and the third performs
@@ -79,7 +79,11 @@ processing using the ``-workflows`` argument. For just about anything you'll
 want to do with lyman, you have to preprocess the data. (``run_fmri.py -w
 preproc``). At that point, you may continue on with subject-level timeseries
 modeling (``run_fmri.py -w model reg ffx``), possibly on several different
-models (``run_fmri.py -w model -altmodel <altmodel>``). You may also turn to the
-``lyman.mvpa`` library to perform decoding analyses, although you will have to
-coregister the timeseries data first (``run_fmri.py -w reg -timeseries
+models (``run_fmri.py -w model -altmodel <altmodel>``). You may also turn to
+the ``lyman.mvpa`` library to perform decoding analyses, although you will have
+to coregister the timeseries data first (``run_fmri.py -w reg -timeseries
 -unsmoothed``).
+
+For detailed information about these scripts, you can run them with the ``-h``
+flag to see what they do and how to use them. That information is also
+reproduced :ref:`online <commandline>`.
