@@ -50,7 +50,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     """
     preproc = Workflow(name)
 
-    if exp_info is  None:
+    if exp_info is None:
         exp_info = lyman.default_experiment_parameters()
 
     # Define the inputs for the preprocessing workflow
@@ -95,9 +95,9 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
                                               "smoothed_timeseries")
 
     filter_rough = create_filtering_workflow("filter_rough",
-                                              exp_info["hpf_cutoff"],
-                                              exp_info["TR"],
-                                              "unsmoothed_timeseries")
+                                             exp_info["hpf_cutoff"],
+                                             exp_info["TR"],
+                                             "unsmoothed_timeseries")
 
     # Automatically detect motion and intensity outliers
     artifacts = MapNode(Function(["timeseries",
@@ -115,11 +115,10 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
 
     # Save the experiment info for this run
     dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
-                                 dump_exp_info, imports),
-                                "timeseries",
-                                "dumpjson")
+                                dump_exp_info, imports),
+                       "timeseries",
+                       "dumpjson")
     dumpjson.inputs.exp_info = exp_info
-
 
     preproc.connect([
         (inputnode, prepare,
@@ -157,7 +156,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
         preproc.connect([
             (inputnode, coregister,
                 [("whole_brain_template", "inputs.whole_brain_template")])
-                        ])
+        ])
 
     # Define the outputs of the top-level workflow
     output_fields = ["smoothed_timeseries",
@@ -219,8 +218,8 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
                                   save_mats=True,
                                   save_rms=True,
                                   save_plots=True),
-                       ["in_file", "ref_file"],
-                       "mcflirt")
+                      ["in_file", "ref_file"],
+                      "mcflirt")
 
     # Optionally emoporally interpolate to correct for slice time differences
     if temporal_interp:
@@ -305,8 +304,8 @@ def create_skullstrip_workflow(name="skullstrip"):
     findmask = MapNode(fsl.BET(mask=True,
                                no_output=True,
                                frac=0.3),
-                        "in_file",
-                        "findmask")
+                       "in_file",
+                       "findmask")
 
     # Use the mask from skullstripping to strip each timeseries
     maskfunc = MapNode(fsl.ApplyMask(),
@@ -392,8 +391,8 @@ def create_bbregister_workflow(name="bbregister",
                               ["out_file"],
                               write_coreg_plot,
                               imports),
-                           "in_file",
-                           "coreg_report")
+                     "in_file",
+                     "coreg_report")
 
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(["tkreg_mat", "flirt_mat", "report"]),
@@ -423,7 +422,7 @@ def create_bbregister_workflow(name="bbregister",
         bbregister.connect([
             (inputnode, func2anat,
                 [("whole_brain_template", "intermediate_file")]),
-                ])
+        ])
 
     return bbregister
 
@@ -468,10 +467,7 @@ def create_filtering_workflow(name="filter",
     return filtering
 
 
-# ------------------------
-# Main interface functions
-# ------------------------
-
+# =========================================================================== #
 
 def prep_timeseries(in_file, frames_to_toss):
     """Trim equilibrium TRs and change datatype to float."""
@@ -770,6 +766,7 @@ def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
     scaled_img.to_filename(out_file)
 
     return out_file
+
 
 def dump_exp_info(exp_info, timeseries):
     """Dump the exp_info dict into a json file."""
