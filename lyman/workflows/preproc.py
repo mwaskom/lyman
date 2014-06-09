@@ -590,13 +590,13 @@ class RealignmentReport(BaseInterface):
         with sns.axes_style("whitegrid"):
             f, (ax_rot, ax_trans) = plt.subplots(2, 1, figsize=(9, 3.75),
                                                  sharex=True)
-        ax_rot.plot(df.filter(like="rot") * 100)
+        ax_rot.plot(np.rad2deg(df.filter(like="rot")))
         ax_rot.axhline(0, c=".4", ls="--", zorder=1)
         ax_trans.plot(df.filter(like="trans"))
         ax_trans.axhline(0, c=".4", ls="--", zorder=1)
         ax_rot.set_xlim(0, len(df) - 1)
 
-        ax_rot.set_ylabel(r"Rotations (rad $\times$ 100)")
+        ax_rot.set_ylabel(r"Rotations (degrees)")
         ax_trans.set_ylabel("Translations (mm)")
         f.tight_layout()
         return f
