@@ -130,12 +130,12 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("outputs.timeseries", "inputs.timeseries")]),
         (realign, artifacts,
             [("outputs.motion_file", "motion_file")]),
-        (skullstrip, artifacts,
-            [("outputs.mask_file", "mask_file")]),
-        (skullstrip, coregister,
-            [("outputs.mean_file", "inputs.source_file")]),
+        (realign, coregister,
+            [("outputs.timeseries", "inputs.timeseries")]),
         (inputnode, coregister,
             [("subject_id", "inputs.subject_id")]),
+        (skullstrip, artifacts,
+            [("outputs.mask_file", "mask_file")]),
         (skullstrip, susan,
             [("outputs.mask_file", "inputnode.mask_file"),
              ("outputs.timeseries", "inputnode.in_files")]),
@@ -365,10 +365,16 @@ def create_bbregister_workflow(name="bbregister",
                                contrast_type="t2",
                                partial_brain=False):
     """Find a linear transformation to align the EPI file with the anatomy."""
-    in_fields = ["subject_id", "source_file"]
+    in_fields = ["subject_id", "timeseries"]
     if partial_brain:
         in_fields.append("whole_brain_template")
     inputnode = Node(IdentityInterface(in_fields), "inputs")
+
+    # Take the mean over time to get a target volume
+    meanvol = MapNode(fsl.MeanImage(), "in_file", "meanvol")
+
+    # Do a rough skullstrip using BET
+    skullstrip = MapNode(fsl.BET(), "in_file", "bet")
 
     # Estimate the registration to Freesurfer conformed space
     func2anat = MapNode(fs.BBRegister(contrast_type=contrast_type,
@@ -381,12 +387,7 @@ def create_bbregister_workflow(name="bbregister",
                         "func2anat")
 
     # Make an image for quality control on the registration
-    report = MapNode(Function(["subject_id", "in_file"],
-                              ["out_file"],
-                              write_coreg_plot,
-                              imports),
-                     "in_file",
-                     "coreg_report")
+    report = MapNode(CoregReport(), "in_file", "coreg_report")
 
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(["tkreg_mat", "flirt_mat", "report"]),
@@ -397,10 +398,15 @@ def create_bbregister_workflow(name="bbregister",
     # Connect the registration
     bbregister.connect([
         (inputnode, func2anat,
-            [("subject_id", "subject_id"),
-             ("source_file", "source_file")]),
+            [("subject_id", "subject_id")]),
         (inputnode, report,
             [("subject_id", "subject_id")]),
+        (inputnode, meanvol,
+            [("timeseries", "in_file")]),
+        (meanvol, skullstrip,
+            [("out_file", "in_file")]),
+        (skullstrip, func2anat,
+            [("out_file", "source_file")]),
         (func2anat, report,
             [("registered_file", "in_file")]),
         (func2anat, outputnode,
@@ -616,6 +622,33 @@ class RealignmentReport(BaseInterface):
         return outputs
 
 
+class CoregReportInput(BaseInterfaceInputSpec):
+
+    in_file = File(exists=True)
+    subject_id = traits.Str()
+
+
+class CoregReport(BaseInterface):
+
+    input_spec = CoregReportInput
+    output_spec = SingleOutFile
+
+    def _run_interface(self, runtime):
+
+        subjects_dir = os.environ["SUBJECTS_DIR"]
+        wm_file = op.join(subjects_dir, self.inputs.subject_id, "mri/wm.mgz")
+        wm_data = nib.load(wm_file).get_data().astype(bool).astype(int)
+
+        m = Mosaic(self.inputs.in_file, wm_data, step=3)
+        m.plot_contours(["#DD2222"])
+        m.savefig("func2anat.png")
+        m.close()
+
+        return runtime
+
+    _list_outputs = list_out_file("func2anat.png")
+
+
 def refine_mask(timeseries, mask_file):
     """Improve brain mask by thresholding and dilating masked timeseries."""
     ts_img = nib.load(timeseries)
@@ -754,54 +787,6 @@ def detect_artifacts(timeseries, mask_file, motion_file,
     artifacts.to_csv(art_file, index=False)
 
     return [plot_file, art_file]
-
-
-def write_coreg_plot(subject_id, in_file):
-    """Plot the wm surface edges on the mean functional."""
-    bold = nib.load(in_file).get_data()
-
-    # Load the white matter volume from recon-all
-    subj_dir = os.environ["SUBJECTS_DIR"]
-    wm_file = os.path.join(subj_dir, subject_id, "mri/wm.mgz")
-    wm = nib.load(wm_file).get_data()
-
-    # Find the limits of the data
-    # note that FS conformed space is not (x, y, z)
-    xdata = np.flatnonzero(bold.any(axis=1).any(axis=1))
-    xmin, xmax = xdata.min(), xdata.max()
-    ydata = np.flatnonzero(bold.any(axis=0).any(axis=0))
-    ymin, ymax = ydata.min(), ydata.max()
-    zdata = np.flatnonzero(bold.any(axis=0).any(axis=1))
-    zmin, zmax = zdata.min() + 10, zdata.max() - 25
-
-    # Figure out the plot parameters
-    n_slices = (zmax - zmin) // 3
-    n_row, n_col = n_slices // 8, 8
-    start = n_slices % n_col // 2 + zmin
-    figsize = (10, 1.375 * n_row)
-    slices = (start + np.arange(zmax - zmin))[::3][:n_slices]
-
-    # Draw the slices and save
-    vmin, vmax = 0, moss.percentiles(bold, 99)
-    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
-    cmap = mpl.colors.ListedColormap(["#C41E3A"])
-    for i, ax in enumerate(reversed(axes.ravel())):
-        i = slices[i]
-        ax.imshow(np.flipud(bold[xmin:xmax, i, ymin:ymax].T),
-                  cmap="gray", vmin=vmin, vmax=vmax)
-        try:
-            ax.contour(np.flipud(wm[xmin:xmax, i, ymin:ymax].T),
-                       linewidths=.5, cmap=cmap)
-        except ValueError:
-            pass
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-    out_file = os.path.abspath("func2anat.png")
-    plt.savefig(out_file, dpi=100, bbox_inches="tight",
-                facecolor="k", edgecolor="k")
-    plt.close(f)
-    return out_file
 
 
 def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
