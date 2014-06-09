@@ -3,35 +3,41 @@ import os
 import os.path as op
 import json
 import numpy as np
-import scipy as sp
+from scipy import ndimage
 import pandas as pd
 import nibabel as nib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 import moss
-import seaborn
+from moss.mosaic import Mosaic
+import seaborn as sns
 
-from nipype.interfaces import fsl
-from nipype.interfaces import freesurfer as fs
+from nipype.interfaces import fsl, freesurfer as fs
 from nipype import (Node, MapNode, Workflow,
                     IdentityInterface, Function)
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec,
+                                    InputMultiPath, OutputMultiPath,
+                                    TraitedSpec, File, traits)
 from nipype.workflows.fmri.fsl import create_susan_smooth
 
 import lyman
+from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
+                         list_out_file, nii_to_png)
 
 # For nipype Function interfaces
 imports = ["import os",
            "import os.path as op",
            "import json",
            "import numpy as np",
-           "import scipy as sp",
+           "from scipy import ndimage",
            "import pandas as pd",
            "import nibabel as nib",
            "import matplotlib as mpl",
            "import matplotlib.pyplot as plt",
            "import moss",
-           "import seaborn"]
+           "import seaborn as sns"]
 
 
 def create_preprocessing_workflow(name="preproc", exp_info=None):
@@ -62,12 +68,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     inputnode = Node(IdentityInterface(in_fields), "inputs")
 
     # Remove equilibrium frames and convert to float
-    prepare = MapNode(Function(["in_file", "frames_to_toss"],
-                               ["out_file"],
-                               prep_timeseries,
-                               imports),
-                      "in_file",
-                      "prep_timeseries")
+    prepare = MapNode(PrepTimeseries(), "in_file", "prep_timeseries")
     prepare.inputs.frames_to_toss = exp_info["frames_to_toss"]
 
     # Motion and slice time correct
@@ -199,18 +200,16 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     return preproc, inputnode, outputnode
 
 
+# =========================================================================== #
+
+
 def create_realignment_workflow(name="realignment", temporal_interp=True,
                                 TR=2, slice_order="up", interleaved=True):
     """Motion and slice-time correct the timeseries and summarize."""
     inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
     # Get the middle volume of each run for motion correction
-    extractref = MapNode(Function(["in_file"],
-                                  ["out_file"],
-                                  extract_mc_target,
-                                  imports),
-                         "in_file",
-                         "extractref")
+    extractref = MapNode(ExtractRealignmentTarget(), "in_file", "extractref")
 
     # Motion correct to middle volume of each run
     mcflirt = MapNode(fsl.MCFLIRT(cost="normcorr",
@@ -236,15 +235,10 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
             slicetime.inputs.interleaved = True
 
     # Generate a report on the motion correction
-    report_inputs = ["target_file", "realign_params", "displace_params"]
-    report_outputs = ["realign_report", "motion_file"]
-    mcreport = MapNode(Function(report_inputs,
-                                report_outputs,
-                                realign_report,
-                                imports),
-                       report_inputs,
+    mcreport = MapNode(RealignmentReport(),
+                       ["target_file", "realign_params", "displace_params"],
                        "mcreport")
-
+                        
     # Define the outputs
     outputnode = Node(IdentityInterface(["timeseries",
                                          "example_func",
@@ -469,92 +463,157 @@ def create_filtering_workflow(name="filter",
 
 # =========================================================================== #
 
-def prep_timeseries(in_file, frames_to_toss):
-    """Trim equilibrium TRs and change datatype to float."""
-    img = nib.load(in_file)
-    data = img.get_data()
-    aff = img.get_affine()
-    hdr = img.get_header()
 
-    data = data[..., frames_to_toss:]
-    hdr.set_data_dtype(np.float32)
+class PrepTimeseriesInput(BaseInterfaceInputSpec):
 
-    new_img = nib.Nifti1Image(data, aff, hdr)
-    out_file = os.path.abspath("timeseries.nii.gz")
-    new_img.to_filename(out_file)
-    return out_file
+    in_file = File(exists=True)
+    frames_to_toss = traits.Int()
 
 
-def extract_mc_target(in_file):
-    """Extract the middle frame of a timeseries."""
-    img = nib.load(in_file)
-    data = img.get_data()
+class PrepTimeseries(BaseInterface):
 
-    middle_vol = data.shape[-1] // 2
-    targ = np.empty(data.shape[:-1])
-    targ[:] = data[..., middle_vol]
+    input_spec = PrepTimeseriesInput
+    output_spec = SingleOutFile
 
-    targ_img = nib.Nifti1Image(targ, img.get_affine(), img.get_header())
-    out_file = os.path.abspath("example_func.nii.gz")
-    targ_img.to_filename(out_file)
-    return out_file
+    def _run_interface(self, runtime):
+
+        # Load the input timeseries
+        img = nib.load(self.inputs.in_file)
+        data = img.get_data()
+        aff = img.get_affine()
+        hdr = img.get_header()
+
+        # Trim off the equilibrium TRs
+        data = self.trim_timeseries(data)
+
+        # Save the output timeseries as float32
+        hdr.set_data_dtype(np.float32)
+        new_img = nib.Nifti1Image(data, aff, hdr)
+        new_img.to_filename("timeseries.nii.gz")
+
+        return runtime
+
+    def trim_timeseries(self, data):
+        """Remove frames from beginning of timeseries."""
+        return data[..., self.inputs.frames_to_toss:]
+
+    _list_outputs = list_out_file("timeseries.nii.gz")
 
 
-def realign_report(target_file, realign_params, displace_params):
-    """Create files summarizing the motion correction."""
-    # Create a DataFrame with the 6 motion parameters
-    rot = ["rot_" + dim for dim in ["x", "y", "z"]]
-    trans = ["trans_" + dim for dim in ["x", "y", "z"]]
-    df = pd.DataFrame(np.loadtxt(realign_params),
-                      columns=rot + trans)
+class ExtractRealignmentTarget(BaseInterface):
 
-    abs, rel = displace_params
-    df["displace_abs"] = np.loadtxt(abs)
-    df["displace_rel"] = pd.Series(np.loadtxt(rel), index=df.index[1:])
-    df.loc[0, "displace_rel"] = 0
-    motion_file = os.path.abspath("realignment_params.csv")
-    df.to_csv(motion_file, index=False)
+    input_spec = SingleInFile
+    output_spec = SingleOutFile
 
-    # Write the motion plots
-    seaborn.set()
-    seaborn.set_color_palette("husl", 3)
-    f, (ax_rot, ax_trans) = plt.subplots(2, 1,
-                                         figsize=(8, 3.75),
-                                         sharex=True)
-    ax_rot.plot(df[rot] * 100)
-    ax_rot.axhline(0, c="#444444", ls="--", zorder=1)
-    ax_trans.plot(df[trans])
-    ax_trans.axhline(0, c="#444444", ls="--", zorder=1)
-    ax_rot.set_xlim(0, len(df) - 1)
+    def _run_interface(self, runtime):
 
-    ax_rot.set_ylabel(r"Rotations (rad $\times$ 100)")
-    ax_trans.set_ylabel("Translations (mm)")
-    plt.tight_layout()
+        # Load the input timeseries
+        img = nib.load(self.inputs.in_file)
+        data = img.get_data()
 
-    plot_file = os.path.abspath("realignment_plots.png")
-    f.savefig(plot_file, dpi=100, bbox_inches="tight")
-    plt.close(f)
+        # Extract the target volume
+        targ = self.extract_target(data)
 
-    # Write the example func plot
-    data = nib.load(target_file).get_data()
-    n_slices = data.shape[-1]
-    n_row, n_col = n_slices // 8, 8
-    start = n_slices % n_col // 2
-    figsize = (10, 1.375 * n_row)
-    f, axes = plt.subplots(n_row, n_col, figsize=figsize, facecolor="k")
+        # Save a new 3D image
+        targ_img = nib.Nifti1Image(targ,
+                                   img.get_affine(),
+                                   img.get_header())
+        targ_img.to_filename("example_func.nii.gz")
 
-    vmin, vmax = 0, moss.percentiles(data, 99)
-    for i, ax in enumerate(axes.ravel(), start):
-        ax.imshow(data[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
-        ax.set_xticks([])
-        ax.set_yticks([])
-    f.subplots_adjust(hspace=1e-5, wspace=1e-5)
-    target_file = os.path.abspath("example_func.png")
-    f.savefig(target_file, dpi=100, bbox_inches="tight",
-              facecolor="k", edgecolor="k")
-    plt.close(f)
+        return runtime
 
-    return [motion_file, plot_file, target_file], motion_file
+    def extract_target(self, data):
+        """Return a 3D array with data from the middle TR."""
+        middle_vol = data.shape[-1] // 2
+        targ = np.empty(data.shape[:-1])
+        targ[:] = data[..., middle_vol]
+
+        return targ
+
+    _list_outputs = list_out_file("example_func.nii.gz")
+
+
+class RealignmentReportInput(BaseInterfaceInputSpec):
+
+    target_file = File(exists=True)
+    realign_params = File(exists=True)
+    displace_params = InputMultiPath(File(exists=True))
+
+
+class RealignmentReportOutput(TraitedSpec):
+
+    realign_report = OutputMultiPath(File(exists=True))
+    motion_file = File(exists=True)
+
+
+class RealignmentReport(BaseInterface):
+
+    input_spec = RealignmentReportInput
+    output_spec = RealignmentReportOutput
+
+    def _run_interface(self, runtime):
+
+        self.out_files = []
+
+        # Load the realignment parameters
+        rot = ["rot_" + dim for dim in ["x", "y", "z"]]
+        trans = ["trans_" + dim for dim in ["x", "y", "z"]]
+        df = pd.DataFrame(np.loadtxt(self.inputs.realign_params),
+                          columns=rot + trans)
+
+        # Load the RMS displacement parameters
+        abs, rel = self.inputs.displace_params
+        df["displace_abs"] = np.loadtxt(abs)
+        df["displace_rel"] = pd.Series(np.loadtxt(rel), index=df.index[1:])
+        df.loc[0, "displace_rel"] = 0
+
+        # Write the motion file to csv
+        self.motion_file = op.abspath("realignment_params.csv")
+        df.to_csv(self.motion_file)
+
+        # Plot the motion timeseries
+        f = self.plot_motion(df)
+        self.plot_file = op.abspath("realignment_plots.png")
+        f.savefig(self.plot_file, dpi=100)
+        plt.close(f)
+
+        # Plot the target image
+        m = self.plot_target()
+        self.target_file = op.abspath("example_func.png")
+        m.savefig(self.target_file)
+        m.close()
+
+        return runtime
+
+    def plot_motion(self, df):
+        """Plot the timecourses of realignment parameters."""
+        with sns.axes_style("whitegrid"):
+            f, (ax_rot, ax_trans) = plt.subplots(2, 1, figsize=(9, 3.75),
+                                                 sharex=True)
+        ax_rot.plot(df.filter(like="rot") * 100)
+        ax_rot.axhline(0, c=".4", ls="--", zorder=1)
+        ax_trans.plot(df.filter(like="trans"))
+        ax_trans.axhline(0, c=".4", ls="--", zorder=1)
+        ax_rot.set_xlim(0, len(df) - 1)
+
+        ax_rot.set_ylabel(r"Rotations (rad $\times$ 100)")
+        ax_trans.set_ylabel("Translations (mm)")
+        f.tight_layout()
+        return f
+
+    def plot_target(self):
+        """Plot a mosaic of the motion correction target image."""
+        m = Mosaic(self.inputs.target_file, step=1)
+        return m
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["realign_report"] = [self.target_file,
+                                     self.motion_file,
+                                     self.plot_file]
+        outputs["motion_file"] = self.motion_file
+        return outputs
 
 
 def refine_mask(timeseries, mask_file):
@@ -572,8 +631,8 @@ def refine_mask(timeseries, mask_file):
     mask = ts_min > 0
 
     # Dilate the resulting mask by one voxel
-    dilator = sp.ndimage.generate_binary_structure(3, 3)
-    mask = sp.ndimage.binary_dilation(mask, dilator)
+    dilator = ndimage.generate_binary_structure(3, 3)
+    mask = ndimage.binary_dilation(mask, dilator)
 
     # Mask the timeseries and save it
     ts_data[~mask] = 0
@@ -650,7 +709,7 @@ def write_mask_report(mask_file, orig_file, mean_file):
 def detect_artifacts(timeseries, mask_file, motion_file,
                      intensity_thresh, motion_thresh):
     """Find frames with exessive signal intensity or motion."""
-    seaborn.set()
+    sns.set()
 
     # Load the timeseries and detect outliers
     ts = nib.load(timeseries).get_data()
@@ -665,7 +724,7 @@ def detect_artifacts(timeseries, mask_file, motion_file,
     art_motion = rel_motion > motion_thresh
 
     # Plot the timecourses with outliers
-    blue, green, red = seaborn.color_palette("deep", 3)
+    blue, green, red = sns.color_palette("deep", 3)
     f, (ax_int, ax_mot) = plt.subplots(2, 1, sharex=True,
                                        figsize=(8, 3.75))
     ax_int.axhline(-intensity_thresh, c="gray", ls="--")
