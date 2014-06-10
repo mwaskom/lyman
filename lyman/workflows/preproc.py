@@ -605,18 +605,41 @@ class RealignmentReport(BaseInterface):
     def plot_motion(self, df):
         """Plot the timecourses of realignment parameters."""
         with sns.axes_style("whitegrid"):
-            f, (ax_rot, ax_trans) = plt.subplots(2, 1, figsize=(9, 3.75),
-                                                 sharex=True)
-        ax_rot.plot(np.rad2deg(df.filter(like="rot")))
-        ax_rot.axhline(0, c=".4", ls="--", zorder=1)
-        ax_trans.plot(df.filter(like="trans"))
-        ax_trans.axhline(0, c=".4", ls="--", zorder=1)
-        ax_rot.set_xlim(0, len(df) - 1)
+            fig, axes = plt.subplots(3, 1, figsize=(9, 5), sharex=True)
 
-        ax_rot.set_ylabel(r"Rotations (degrees)")
-        ax_trans.set_ylabel("Translations (mm)")
-        f.tight_layout()
-        return f
+        # Trim off all but the axis name
+        f = lambda s: s[-1]
+
+        # Plot rotations
+        pal = sns.color_palette("Reds_d", 3)
+        rot_df = np.rad2deg(df.filter(like="rot")).rename(columns=f)
+        rot_df.plot(ax=axes[0], colors=pal)
+
+        # Plot translations
+        pal = sns.color_palette("Blues_d", 3)
+        trans_df = df.filter(like="trans").rename(columns=f)
+        trans_df.plot(ax=axes[1], colors=pal)
+
+        # Plot displacement
+        f = lambda s: s[-3:]
+        pal = sns.color_palette("Greens_d", 2)
+        disp_df = df.filter(like="displace").rename(columns=f)
+        disp_df.plot(ax=axes[2], colors=pal)
+
+        # Label the graphs
+        axes[0].set_xlim(0, len(df) - 1)
+        axes[0].axhline(0, c=".4", ls="--", zorder=1)
+        axes[1].axhline(0, c=".4", ls="--", zorder=1)
+
+        for ax in axes:
+            ax.legend(frameon=True, ncol=3, loc="best")
+            ax.legend_.get_frame().set_color("white")
+
+        axes[0].set_ylabel("Rotations (degrees)")
+        axes[1].set_ylabel("Translations (mm)")
+        axes[2].set_ylabel("Displacement (mm)")
+        fig.tight_layout()
+        return fig
 
     def plot_target(self):
         """Plot a mosaic of the motion correction target image."""
@@ -736,7 +759,6 @@ class ArtifactDetection(BaseInterface):
         # Load the motion files and find motion artifacts
         df = pd.read_csv(self.inputs.motion_file)
         rel_motion = df["displace_rel"].values
-        abs_motion = df["displace_abs"].values
         art_motion = rel_motion > self.inputs.motion_thresh
 
         # Extract the residual timeseries from each slice
@@ -758,14 +780,9 @@ class ArtifactDetection(BaseInterface):
         art_df.to_csv("artifacts.csv", index=False)
 
         # Plot the artifact data
-        art_fig = self.plot_artifacts(norm_ts, rel_motion, abs_motion, art_df)
+        art_fig = self.plot_artifacts(norm_ts, slices, rel_motion, art_df)
         art_fig.savefig("artifact_detection.png", dpi=100)
         plt.close(art_fig)
-
-        # Plot residual normalized slice timeseries for spike detection
-        spike_fig = self.plot_spikes(slices, art_df)
-        spike_fig.savefig("spike_detection.png", dpi=100)
-        plt.close(spike_fig)
 
         return runtime
 
@@ -778,7 +795,7 @@ class ArtifactDetection(BaseInterface):
 
         return norm_ts
 
-    def plot_artifacts(self, norm, rel, abs, art):
+    def plot_artifacts(self, norm, slices, rel, art):
 
         b, g, r, p, y, c = sns.color_palette("deep")
         with sns.axes_style("whitegrid"):
@@ -786,27 +803,35 @@ class ArtifactDetection(BaseInterface):
 
         # Plot the main timeseries
         axes[0].plot(norm, color=p, zorder=3)
-        axes[1].plot(rel, color=b, zorder=3)
-        axes[2].plot(abs, color=g)
+
+        palette = sns.color_palette("GnBu_d", len(slices))
+        for slice_ts, color in zip(slices, palette):
+            axes[1].plot(slice_ts, linewidth=.75, color=color, zorder=3)
+
+        axes[2].plot(rel, color=b, zorder=3)
         axes[0].set_xlim(0, len(norm))
 
         # Plot the artifacts
         art_kws = dict(color=r, linewidth=2, alpha=.8)
         for t in np.flatnonzero(art["intensity"]):
             axes[0].axvline(t, **art_kws)
+        for t in np.flatnonzero(art["spikes"]):
+            axes[1].axvline(t, color=r, linewidth=2, alpha=.8)
         for t in np.flatnonzero(art["motion"]):
-            axes[1].axvline(t, **art_kws)
+            axes[2].axvline(t, **art_kws)
 
         # Plot the thresholds
         thresh_kws = dict(color=".6", linestyle="--")
         axes[0].axhline(self.inputs.intensity_thresh, **thresh_kws)
         axes[0].axhline(-self.inputs.intensity_thresh, **thresh_kws)
-        axes[1].axhline(self.inputs.motion_thresh, **thresh_kws)
+        if self.inputs.spike_thresh is not None:
+            axes[1].axhline(self.inputs.spike_thresh, **thresh_kws)
+        axes[2].axhline(self.inputs.motion_thresh, **thresh_kws)
 
         # Label the axes
         axes[0].set_ylabel("Normalized Intensity")
-        axes[1].set_ylabel("Relative Motion (mm)")
-        axes[2].set_ylabel("Absolute Motion (mm)")
+        axes[1].set_ylabel("Normalized Intensity")
+        axes[2].set_ylabel("Relative Motion (mm)")
 
         f.tight_layout()
         return f
@@ -832,33 +857,12 @@ class ArtifactDetection(BaseInterface):
 
         return slices
 
-    def plot_spikes(self, slices, art):
-        """Plot the robust normalized residual timeseries from each slice."""
-        with sns.axes_style("whitegrid"):
-            f, ax = plt.subplots(figsize=(9, 3))
-
-        palette = sns.color_palette("GnBu_d", len(slices))
-        for slice_ts, color in zip(slices, palette):
-            ax.plot(slice_ts, linewidth=.75, color=color, zorder=3)
-
-        if self.inputs.spike_thresh is not None:
-            ax.axhline(self.inputs.spike_thresh, c=".6", linestyle="--")
-
-        for t in np.flatnonzero(art["spikes"]):
-            r = sns.color_palette("deep")[2]
-            ax.axvline(t, color=r, linewidth=2, alpha=.8)
-
-        ax.set(xlim=(0, slices.shape[1]), ylabel="Normalized Intensity")
-
-        f.tight_layout()
-        return f
 
     def _list_outputs(self):
 
         outputs = self._outputs().get()
         outputs["out_files"] = [op.abspath("artifacts.csv"),
-                                op.abspath("artifact_detection.png"),
-                                op.abspath("spike_detection.png")]
+                                op.abspath("artifact_detection.png")]
         return outputs
 
 
