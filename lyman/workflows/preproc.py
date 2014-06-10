@@ -3,13 +3,10 @@ import os
 import os.path as op
 import json
 import numpy as np
-from scipy import ndimage
 import pandas as pd
 import nibabel as nib
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-import moss
 from moss.mosaic import Mosaic
 import seaborn as sns
 
@@ -101,14 +98,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
                                              "unsmoothed_timeseries")
 
     # Automatically detect motion and intensity outliers
-    artifacts = MapNode(Function(["timeseries",
-                                  "mask_file",
-                                  "motion_file",
-                                  "intensity_thresh",
-                                  "motion_thresh"],
-                                 ["artifact_report"],
-                                 detect_artifacts,
-                                 imports),
+    artifacts = MapNode(ArtifactDetection(),
                         ["timeseries", "mask_file", "motion_file"],
                         "artifacts")
     artifacts.inputs.intensity_thresh = exp_info["intensity_threshold"]
@@ -188,7 +178,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
              ("outputs.mask_file", "functional_mask"),
              ("outputs.report", "mask_report")]),
         (artifacts, outputnode,
-            [("artifact_report", "artifact_report")]),
+            [("out_files", "artifact_report")]),
         (coregister, outputnode,
             [("outputs.tkreg_mat", "tkreg_affine"),
              ("outputs.flirt_mat", "flirt_affine"),
@@ -714,54 +704,129 @@ class MaskReport(BaseInterface):
         return outputs
 
 
-def detect_artifacts(timeseries, mask_file, motion_file,
-                     intensity_thresh, motion_thresh):
-    """Find frames with exessive signal intensity or motion."""
-    sns.set()
+class ArtifactDetectionInput(BaseInterfaceInputSpec):
 
-    # Load the timeseries and detect outliers
-    ts = nib.load(timeseries).get_data()
-    mask = nib.load(mask_file).get_data().astype(bool)
-    ts = ts[mask].mean(axis=0)
-    ts = (ts - ts.mean()) / ts.std()
-    art_intensity = np.abs(ts) > intensity_thresh
+    timeseries = File(exists=True)
+    mask_file = File(exists=True)
+    motion_file = File(exists=True)
+    intensity_thresh = traits.Float()
+    motion_thresh = traits.Float()
 
-    # Load the motion file and detect outliers
-    df = pd.read_csv(motion_file)
-    rel_motion = np.array(df["displace_rel"])
-    art_motion = rel_motion > motion_thresh
 
-    # Plot the timecourses with outliers
-    blue, green, red = sns.color_palette("deep", 3)
-    f, (ax_int, ax_mot) = plt.subplots(2, 1, sharex=True,
-                                       figsize=(8, 3.75))
-    ax_int.axhline(-intensity_thresh, c="gray", ls="--")
-    ax_int.axhline(intensity_thresh, c="gray", ls="--")
-    ax_int.plot(ts, c=blue)
-    for tr in np.flatnonzero(art_intensity):
-        ax_int.axvline(tr, color=red, lw=2.5, alpha=.8)
-    ax_int.set_xlim(0, len(df))
+class ArtifactDetection(BaseInterface):
 
-    ax_mot.axhline(motion_thresh, c="gray", ls="--")
-    ax_mot.plot(rel_motion, c=green)
-    ymin, ymax = ax_mot.get_ylim()
-    for tr in np.flatnonzero(art_motion):
-        ax_mot.axvline(tr, color=red, lw=2.5, alpha=.8)
+    input_spec = ArtifactDetectionInput
+    output_spec = ManyOutFiles
 
-    ax_int.set_ylabel("Normalized Intensity")
-    ax_mot.set_ylabel("Relative Motion (mm)")
+    def _run_interface(self, runtime):
 
-    plt.tight_layout()
-    plot_file = os.path.abspath("artifact_detection.png")
-    f.savefig(plot_file, dpi=100, bbox_inches="tight")
+        # Load the timeseries and mask files
+        ts = nib.load(self.inputs.timeseries).get_data()
+        mask = nib.load(self.inputs.mask_file).get_data().astype(bool)
 
-    # Save the artifacts file as csv
-    artifacts = pd.DataFrame(dict(intensity=art_intensity,
-                                  motion=art_motion)).astype(int)
-    art_file = os.path.abspath("artifacts.csv")
-    artifacts.to_csv(art_file, index=False)
+        # Normalize the timeseries using robust statistics
+        norm_ts = self.normalize_timeseries(ts, mask)
 
-    return [plot_file, art_file]
+        # Find the intensity artifacts
+        art_intensity = np.abs(norm_ts) > self.inputs.intensity_thresh
+
+        # Load the motion files and find motion artifacts
+        df = pd.read_csv(self.inputs.motion_file)
+        rel_motion = df["displace_rel"].values
+        abs_motion = df["displace_abs"].values
+        art_motion = rel_motion > self.inputs.motion_thresh
+
+        # Make a DataFrame of the artifacts
+        art_df = pd.DataFrame(dict(intensity=art_intensity,
+                                   motion=art_motion)).astype(int)
+        art_df.to_csv("artifacts.csv", index=False)
+
+        # Plot the artifact data
+        art_fig = self.plot_artifacts(norm_ts, rel_motion, abs_motion, art_df)
+        art_fig.savefig("artifact_detection.png", dpi=100)
+        plt.close(art_fig)
+
+        # Plot residual normalized slice timeseries for spike detection
+        spike_fig = self.plot_spikes(ts, mask)
+        spike_fig.savefig("spike_detection.png", dpi=100)
+        plt.close(spike_fig)
+
+        return runtime
+
+    def normalize_timeseries(self, ts, mask):
+        """Compute a robust zscore using median and MAD."""
+        brain_ts = ts[mask]
+        med_ts = np.median(brain_ts, axis=0)
+        mad = np.median(np.abs(med_ts - np.median(brain_ts)))
+        norm_ts = (med_ts - np.median(brain_ts)) / mad
+
+        return norm_ts
+
+    def plot_artifacts(self, norm, rel, abs, art):
+
+        b, g, r, p, y, c = sns.color_palette("deep")
+        with sns.axes_style("whitegrid"):
+            f, axes = plt.subplots(3, 1, sharex=True, figsize=(9, 5.5))
+
+        # Plot the main timeseries
+        axes[0].plot(norm, color=p, zorder=2)
+        axes[1].plot(rel, color=b, zorder=2)
+        axes[2].plot(abs, color=g)
+        axes[0].set_xlim(0, len(norm))
+
+        # Plot the artifacts
+        art_kws = dict(color=r, linewidth=2, alpha=.8)
+        for t in np.flatnonzero(art["intensity"]):
+            axes[0].axvline(t, **art_kws)
+        for t in np.flatnonzero(art["motion"]):
+            axes[1].axvline(t, **art_kws)
+
+        # Plot the thresholds
+        thresh_kws = dict(color=".6", linestyle="--")
+        axes[0].axhline(self.inputs.intensity_thresh, **thresh_kws)
+        axes[0].axhline(-self.inputs.intensity_thresh, **thresh_kws)
+        axes[1].axhline(self.inputs.motion_thresh, **thresh_kws)
+
+        # Label the axes
+        axes[0].set_ylabel("Normalized Intensity")
+        axes[1].set_ylabel("Relative Motion (mm)")
+        axes[2].set_ylabel("Absolute Motion (mm)")
+
+        f.tight_layout()
+        return f
+
+    def plot_spikes(self, ts, mask):
+        """Plot the robust normalized residual timeseries from each slice."""
+        with sns.axes_style("whitegrid"):
+            f, ax = plt.subplots(figsize=(9, 3))
+
+        med_ts = np.median(ts[mask], axis=0)
+        pal = sns.color_palette("GnBu_d", mask.any(axis=(0, 1)).sum())
+
+        for k in range(mask.shape[-1]):
+            if not mask[..., k].any():
+                continue
+            slice_ts = np.median(ts[:, :, k, :][mask[:, :, k]], axis=0)
+            slice_ts = slice_ts - med_ts
+
+            slice_med = np.median(slice_ts)
+            slice_mad = np.median(np.abs(slice_ts - slice_med))
+
+            norm_ts = (slice_ts - slice_med) / slice_mad
+            ax.plot(norm_ts, linewidth=.75, color=pal[k])
+
+        ax.set(xlim=(0, ts.shape[-1]), ylabel="Normalized Intensity")
+
+        f.tight_layout()
+        return f
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_files"] = [op.abspath("artifacts.csv"),
+                                op.abspath("artifact_detection.png"),
+                                op.abspath("spike_detection.png")]
+        return outputs
 
 
 def scale_timeseries(in_file, mask_file, statistic="median", target=10000):

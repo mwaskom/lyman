@@ -26,3 +26,16 @@ def test_extract_realignment_target():
 
         targ = extractor.extract_target(data)
         nt.assert_equal(np.asscalar(np.unique(targ)), ntp // 2)
+
+
+def test_robust_normalization():
+
+    rs = np.random.RandomState(99)
+    vol_shape = [40, 40, 30]
+    ntp = 100
+    ts = rs.normal(0, 1, size=vol_shape + [ntp])
+    mask = rs.uniform(size=vol_shape) > .4
+
+    art = preproc.ArtifactDetection()
+    out = art.normalize_timeseries(ts, mask)
+    nt.assert_equal(out.shape, (ntp,))
