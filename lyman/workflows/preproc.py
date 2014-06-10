@@ -691,7 +691,8 @@ class MaskReport(BaseInterface):
 
     def plot_mask_image(self):
 
-        m = Mosaic(self.inputs.orig_file, self.inputs.mask_file, step=1)
+        m = Mosaic(self.inputs.orig_file, self.inputs.mask_file,
+                   self.inputs.mask_file, show_mask=False, step=1)
         m.plot_mask()
         m.savefig("functional_mask.png")
         m.close()
