@@ -103,6 +103,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
                         "artifacts")
     artifacts.inputs.intensity_thresh = exp_info["intensity_threshold"]
     artifacts.inputs.motion_thresh = exp_info["motion_threshold"]
+    artifacts.inputs.spike_thresh = exp_info["spike_threshold"]
 
     # Save the experiment info for this run
     dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
@@ -712,6 +713,7 @@ class ArtifactDetectionInput(BaseInterfaceInputSpec):
     motion_file = File(exists=True)
     intensity_thresh = traits.Float()
     motion_thresh = traits.Float()
+    spike_thresh = traits.Either(traits.Float(), None)
 
 
 class ArtifactDetection(BaseInterface):
@@ -737,9 +739,22 @@ class ArtifactDetection(BaseInterface):
         abs_motion = df["displace_abs"].values
         art_motion = rel_motion > self.inputs.motion_thresh
 
+        # Extract the residual timeseries from each slice
+        slices = self.slice_timeseries(ts, mask)
+        spike_thresh = self.inputs.spike_thresh
+        if spike_thresh is None:
+            art_spike = np.zeros_like(art_motion)
+        else:
+            # Spike threshold is unidirectional
+            if spike_thresh < 0:
+                art_spike = (slices < spike_thresh).any(axis=0)
+            else:
+                art_spike = (slices > spike_thresh).any(axis=0)
+
         # Make a DataFrame of the artifacts
         art_df = pd.DataFrame(dict(intensity=art_intensity,
-                                   motion=art_motion)).astype(int)
+                                   motion=art_motion,
+                                   spikes=art_spike)).astype(int)
         art_df.to_csv("artifacts.csv", index=False)
 
         # Plot the artifact data
@@ -748,7 +763,7 @@ class ArtifactDetection(BaseInterface):
         plt.close(art_fig)
 
         # Plot residual normalized slice timeseries for spike detection
-        spike_fig = self.plot_spikes(ts, mask)
+        spike_fig = self.plot_spikes(slices, art_df)
         spike_fig.savefig("spike_detection.png", dpi=100)
         plt.close(spike_fig)
 
@@ -770,8 +785,8 @@ class ArtifactDetection(BaseInterface):
             f, axes = plt.subplots(3, 1, sharex=True, figsize=(9, 5.5))
 
         # Plot the main timeseries
-        axes[0].plot(norm, color=p, zorder=2)
-        axes[1].plot(rel, color=b, zorder=2)
+        axes[0].plot(norm, color=p, zorder=3)
+        axes[1].plot(rel, color=b, zorder=3)
         axes[2].plot(abs, color=g)
         axes[0].set_xlim(0, len(norm))
 
@@ -796,14 +811,12 @@ class ArtifactDetection(BaseInterface):
         f.tight_layout()
         return f
 
-    def plot_spikes(self, ts, mask):
-        """Plot the robust normalized residual timeseries from each slice."""
-        with sns.axes_style("whitegrid"):
-            f, ax = plt.subplots(figsize=(9, 3))
 
+    def slice_timeseries(self, ts, mask):
+        """Get the residual timeseries within the mask from each slice."""
         med_ts = np.median(ts[mask], axis=0)
-        pal = sns.color_palette("GnBu_d", mask.any(axis=(0, 1)).sum())
 
+        slices = []
         for k in range(mask.shape[-1]):
             if not mask[..., k].any():
                 continue
@@ -814,9 +827,28 @@ class ArtifactDetection(BaseInterface):
             slice_mad = np.median(np.abs(slice_ts - slice_med))
 
             norm_ts = (slice_ts - slice_med) / slice_mad
-            ax.plot(norm_ts, linewidth=.75, color=pal[k])
+            slices.append(norm_ts)
+        slices = np.asarray(slices)
 
-        ax.set(xlim=(0, ts.shape[-1]), ylabel="Normalized Intensity")
+        return slices
+
+    def plot_spikes(self, slices, art):
+        """Plot the robust normalized residual timeseries from each slice."""
+        with sns.axes_style("whitegrid"):
+            f, ax = plt.subplots(figsize=(9, 3))
+
+        palette = sns.color_palette("GnBu_d", len(slices))
+        for slice_ts, color in zip(slices, palette):
+            ax.plot(slice_ts, linewidth=.75, color=color, zorder=3)
+
+        if self.inputs.spike_thresh is not None:
+            ax.axhline(self.inputs.spike_thresh, c=".6", linestyle="--")
+
+        for t in np.flatnonzero(art["spikes"]):
+            r = sns.color_palette("deep")[2]
+            ax.axvline(t, color=r, linewidth=2, alpha=.8)
+
+        ax.set(xlim=(0, slices.shape[1]), ylabel="Normalized Intensity")
 
         f.tight_layout()
         return f

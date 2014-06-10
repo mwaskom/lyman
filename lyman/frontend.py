@@ -104,6 +104,7 @@ def default_experiment_parameters():
         slice_order="up",
         intensity_threshold=3,
         motion_threshold=1,
+        spike_threshold=None,
         smooth_fwhm=6,
         hpf_cutoff=128,
 
