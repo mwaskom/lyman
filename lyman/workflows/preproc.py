@@ -613,18 +613,18 @@ class RealignmentReport(BaseInterface):
         # Plot rotations
         pal = sns.color_palette("Reds_d", 3)
         rot_df = np.rad2deg(df.filter(like="rot")).rename(columns=f)
-        rot_df.plot(ax=axes[0], colors=pal)
+        rot_df.plot(ax=axes[0], colors=pal, lw=1.5)
 
         # Plot translations
         pal = sns.color_palette("Blues_d", 3)
         trans_df = df.filter(like="trans").rename(columns=f)
-        trans_df.plot(ax=axes[1], colors=pal)
+        trans_df.plot(ax=axes[1], colors=pal, lw=1.5)
 
         # Plot displacement
         f = lambda s: s[-3:]
         pal = sns.color_palette("Greens_d", 2)
         disp_df = df.filter(like="displace").rename(columns=f)
-        disp_df.plot(ax=axes[2], colors=pal)
+        disp_df.plot(ax=axes[2], colors=pal, lw=1.5)
 
         # Label the graphs
         axes[0].set_xlim(0, len(df) - 1)
