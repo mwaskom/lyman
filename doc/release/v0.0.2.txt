@@ -34,3 +34,8 @@ v0.0.2 (??)
     - Otherwise updated the preproc report with better summary figures.
 
 - Updated the mixed effects model reporting and simplified the workflow graph.
+
+    - The boxplot of COPE effect sizes in the mixed effects report is now taken
+      from a sphere (with the same size as in the activation peak image)
+      centered at each peak voxel rather than just from the single voxel
+      itself.
