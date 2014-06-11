@@ -25,16 +25,9 @@ from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
 
 # For nipype Function interfaces
 imports = ["import os",
-           "import os.path as op",
            "import json",
            "import numpy as np",
-           "from scipy import ndimage",
-           "import pandas as pd",
-           "import nibabel as nib",
-           "import matplotlib as mpl",
-           "import matplotlib.pyplot as plt",
-           "import moss",
-           "import seaborn as sns"]
+           "import nibabel as nib"]
 
 
 def create_preprocessing_workflow(name="preproc", exp_info=None):
@@ -836,7 +829,6 @@ class ArtifactDetection(BaseInterface):
         f.tight_layout()
         return f
 
-
     def slice_timeseries(self, ts, mask):
         """Get the residual timeseries within the mask from each slice."""
         med_ts = np.median(ts[mask], axis=0)
@@ -856,7 +848,6 @@ class ArtifactDetection(BaseInterface):
         slices = np.asarray(slices)
 
         return slices
-
 
     def _list_outputs(self):
 
