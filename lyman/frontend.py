@@ -102,8 +102,9 @@ def default_experiment_parameters():
         temporal_interp=False,
         interleaved=True,
         slice_order="up",
-        intensity_threshold=3,
+        intensity_threshold=4.5,
         motion_threshold=1,
+        spike_threshold=None,
         smooth_fwhm=6,
         hpf_cutoff=128,
 

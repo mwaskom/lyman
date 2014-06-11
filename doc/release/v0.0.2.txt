@@ -2,6 +2,40 @@
 v0.0.2 (??)
 -----------
 
-- Added ANTS-based volume normalization. This provides substantial improvements over the FSL-based normalization that was previously used. However, ANTS can be difficult to install, so this is optional and off by default. It controled through a variable in the ``project.py`` file, ``ants_normalization``, which should be either ``True`` or ``False``. After enabling it, you can use the command-line tools as before, and ANTS will be used in ``run_warp.py`` and ``run_fmri.py -workflow reg``.
+- Added ANTS-based volume normalization. This provides substantial improvements
+  over the FSL-based normalization that was previously used. However, ANTS can
+  be difficult to install, so this is optional and off by default. It controled
+  through a variable in the ``project.py`` file, ``ants_normalization``, which
+  should be either ``True`` or ``False``. After enabling it, you can use the
+  command-line tools as before, and ANTS will be used in ``run_warp.py`` and
+  ``run_fmri.py -workflow reg``.
+
+- Updated the preprocessing workflow in several ways
+
+    - The artifact detection code now uses robust metrics (median and median
+      absolute deviation). Previously, it used mean and standard deviation.
+      **Importantly**, this means that the your intensity threshold should be
+      adjusted by a scaling factor to provide a similarly stringent threshold.
+      As a general rule of thumb, 1 SD is about 1.48 MADs.
+
+    - Added white noise spike detection. This is controlled through the
+      ``spike_threshod`` in the experiment file. It is also in units of median
+      absolute deviation. It is ``None`` by default, indicating that no volumes
+      will be excluded for white noise spikes. Additionally, a plot that can be
+      used to diagnose spikes has been added to the artifact detection report.
+
+    - Changed the derivation of the brain mask. Previously, this mask was
+      intensity based (although the intensity threshold was determined within a
+      mask output by BET). Now, the Freesurfer segmentation is used to define
+      an anatomical brain mask, which is then transformed into native run
+      space. This should avoid losing voxels in magnetic susceptibility areas
+      like ventral temporal cortex.
+
+    - Otherwise updated the preproc report with better summary figures.
 
 - Updated the mixed effects model reporting and simplified the workflow graph.
+
+    - The boxplot of COPE effect sizes in the mixed effects report is now taken
+      from a sphere (with the same size as in the activation peak image)
+      centered at each peak voxel rather than just from the single voxel
+      itself.

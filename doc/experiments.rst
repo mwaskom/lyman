@@ -74,8 +74,16 @@ Preprocessing Parameters
 
    intensity_threshold
     A float specifying the threshold for intensity artifacts. Frames where the
-    mean signal intensity across the brain exceeds the grand run mean by this
-    many standard deviations will be excluded from the model.
+    median signal intensity across the brain exceeds the grand run median by
+    this many median absolute deviations will be excluded from the model.
+
+   spike_threshold
+    A float specifying the threshold for white noise spike artifacts, or
+    ``None`` to avoid detecting spikes (a plot is produced in either case).
+    This is in the same units as the *intensity_threshold*, but spikes are
+    usually more extreme. Unlike the intensity_threshold, white noise spikes
+    will be unidirectional, but whether they are going to be positive or
+    negative deflections will depend on your scanner. Ask your physicist. 
 
    motion_threshold
     A float specifying the threshold for motion artifacts. Frames where the

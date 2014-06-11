@@ -1,6 +1,8 @@
+import os.path as op
 import networkx as nx
 from nipype import Workflow, MapNode, Node, IdentityInterface
-from nipype.interfaces.base import isdefined
+from nipype.interfaces.base import (BaseInterfaceInputSpec, TraitedSpec,
+                                    File, OutputMultiPath, isdefined)
 
 
 class InputWrapper(object):
@@ -124,3 +126,29 @@ def make_subject_source(subject_list):
                 iterables=("subject_id", subject_list),
                 overwrite=True,
                 name="subj_source")
+
+
+class SingleInFile(TraitedSpec):
+
+    in_file = File(exists=True)
+
+
+class SingleOutFile(TraitedSpec):
+
+    out_file = File(exists=True)
+
+
+class ManyOutFiles(TraitedSpec):
+
+    out_files = OutputMultiPath(File(exists=True))
+
+
+def list_out_file(fname):
+    """Return a _list_outputs function for a single out_file."""
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_file"] = op.abspath(fname)
+        return outputs
+
+    return _list_outputs
