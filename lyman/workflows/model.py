@@ -29,7 +29,7 @@ imports = ["import os.path as op",
 
 def create_timeseries_model_workflow(name="model", exp_info=None):
 
-    # Default experiment parameters for generating graph inamge, testing, etc.
+    # Default experiment parameters for generating graph image, testing, etc.
     if exp_info is None:
         exp_info = default_experiment_parameters()
 
@@ -56,8 +56,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                    "report"],
                                   setup_model,
                                   imports),
-                          ["realign_file", "artifact_file", "run"],
-                          "modelsetup")
+                         ["realign_file", "artifact_file", "run"],
+                         "modelsetup")
     modelsetup.inputs.exp_info = exp_info
     if exp_info["regressor_file"] is None:
         modelsetup.inputs.regressor_file = None
@@ -94,8 +94,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     # Save the experiment info for this run
     dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
                                 dump_exp_info, imports),
-                    "timeseries",
-                    "dumpjson")
+                       "timeseries",
+                       "dumpjson")
     dumpjson.inputs.exp_info = exp_info
 
     # Report on the results of the model
@@ -184,7 +184,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         model.connect([
             (inputnode, modelsetup,
                 [("regressor_file", "regressor_file")])
-                       ])
+        ])
 
     return model, inputnode, outputnode
 
