@@ -1,4 +1,6 @@
 """Timeseries model using FSL's gaussian least squares."""
+import os
+import re
 import os.path as op
 import json
 import numpy as np
@@ -12,8 +14,16 @@ import seaborn as sns
 
 from nipype import Node, MapNode, Workflow, IdentityInterface, Function
 from nipype.interfaces import fsl
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec,
+                                    InputMultiPath, OutputMultiPath,
+                                    TraitedSpec, File, traits,
+                                    isdefined)
+from nipype.workflows.fmri.fsl import create_susan_smooth
 
-from lyman import default_experiment_parameters
+import lyman
+from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
+                         list_out_file)
 
 imports = ["import os.path as op",
            "import json",
@@ -31,12 +41,14 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
 
     # Default experiment parameters for generating graph image, testing, etc.
     if exp_info is None:
-        exp_info = default_experiment_parameters()
+        exp_info = lyman.default_experiment_parameters()
 
     # Define constant inputs
-    inputs = ["design_file", "realign_file", "artifact_file", "timeseries"]
+    inputs = ["realign_file", "artifact_file", "timeseries"]
 
-    # Possibly add the regressor file to the inputs
+    # Possibly add the design and regressor files to the inputs
+    if exp_info["design_name"] is not None:
+        inputs.append("design_file")
     if exp_info["regressor_file"] is not None:
         inputs.append("regressor_file")
 
@@ -44,28 +56,14 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     inputnode = Node(IdentityInterface(inputs), "inputs")
 
     # Set up the experimental design
-    modelsetup = MapNode(Function(["exp_info",
-                                   "design_file",
-                                   "realign_file",
-                                   "artifact_file",
-                                   "regressor_file",
-                                   "run"],
-                                  ["design_matrix_file",
-                                   "contrast_file",
-                                   "design_matrix_pkl",
-                                   "report"],
-                                  setup_model,
-                                  imports),
-                         ["realign_file", "artifact_file", "run"],
+    modelsetup = MapNode(ModelSetup(exp_info=exp_info),
+                         ["timeseries", "realign_file", "artifact_file"],
                          "modelsetup")
-    modelsetup.inputs.exp_info = exp_info
-    if exp_info["regressor_file"] is None:
-        modelsetup.inputs.regressor_file = None
 
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
                                         mask_size=5,
-                                        threshold=1000),
+                                        threshold=100),
                             ["design_file", "in_file"],
                             "modelestimate")
 
@@ -129,10 +127,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     model = Workflow(name=name)
     model.connect([
         (inputnode, modelsetup,
-            [("design_file", "design_file"),
-             ("realign_file", "realign_file"),
+            [("realign_file", "realign_file"),
              ("artifact_file", "artifact_file"),
-             (("timeseries", run_indices), "run")]),
+             ("timeseries", "timeseries")]),
         (inputnode, modelestimate,
             [("timeseries", "in_file")]),
         (inputnode, dumpjson,
@@ -180,111 +177,183 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
             [("report", "report")]),
         ])
 
+    if exp_info["design_name"] is not None:
+        model.connect(inputnode, "design_file",
+                      modelsetup, "design_file")
     if exp_info["regressor_file"] is not None:
-        model.connect([
-            (inputnode, modelsetup,
-                [("regressor_file", "regressor_file")])
-        ])
+        model.connect(inputnode, "regressor_file",
+                      modelsetup, "regressor_file")
 
     return model, inputnode, outputnode
 
 
-# Main Interface Functions
-# ========================
+# =========================================================================== #
 
 
-def setup_model(design_file, realign_file, artifact_file, regressor_file,
-                exp_info, run):
-    """Build the model design."""
-    design = pd.read_csv(design_file)
-    design = design[design["run"] == run]
+class ModelSetupInput(BaseInterfaceInputSpec):
 
-    realign = pd.read_csv(realign_file)
-    realign = realign.filter(regex="rot|trans").apply(stats.zscore)
+    exp_info = traits.Dict()
+    timeseries = File(exists=True)
+    design_file = File(exists=True)
+    realign_file = File(exists=True)
+    artifact_file = File(exists=True)
+    regressor_file = File(exists=True)
 
-    artifacts = pd.read_csv(artifact_file).max(axis=1)
-    ntp = len(artifacts)
-    tr = exp_info["TR"]
 
-    if regressor_file is None:
-        regressors = None
-    else:
-        regressors = pd.read_csv(regressor_file)
-        regressors = regressors[regressors["run"] == run].drop("run", axis=1)
-        if exp_info["regressor_names"] is not None:
-            regressors = regressors[exp_info["regressor_names"]]
-        regressors.index = np.arange(ntp) * tr
+class ModelSetupOutput(TraitedSpec):
 
-    # Set up the HRF model
-    hrf = getattr(glm, exp_info["hrf_model"])
-    hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
+    design_matrix_file = File(exists=True)
+    contrast_file = File(exists=True)
+    design_matrix_pkl = File(exists=True)
+    report = OutputMultiPath(File(exists=True))
 
-    # Keep tabs on the keyword arguments for the design matrix
-    design_kwargs = dict(confounds=realign,
-                         artifacts=artifacts,
-                         regressors=regressors,
-                         tr=tr,
-                         condition_names=exp_info["condition_names"],
-                         confound_pca=exp_info["confound_pca"],
-                         hpf_cutoff=exp_info["hpf_cutoff"])
 
-    # Create the main design matrix object
-    X = glm.DesignMatrix(design, hrf, ntp, **design_kwargs)
+class ModelSetup(BaseInterface):
 
-    # Also create one without high pass filtering
-    design_kwargs["hpf_cutoff"] = None
-    X_unfiltered = glm.DesignMatrix(design, hrf, ntp, **design_kwargs)
+    input_spec = ModelSetupInput
+    output_spec = ModelSetupOutput
 
-    # Now we build up the report, with lots of lovely images
-    sns.set()
-    design_png = op.abspath("design.png")
-    X.plot(fname=design_png)
+    def _run_interface(self, runtime):
 
-    corr_png = op.abspath("design_correlation.png")
-    X.plot_confound_correlation(fname=corr_png)
+        # Get all the information for the design
+        design_kwargs = self.build_design_information()
 
-    svd_png = op.abspath("design_singular_values.png")
-    X.plot_singular_values(fname=svd_png)
+        # Initialize the design matrix object
+        X = glm.DesignMatrix(**design_kwargs)
 
-    # Build a list of images sumarrizing the model
-    report = [design_png, corr_png, svd_png]
+        # Report on the design
+        self.design_report(self.inputs.exp_info, X, design_kwargs)
 
-    # Now plot the information loss from the filter
-    for i, (name, cols, weights) in enumerate(exp_info["contrasts"], 1):
-        C = X.contrast_vector(cols, weights)
+        # Write out the design object as a pkl to pass to the report function
+        X.to_pickle("design.pkl")
 
-        y_filt = X.design_matrix.dot(C)
-        y_unfilt = X_unfiltered.design_matrix.dot(C)
+        # Finally, write out the design files in FSL format
+        X.to_fsl_files("design", self.inputs.exp_info["contrasts"])
 
-        fs, pxx_filt = signal.welch(y_filt, 1. / tr, nperseg=ntp)
-        fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
+        return runtime
 
-        f, ax = plt.subplots(1, 1, figsize=(8, 4))
-        ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
-        ax.axvline(1.0 / exp_info["hpf_cutoff"], c="#222222", ls=":", lw=1.5)
-        ax.fill_between(fs, pxx_filt, color="#444444")
-        ax.set_xlabel("Frequency")
-        ax.set_ylabel("Spectral Density")
-        ax.set_xlim(0, .15)
-        plt.tight_layout()
-        fname = op.abspath("cope%d_filter.png" % i)
-        f.savefig(fname, dpi=100)
-        plt.close(f)
-        report.append(fname)
+    def build_design_information(self):
 
-    # Write out the X object as a pkl to pass to the report function
-    design_matrix_pkl = op.abspath("design.pkl")
-    X.to_pickle(design_matrix_pkl)
+        # Load in the design information
+        exp_info = self.inputs.exp_info
+        tr = self.inputs.exp_info["TR"]
 
-    # Finally, write out the design files in FSL format
-    design_matrix_file = op.abspath("design.mat")
-    contrast_file = op.abspath("design.con")
-    X.to_fsl_files("design", exp_info["contrasts"])
+        # Derive the length of the scan and run number from the timeseries
+        ntp = nib.load(self.inputs.timeseries).shape[-1]
+        run = int(re.search("run_(\d+)", self.inputs.timeseries).group(1))
 
-    # Close the open figures
-    plt.close("all")
+        # Get the experimental design
+        if isdefined(self.inputs.design_file):
+            design = pd.read_csv(self.inputs.design_file)
+            design = design[design["run"] == run]
+        else:
+            design = None
 
-    return design_matrix_file, contrast_file, design_matrix_pkl, report
+        # Get the motion correction parameters
+        realign = pd.read_csv(self.inputs.realign_file)
+        realign = realign.filter(regex="rot|trans").apply(stats.zscore)
+
+        # Get the image artifacts
+        artifacts = pd.read_csv(self.inputs.artifact_file).max(axis=1)
+
+        # Get the additional model regressors
+        if isdefined(self.inputs.regressor_file):
+            regressors = pd.read_csv(self.inputs.regressor_file)
+            regressors = regressors[regressors["run"] == run]
+            regressors = regressors.drop("run", axis=1)
+            if exp_info["regressor_names"] is not None:
+                regressors = regressors[exp_info["regressor_names"]]
+            regressors.index = np.arange(ntp) * tr
+        else:
+            regressors = None
+
+        # Set up the HRF model
+        hrf = getattr(glm, exp_info["hrf_model"])
+        hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
+
+        # Build a dict of keyword arguments for the design matrix
+        design_kwargs = dict(design=design,
+                             hrf_model=hrf,
+                             ntp=ntp,
+                             tr=tr,
+                             confounds=realign,
+                             artifacts=artifacts,
+                             regressors=regressors,
+                             condition_names=exp_info["condition_names"],
+                             confound_pca=exp_info["confound_pca"],
+                             hpf_cutoff=exp_info["hpf_cutoff"])
+
+        return design_kwargs
+
+    def design_report(self, exp_info, X, design_kwargs):
+        """Generate static images summarizing the design."""
+        # Plot the design itself
+        design_png = op.abspath("design.png")
+        X.plot(fname=design_png, close=True)
+
+        with sns.axes_style("whitegrid"):
+            # Plot the eigenvalue spectrum
+            svd_png = op.abspath("design_singular_values.png")
+            X.plot_singular_values(fname=svd_png, close=True)
+
+            # Plot the correlations between design elements and confounds
+            corr_png = op.abspath("design_correlation.png")
+            if design_kwargs["design"] is None:
+                with open(corr_png, "wb"):
+                    pass
+            else:
+                X.plot_confound_correlation(fname=corr_png, close=True)
+
+        # Build a list of images sumarrizing the model
+        report = [design_png, corr_png, svd_png]
+
+        # Now plot the information loss from the high-pass filter
+        design_kwargs["hpf_cutoff"] = None
+        X_unfiltered = glm.DesignMatrix(**design_kwargs)
+        tr = design_kwargs["tr"]
+        ntp = design_kwargs["ntp"]
+
+        # Plot for each contrast
+        for i, (name, cols, weights) in enumerate(exp_info["contrasts"], 1):
+
+            # Compute the contrast predictors
+            C = X.contrast_vector(cols, weights)
+            y_filt = X.design_matrix.dot(C)
+            y_unfilt = X_unfiltered.design_matrix.dot(C)
+
+            # Compute the spectral density for filtered and unfiltered
+            fs, pxx_filt = signal.welch(y_filt, 1. / tr, nperseg=ntp)
+            fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
+
+            # Draw the spectral density
+            f, ax = plt.subplots(figsize=(9, 3))
+            ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
+            ax.axvline(1.0 / exp_info["hpf_cutoff"], c=".3", ls=":", lw=1.5)
+            ax.fill_between(fs, pxx_filt, color=".5")
+
+            # Label the plot
+            ax.set(xlabel="Frequency",
+                   ylabel="Spectral Density",
+                   xlim=(0, .15))
+            plt.tight_layout()
+
+            # Save the plot
+            fname = op.abspath("cope%d_filter.png" % i)
+            f.savefig(fname, dpi=100)
+            plt.close(f)
+            report.append(fname)
+
+        # Store the report files for later
+        self.report_files = report
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["report"] = self.report_files
+        outputs["contrast_file"] = op.abspath("design.con")
+        outputs["design_matrix_pkl"] = op.abspath("design.pkl")
+        outputs["design_matrix_file"] = op.abspath("design.mat")
+        return outputs
 
 
 def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
@@ -454,16 +523,3 @@ def dump_exp_info(exp_info, timeseries):
     with open(json_file, "w") as fp:
         json.dump(exp_info, fp, sort_keys=True, indent=2)
     return json_file
-
-
-# Smaller helper functions
-# ========================
-
-
-def run_indices(ts_files):
-    """Find the run numbers associated with timeseries files."""
-    import re
-    if not isinstance(ts_files, list):
-        ts_files = [ts_files]
-    runs = [re.search("run_(\d+)", f).group(1) for f in ts_files]
-    return map(int, runs)
