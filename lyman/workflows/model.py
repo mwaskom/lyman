@@ -158,9 +158,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         model.connect(inputnode, "regressor_file",
                       modelsetup, "regressor_file")
     if exp_info["contrasts"]:
-        model.connect(contrastestimate, "zstat_files",
+        model.connect(contrastestimate, "zstats",
                       modelreport, "zstat_files")
-        modelreport.iterfields.append("zstat_files")
+        modelreport.iterfield.append("zstat_files")
 
     return model, inputnode, outputnode
 
