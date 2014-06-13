@@ -35,7 +35,7 @@ def create_reg_workflow(name="reg", space="mni",
 
     # Define the input fields flexibly
     if regtype == "model":
-        fields = ["copes", "varcopes", "sumsquares"]
+        fields = ["means", "copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
     fields.extend(["masks", "rigids"])
@@ -78,6 +78,7 @@ class RegistrationInput(BaseInterfaceInputSpec):
 
 class ModelRegInput(BaseInterfaceInputSpec):
 
+    means = InputMultiPath(File(exists=True))
     copes = InputMultiPath(File(exists=True))
     varcopes = InputMultiPath(File(exists=True))
     sumsquares = InputMultiPath(File(exists=True))
@@ -334,7 +335,9 @@ class EPIModelRegistration(EPIRegistration,
             run_varcopes = varcopes[i]
             run_sumsquares = sumsquares[i]
             run_mask = [self.inputs.masks[i]]
-            all_files = run_copes + run_varcopes + run_sumsquares + run_mask
+            run_mean = [self.inputs.means[i]]
+            all_files = (run_copes + run_varcopes +
+                         run_sumsquares + run_mask + run_mean)
 
             # Apply the transformation to each file
             for in_file in all_files:
