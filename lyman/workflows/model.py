@@ -1,15 +1,13 @@
 """Timeseries model using FSL's gaussian least squares."""
-import os
 import re
 import os.path as op
-import json
 import numpy as np
 from scipy import stats, signal
 import pandas as pd
 import nibabel as nib
 import matplotlib.pyplot as plt
-import moss
 from moss import glm
+from moss.mosaic import Mosaic
 import seaborn as sns
 
 from nipype import Node, MapNode, Workflow, IdentityInterface, Function
@@ -20,19 +18,7 @@ from nipype.interfaces.base import (BaseInterface,
                                     TraitedSpec, File, traits,
                                     isdefined)
 import lyman
-from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
-                         list_out_file)
-
-imports = ["import os.path as op",
-           "import json",
-           "import numpy as np",
-           "from scipy import stats, signal",
-           "import pandas as pd",
-           "import nibabel as nib",
-           "import matplotlib.pyplot as plt",
-           "import moss",
-           "from moss import glm",
-           "import seaborn as sns"]
+from lyman.tools import ManyOutFiles, nii_to_png
 
 
 def create_timeseries_model_workflow(name="model", exp_info=None):
@@ -83,21 +69,16 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
 
     # Save the experiment info for this run
     dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
-                                dump_exp_info, imports),
+                                dump_exp_info),
                        "timeseries",
                        "dumpjson")
     dumpjson.inputs.exp_info = exp_info
 
     # Report on the results of the model
-    modelreport = MapNode(Function(["timeseries",
-                                    "sigmasquareds_file",
-                                    "zstat_files",
-                                    "r2_files"],
-                                   ["report"],
-                                   report_model,
-                                   imports),
+    # Note: see below for a conditional iterfield
+    modelreport = MapNode(ModelReport(),
                           ["timeseries", "sigmasquareds_file",
-                           "zstat_files", "r2_files"],
+                           "tsnr_file", "r2_files"],
                           "modelreport")
 
     # Define the workflow outputs
@@ -146,10 +127,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
             [("timeseries", "timeseries")]),
         (modelestimate, modelreport,
             [("sigmasquareds", "sigmasquareds_file")]),
-        (contrastestimate, modelreport,
-            [("zstats", "zstat_files")]),
         (modelsummary, modelreport,
-            [("r2_files", "r2_files")]),
+            [("r2_files", "r2_files"),
+             ("tsnr_file", "tsnr_file")]),
         (modelsetup, outputnode,
             [("design_matrix_file", "design_mat"),
              ("contrast_file", "contrast_mat"),
@@ -168,7 +148,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
              ("ss_files", "ss_files"),
              ("tsnr_file", "tsnr_file")]),
         (modelreport, outputnode,
-            [("report", "report")]),
+            [("out_files", "report")]),
         ])
 
     if exp_info["design_name"] is not None:
@@ -177,6 +157,10 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     if exp_info["regressor_file"] is not None:
         model.connect(inputnode, "regressor_file",
                       modelsetup, "regressor_file")
+    if exp_info["contrasts"]:
+        model.connect(contrastestimate, "zstat_files",
+                      modelreport, "zstat_files")
+        modelreport.iterfields.append("zstat_files")
 
     return model, inputnode, outputnode
 
@@ -463,102 +447,97 @@ class ModelSummary(BaseInterface):
         return outputs
 
 
-def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
-    """Build the model report images, mostly from axial montages."""
-    sns.set()
+class ModelReportInput(BaseInterfaceInputSpec):
 
-    # Load the timeseries, get a mean image
-    ts_img = nib.load(timeseries)
-    ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
-    ts_data = ts_img.get_data()
-    mean_data = ts_data.mean(axis=-1)
-    mlow, mhigh = 0, moss.percentiles(mean_data, 98)
+    timeseries = File(exists=True)
+    sigmasquareds_file = File(exists=True)
+    tsnr_file = File(exists=True)
+    zstat_files = InputMultiPath(File(exists=True))
+    r2_files = InputMultiPath(File(exists=True))
 
-    # Get the plot params. OMG I need a general function for this
-    n_slices = mean_data.shape[-1]
-    n_row, n_col = n_slices // 8, 8
-    start = n_slices % n_col // 2
-    figsize = (10, 1.4 * n_row)
-    spkws = dict(nrows=n_row, ncols=n_col, figsize=figsize, facecolor="k")
-    savekws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
 
-    def add_colorbar(f, cmap, low, high, left, width, fmt):
-        cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
-        cbar_ax = f.add_axes([left, 0, width, .03])
-        cbar_ax.imshow(cbar.T, aspect="auto", cmap=cmap)
-        cbar_ax.axis("off")
-        f.text(left - .01, .018, fmt % low, ha="right", va="center",
-               color="white", size=13, weight="demibold")
-        f.text(left + width + .01, .018, fmt % high, ha="left",
-               va="center", color="white", size=13, weight="demibold")
+class ModelReport(BaseInterface):
 
-    report = []
+    input_spec = ModelReportInput
+    output_spec = ManyOutFiles
 
-    # Plot the residual image (sigmasquareds)
-    ss = nib.load(sigmasquareds_file).get_data()
-    sslow, sshigh = moss.percentiles(ss, [2, 98])
-    ss[mean_data == 0] = np.nan
-    f, axes = plt.subplots(**spkws)
-    for i, ax in enumerate(axes.ravel(), start):
-        ax.imshow(mean_data[..., i].T, cmap="gray",
-                  vmin=mlow, vmax=mhigh, interpolation="nearest")
-        ax.imshow(ss[..., i].T, cmap="PuRd_r",
-                  vmin=sslow, vmax=sshigh, alpha=.7)
-        ax.axis("off")
-    add_colorbar(f, "PuRd_r", sslow, sshigh, .35, .3, "%d")
-    ss_png = op.abspath("sigmasquareds.png")
-    f.savefig(ss_png, **savekws)
-    plt.close(f)
-    report.append(ss_png)
+    def _run_interface(self, runtime):
 
-    # Now plot each zstat file
-    for z_i, zname in enumerate(zstat_files, 1):
-        zdata = nib.load(zname).get_data()
-        pos = zdata.copy()
-        pos[pos < 2.3] = np.nan
-        neg = zdata.copy()
-        neg[neg > -2.3] = np.nan
-        zlow = 2.3
-        zhigh = max(np.abs(zdata).max(), 3.71)
-        f, axes = plt.subplots(**spkws)
-        for i, ax in enumerate(axes.ravel()):
-            ax.imshow(mean_data[..., i].T, cmap="gray",
-                      vmin=mlow, vmax=mhigh)
-            ax.imshow(pos[..., i].T, cmap="Reds_r",
-                      vmin=zlow, vmax=zhigh)
-            ax.imshow(neg[..., i].T, cmap="Blues",
-                      vmin=-zhigh, vmax=-zlow)
-            ax.axis("off")
-        add_colorbar(f, "Blues", -zhigh, -zlow, .15, .3, "%.1f")
-        add_colorbar(f, "Reds_r", zlow, zhigh, .55, .3, "%.1f")
+        # Load the sigmasquareds and use it to infer the model mask
+        var_img = nib.load(self.inputs.sigmasquareds_file).get_data()
+        self.mask = (var_img > 0).astype(np.int16)
 
-        fname = op.abspath("zstat%d.png" % z_i)
-        f.savefig(fname, **savekws)
-        plt.close(f)
-        report.append(fname)
+        # Load the timeseries and take the mean over time for a background
+        ts_img = nib.load(self.inputs.timeseries)
+        self.mean = nib.Nifti1Image(ts_img.get_data().mean(axis=-1),
+                                    ts_img.get_affine(),
+                                    ts_img.get_header())
 
-    # Now the r_2 files
-    for rname, cmap in zip(r2_files, ["GnBu_r", "YlGn_r", "OrRd_r"]):
-        data = nib.load(rname).get_data()
-        rhigh = moss.percentiles(np.nan_to_num(data), 99)
-        f, axes = plt.subplots(**spkws)
-        for i, ax in enumerate(axes.ravel(), start):
-            ax.imshow(mean_data[..., i].T, cmap="gray",
-                      vmin=mlow, vmax=mhigh, interpolation="nearest")
-            ax.imshow(data[..., i].T, cmap=cmap, vmin=0, vmax=rhigh, alpha=.7)
-            ax.axis("off")
-        add_colorbar(f, cmap, 0, rhigh, .35, .3, "%.2f")
+        # Set up the output list
+        self.out_files = []
 
-        fname = op.abspath(op.basename(rname).replace(".nii.gz", ".png"))
-        f.savefig(fname, **savekws)
-        plt.close(f)
-        report.append(fname)
+        # Plot the data
+        self.plot_residuals()
+        self.plot_rsquareds()
+        self.plot_tsnr()
+        if isdefined(self.inputs.zstat_files):
+            self.plot_zstats()
 
-    return report
+        return runtime
+
+    def plot_residuals(self):
+        """Plot the variance of the model residuals across time."""
+        ss = self.inputs.sigmasquareds_file
+        m = Mosaic(self.mean, ss, self.mask, step=1)
+        m.plot_overlay("cube:.8:.2", 0, alpha=.6, fmt="%d")
+        png_name = nii_to_png(ss)
+        m.savefig(png_name)
+        m.close()
+        self.out_files.append(png_name)
+
+    def plot_tsnr(self):
+
+        tsnr = self.inputs.tsnr_file
+        m = Mosaic(self.mean, tsnr, self.mask, step=1)
+        m.plot_overlay("cube:1.9:.5", 0, alpha=1, fmt="%d")
+        png_name = nii_to_png(tsnr)
+        m.savefig(png_name)
+        m.close()
+        self.out_files.append(png_name)
+
+    def plot_rsquareds(self):
+        """Plot the full, main, and confound R squared maps."""
+        cmaps = ["cube:2:0", "cube:2.6:0", "cube:1.5:0"]
+        for r2_file, cmap in zip(self.inputs.r2_files, cmaps):
+            m = Mosaic(self.mean, r2_file, self.mask, step=1)
+            m.plot_overlay(cmap, 0, alpha=.6)
+            png_name = nii_to_png(r2_file)
+            m.savefig(png_name)
+            m.close()
+            self.out_files.append(png_name)
+
+    def plot_zstats(self):
+        """Plot the positive and negative z stats with a low threshold."""
+        for z_file in self.inputs.zstat_files:
+            m = Mosaic(self.mean, z_file, self.mask, step=1)
+            m.plot_activation(pos_cmap="Reds_r", neg_cmap="Blues",
+                              thresh=1.7, alpha=.85)
+            png_name = nii_to_png(z_file)
+            m.savefig(png_name)
+            m.close()
+            self.out_files.append(png_name)
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_files"] = self.out_files
+        return outputs
 
 
 def dump_exp_info(exp_info, timeseries):
     """Dump the exp_info dict into a json file."""
+    import os.path as op
+    import json
     json_file = op.abspath("experiment_info.json")
     with open(json_file, "w") as fp:
         json.dump(exp_info, fp, sort_keys=True, indent=2)

@@ -33,6 +33,22 @@ v0.0.2 (??)
 
     - Otherwise updated the preproc report with better summary figures.
 
+- Updated the timeseries model workflow in several ways
+
+    - It should now be possible to run the model workflow on task-free data
+      (i.e. for functional connectivity analysis) by setting "``design_name``"
+      to ``None`` in the experiment file.
+
+    - Added computation and reporting of residual tSNR.
+
+    - Improved the colormaps used for reporting summary statistics about the
+      mode (residual variance, R squared, etc.)
+
+    - Improved the plot showing correlations between confound and task
+      variables
+
+    - Otherwise improved the logic and testing of the model workflow.
+
 - Updated the mixed effects model reporting and simplified the workflow graph.
 
     - The boxplot of COPE effect sizes in the mixed effects report is now taken

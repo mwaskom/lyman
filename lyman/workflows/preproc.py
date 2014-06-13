@@ -703,7 +703,7 @@ class MaskReport(BaseInterface):
                                      light=1, dark=0)
         m = Mosaic(self.inputs.mean_file, self.inputs.mean_file,
                    self.inputs.mask_file, step=1)
-        m.plot_overlay(vmin=0, cmap=cmap)
+        m.plot_overlay(vmin=0, cmap=cmap, fmt="%d")
         m.savefig("mean_func.png")
         m.close()
 
