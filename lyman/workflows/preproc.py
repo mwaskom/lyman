@@ -307,7 +307,8 @@ def create_skullstrip_workflow(name="skullstrip"):
     stripts = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripts")
 
     # Use the mask to skullstrip the mean image
-    stripmean = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripmean")
+    stripmean = MapNode(fs.ApplyMask(out_file="mean_func.nii.gz"),
+                        ["in_file", "mask_file"], "stripmean")
 
     # Generate images summarizing the skullstrip and resulting data
     reportmask = MapNode(MaskReport(), ["mask_file", "orig_file", "mean_file"],
