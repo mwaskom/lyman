@@ -270,8 +270,10 @@ def main(arglist):
         copes=op.join(ffx_base, "cope*" + ext),
         varcopes=op.join(ffx_base, "varcope*" + ext),
         masks=op.join(ffx_base, "functional_mask" + ext),
+        means=op.join(ffx_base, "mean_func" + ext),
         dofs="{subject_id}/model/{smoothing}/run_*/results/dof",
         ss_files=op.join(ffx_base, "ss*" + ext),
+        timeseries="{subject_id}/preproc/run_*/{smoothing}_timeseries.nii.gz",
                          )
     ffx_lists = ffx_templates.keys()
 
