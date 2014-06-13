@@ -19,8 +19,6 @@ from nipype.interfaces.base import (BaseInterface,
                                     InputMultiPath, OutputMultiPath,
                                     TraitedSpec, File, traits,
                                     isdefined)
-from nipype.workflows.fmri.fsl import create_susan_smooth
-
 import lyman
 from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
                          list_out_file)
@@ -76,18 +74,12 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                 "sigmasquareds"],
                                "contrastestimate")
 
-    calcrsquared = MapNode(Function(["design_matrix_pkl",
-                                     "timeseries",
-                                     "pe_files"],
-                                    ["r2_files",
-                                     "ss_files"],
-                                    compute_rsquareds,
-                                    imports),
+    # Compute summary statistics about the model fit
+    modelsummary = MapNode(ModelSummary(),
                            ["design_matrix_pkl",
                             "timeseries",
                             "pe_files"],
-                           "calcrsquared")
-    calcrsquared.plugin_args = dict(qsub_args="-l h_vmem=8G")
+                           "modelsummary")
 
     # Save the experiment info for this run
     dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
@@ -115,6 +107,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                          "zstats",
                                          "r2_files",
                                          "ss_files",
+                                         "tsnr_file",
                                          "report",
                                          "design_mat",
                                          "contrast_mat",
@@ -143,11 +136,11 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
              ("sigmasquareds", "sigmasquareds")]),
         (modelsetup, contrastestimate,
             [("contrast_file", "tcon_file")]),
-        (modelsetup, calcrsquared,
+        (modelsetup, modelsummary,
             [("design_matrix_pkl", "design_matrix_pkl")]),
-        (inputnode, calcrsquared,
+        (inputnode, modelsummary,
             [("timeseries", "timeseries")]),
-        (modelestimate, calcrsquared,
+        (modelestimate, modelsummary,
             [("param_estimates", "pe_files")]),
         (inputnode, modelreport,
             [("timeseries", "timeseries")]),
@@ -155,7 +148,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
             [("sigmasquareds", "sigmasquareds_file")]),
         (contrastestimate, modelreport,
             [("zstats", "zstat_files")]),
-        (calcrsquared, modelreport,
+        (modelsummary, modelreport,
             [("r2_files", "r2_files")]),
         (modelsetup, outputnode,
             [("design_matrix_file", "design_mat"),
@@ -170,9 +163,10 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
             [("copes", "copes"),
              ("varcopes", "varcopes"),
              ("zstats", "zstats")]),
-        (calcrsquared, outputnode,
+        (modelsummary, outputnode,
             [("r2_files", "r2_files"),
-             ("ss_files", "ss_files")]),
+             ("ss_files", "ss_files"),
+             ("tsnr_file", "tsnr_file")]),
         (modelreport, outputnode,
             [("report", "report")]),
         ])
@@ -356,71 +350,117 @@ class ModelSetup(BaseInterface):
         return outputs
 
 
-def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
-    """Compute partial r2 for various parts of the design matrix."""
-    X = glm.DesignMatrix.from_pickle(design_matrix_pkl)
+class ModelSummaryInput(BaseInterfaceInputSpec):
 
-    # Load the timeseries
-    ts_img = nib.load(timeseries)
-    ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
-    y = ts_img.get_data().reshape(-1, ts_img.shape[-1]).T
-    y -= y.mean(axis=0)
+    design_matrix_pkl = File(exists=True)
+    timeseries = File(exists=True)
+    pe_files = InputMultiPath(File(exists=True))
 
-    outshape = ts_img.shape[:3]
 
-    # Load the parameter estimates
-    pes = [nib.load(f).get_data()[..., np.newaxis] for f in pe_files]
-    pes = np.concatenate(pes, axis=3).reshape(-1, len(pe_files)).T
+class ModelSummaryOutput(TraitedSpec):
 
-    # Get the sum of squares of the data
-    ybar = y.mean(axis=0)
-    sstot = np.square(y - ybar).sum(axis=0)
+    r2_files = OutputMultiPath(File(exists=True))
+    ss_files = OutputMultiPath(File(exists=True))
+    tsnr_file = File(exists=True)
 
-    # Store the sum of squares
-    sstot_img = nib.Nifti1Image(sstot.reshape(outshape),
-                                ts_aff, ts_header)
-    sstot_file = op.abspath("sstot.nii.gz")
-    sstot_img.to_filename(sstot_file)
 
-    # Now get the r2 for the full model
-    yhat_full = X.design_matrix.dot(pes)
-    ssres_full = np.square(yhat_full - y).sum(axis=0)
-    r2_full = (1 - ssres_full / sstot).reshape(outshape)
+class ModelSummary(BaseInterface):
 
-    full_img = nib.Nifti1Image(r2_full, ts_aff, ts_header)
-    full_file = op.abspath("r2_full.nii.gz")
-    full_img.to_filename(full_file)
+    input_spec = ModelSummaryInput
+    output_spec = ModelSummaryOutput
 
-    ssres_full_img = nib.Nifti1Image(ssres_full.reshape(outshape),
-                                     ts_aff, ts_header)
-    ssres_full_file = op.abspath("ssres_full.nii.gz")
-    ssres_full_img.to_filename(ssres_full_file)
+    def _run_interface(self, runtime):
 
-    # Next just the "main" submatrix(conditions and regressors)
-    yhat_main = X.design_matrix.dot(pes * X.main_vector)
-    ssres_main = np.square(yhat_main - y).sum(axis=0)
-    r2_main = (1 - ssres_main / sstot).reshape(outshape)
+        # Load the design matrix object
+        X = glm.DesignMatrix.from_pickle(self.inputs.design_matrix_pkl)
 
-    main_img = nib.Nifti1Image(r2_main, ts_aff, ts_header)
-    main_file = op.abspath("r2_main.nii.gz")
-    main_img.to_filename(main_file)
+        # Load and de-mean the timeseries
+        ts_img = nib.load(self.inputs.timeseries)
+        ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
+        y = ts_img.get_data()
+        ybar = y.mean(axis=-1)[..., np.newaxis]
+        y -= ybar
+        self.y = y
 
-    ssres_main_img = nib.Nifti1Image(ssres_main.reshape(outshape),
-                                     ts_aff, ts_header)
-    ssres_main_file = op.abspath("ssres_main.nii.gz")
-    ssres_main_img.to_filename(ssres_main_file)
+        # Store the image attributes
+        self.affine = ts_aff
+        self.header = ts_header
 
-    # Finally the confound submatrix
-    yhat_conf = X.design_matrix.dot(pes * X.confound_vector)
-    ssres_conf = np.square(yhat_conf - y).sum(axis=0)
-    r2_conf = (1 - ssres_conf / sstot).reshape(outshape)
+        # Load the parameter estimates, make 4D, and concatenate
+        pes = [nib.load(f).get_data() for f in self.inputs.pe_files]
+        pes = [pe[..., np.newaxis] for pe in pes]
+        pes = np.concatenate(pes, axis=-1)
 
-    conf_img = nib.Nifti1Image(r2_conf, ts_aff, ts_header)
-    conf_file = op.abspath("r2_confound.nii.gz")
-    conf_img.to_filename(conf_file)
+        # Compute and save the total sum of squares
+        self.sstot = np.sum(np.square(y), axis=-1)
+        self.save_image(self.sstot, "sstot")
 
-    return ([full_file, main_file, conf_file],
-            [sstot_file, ssres_full_file, ssres_main_file])
+        # Compute the full model r squared
+        yhat_full = self.dot_by_slice(X, pes)
+        ss_full, r2_full = self.compute_r2(yhat_full)
+        self.save_image(ss_full, "ssres_full")
+        self.save_image(r2_full, "r2_full")
+
+        # Compute the main model r squared
+        yhat_main = self.dot_by_slice(X, pes, "main")
+        ss_main, r2_main = self.compute_r2(yhat_main)
+        self.save_image(ss_main, "ssres_main")
+        self.save_image(r2_main, "r2_main")
+
+        # Compute the confound model r squared
+        yhat_confound = self.dot_by_slice(X, pes, "confound")
+        _, r2_confound = self.compute_r2(yhat_confound)
+        self.save_image(r2_confound, "r2_confound")
+
+        # Compute and save the residual tSNR
+        std = np.sqrt(ss_full / len(y))
+        tsnr = np.squeeze(ybar) / std
+        self.save_image(tsnr, "tsnr")
+
+        return runtime
+
+    def save_image(self, data, fname):
+        """Save data to the output structure."""
+        img = nib.Nifti1Image(data, self.affine, self.header)
+        img.to_filename(fname + ".nii.gz")
+
+    def dot_by_slice(self, X, pes, component=None):
+        """Broadcast a dot product by image slices to balance speed/memory."""
+        if component is not None:
+            pes = pes * getattr(X, component + "_vector").T[np.newaxis,
+                                                            np.newaxis, :, :]
+        # Set up the output data structure
+        n_x, n_y, n_z, n_pe = pes.shape
+        n_t = X.design_matrix.shape[0]
+        out = np.empty((n_x, n_y, n_z, n_t))
+
+        # Do the dot product, broadcasted for each Z slice
+        for k in range(n_z):
+            slice_pe = pes[:, :, k, :].reshape(-1, n_pe).T
+            slice_dot = X.design_matrix.values.dot(slice_pe)
+            out[:, :, k, :] = slice_dot.T.reshape(n_x, n_y, n_t)
+
+        return out
+
+    def compute_r2(self, yhat):
+
+        ssres = np.sum(np.square(yhat - self.y), axis=-1)
+        r2 = 1 - ssres / self.sstot
+        return ssres, r2
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+
+        outputs["r2_files"] = [op.abspath("r2_full.nii.gz"),
+                               op.abspath("r2_main.nii.gz"),
+                               op.abspath("r2_confound.nii.gz")]
+        outputs["ss_files"] = [op.abspath("sstot.nii.gz"),
+                               op.abspath("ssres_full.nii.gz"),
+                               op.abspath("ssres_main.nii.gz")]
+        outputs["tsnr_file"] = op.abspath("tsnr.nii.gz")
+
+        return outputs
 
 
 def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
