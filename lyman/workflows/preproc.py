@@ -307,7 +307,8 @@ def create_skullstrip_workflow(name="skullstrip"):
     stripts = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripts")
 
     # Use the mask to skullstrip the mean image
-    stripmean = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripmean")
+    stripmean = MapNode(fs.ApplyMask(out_file="mean_func.nii.gz"),
+                        ["in_file", "mask_file"], "stripmean")
 
     # Generate images summarizing the skullstrip and resulting data
     reportmask = MapNode(MaskReport(), ["mask_file", "orig_file", "mean_file"],
@@ -702,7 +703,7 @@ class MaskReport(BaseInterface):
                                      light=1, dark=0)
         m = Mosaic(self.inputs.mean_file, self.inputs.mean_file,
                    self.inputs.mask_file, step=1)
-        m.plot_overlay(vmin=0, cmap=cmap)
+        m.plot_overlay(vmin=0, cmap=cmap, fmt="%d")
         m.savefig("mean_func.png")
         m.close()
 

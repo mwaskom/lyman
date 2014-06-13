@@ -1,42 +1,38 @@
 """Timeseries model using FSL's gaussian least squares."""
+import re
 import os.path as op
-import json
 import numpy as np
 from scipy import stats, signal
 import pandas as pd
 import nibabel as nib
 import matplotlib.pyplot as plt
-import moss
 from moss import glm
+from moss.mosaic import Mosaic
 import seaborn as sns
 
 from nipype import Node, MapNode, Workflow, IdentityInterface, Function
 from nipype.interfaces import fsl
-
-from lyman import default_experiment_parameters
-
-imports = ["import os.path as op",
-           "import json",
-           "import numpy as np",
-           "from scipy import stats, signal",
-           "import pandas as pd",
-           "import nibabel as nib",
-           "import matplotlib.pyplot as plt",
-           "import moss",
-           "from moss import glm",
-           "import seaborn as sns"]
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec,
+                                    InputMultiPath, OutputMultiPath,
+                                    TraitedSpec, File, traits,
+                                    isdefined)
+import lyman
+from lyman.tools import ManyOutFiles, nii_to_png
 
 
 def create_timeseries_model_workflow(name="model", exp_info=None):
 
-    # Default experiment parameters for generating graph inamge, testing, etc.
+    # Default experiment parameters for generating graph image, testing, etc.
     if exp_info is None:
-        exp_info = default_experiment_parameters()
+        exp_info = lyman.default_experiment_parameters()
 
     # Define constant inputs
-    inputs = ["design_file", "realign_file", "artifact_file", "timeseries"]
+    inputs = ["realign_file", "artifact_file", "timeseries"]
 
-    # Possibly add the regressor file to the inputs
+    # Possibly add the design and regressor files to the inputs
+    if exp_info["design_name"] is not None:
+        inputs.append("design_file")
     if exp_info["regressor_file"] is not None:
         inputs.append("regressor_file")
 
@@ -44,28 +40,14 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     inputnode = Node(IdentityInterface(inputs), "inputs")
 
     # Set up the experimental design
-    modelsetup = MapNode(Function(["exp_info",
-                                   "design_file",
-                                   "realign_file",
-                                   "artifact_file",
-                                   "regressor_file",
-                                   "run"],
-                                  ["design_matrix_file",
-                                   "contrast_file",
-                                   "design_matrix_pkl",
-                                   "report"],
-                                  setup_model,
-                                  imports),
-                          ["realign_file", "artifact_file", "run"],
-                          "modelsetup")
-    modelsetup.inputs.exp_info = exp_info
-    if exp_info["regressor_file"] is None:
-        modelsetup.inputs.regressor_file = None
+    modelsetup = MapNode(ModelSetup(exp_info=exp_info),
+                         ["timeseries", "realign_file", "artifact_file"],
+                         "modelsetup")
 
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
                                         mask_size=5,
-                                        threshold=1000),
+                                        threshold=100),
                             ["design_file", "in_file"],
                             "modelestimate")
 
@@ -78,36 +60,25 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                 "sigmasquareds"],
                                "contrastestimate")
 
-    calcrsquared = MapNode(Function(["design_matrix_pkl",
-                                     "timeseries",
-                                     "pe_files"],
-                                    ["r2_files",
-                                     "ss_files"],
-                                    compute_rsquareds,
-                                    imports),
+    # Compute summary statistics about the model fit
+    modelsummary = MapNode(ModelSummary(),
                            ["design_matrix_pkl",
                             "timeseries",
                             "pe_files"],
-                           "calcrsquared")
-    calcrsquared.plugin_args = dict(qsub_args="-l h_vmem=8G")
+                           "modelsummary")
 
     # Save the experiment info for this run
     dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
-                                dump_exp_info, imports),
-                    "timeseries",
-                    "dumpjson")
+                                dump_exp_info),
+                       "timeseries",
+                       "dumpjson")
     dumpjson.inputs.exp_info = exp_info
 
     # Report on the results of the model
-    modelreport = MapNode(Function(["timeseries",
-                                    "sigmasquareds_file",
-                                    "zstat_files",
-                                    "r2_files"],
-                                   ["report"],
-                                   report_model,
-                                   imports),
+    # Note: see below for a conditional iterfield
+    modelreport = MapNode(ModelReport(),
                           ["timeseries", "sigmasquareds_file",
-                           "zstat_files", "r2_files"],
+                           "tsnr_file", "r2_files"],
                           "modelreport")
 
     # Define the workflow outputs
@@ -117,6 +88,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                          "zstats",
                                          "r2_files",
                                          "ss_files",
+                                         "tsnr_file",
                                          "report",
                                          "design_mat",
                                          "contrast_mat",
@@ -129,10 +101,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     model = Workflow(name=name)
     model.connect([
         (inputnode, modelsetup,
-            [("design_file", "design_file"),
-             ("realign_file", "realign_file"),
+            [("realign_file", "realign_file"),
              ("artifact_file", "artifact_file"),
-             (("timeseries", run_indices), "run")]),
+             ("timeseries", "timeseries")]),
         (inputnode, modelestimate,
             [("timeseries", "in_file")]),
         (inputnode, dumpjson,
@@ -146,20 +117,19 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
              ("sigmasquareds", "sigmasquareds")]),
         (modelsetup, contrastestimate,
             [("contrast_file", "tcon_file")]),
-        (modelsetup, calcrsquared,
+        (modelsetup, modelsummary,
             [("design_matrix_pkl", "design_matrix_pkl")]),
-        (inputnode, calcrsquared,
+        (inputnode, modelsummary,
             [("timeseries", "timeseries")]),
-        (modelestimate, calcrsquared,
+        (modelestimate, modelsummary,
             [("param_estimates", "pe_files")]),
         (inputnode, modelreport,
             [("timeseries", "timeseries")]),
         (modelestimate, modelreport,
             [("sigmasquareds", "sigmasquareds_file")]),
-        (contrastestimate, modelreport,
-            [("zstats", "zstat_files")]),
-        (calcrsquared, modelreport,
-            [("r2_files", "r2_files")]),
+        (modelsummary, modelreport,
+            [("r2_files", "r2_files"),
+             ("tsnr_file", "tsnr_file")]),
         (modelsetup, outputnode,
             [("design_matrix_file", "design_mat"),
              ("contrast_file", "contrast_mat"),
@@ -173,297 +143,402 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
             [("copes", "copes"),
              ("varcopes", "varcopes"),
              ("zstats", "zstats")]),
-        (calcrsquared, outputnode,
+        (modelsummary, outputnode,
             [("r2_files", "r2_files"),
-             ("ss_files", "ss_files")]),
+             ("ss_files", "ss_files"),
+             ("tsnr_file", "tsnr_file")]),
         (modelreport, outputnode,
-            [("report", "report")]),
+            [("out_files", "report")]),
         ])
 
+    if exp_info["design_name"] is not None:
+        model.connect(inputnode, "design_file",
+                      modelsetup, "design_file")
     if exp_info["regressor_file"] is not None:
-        model.connect([
-            (inputnode, modelsetup,
-                [("regressor_file", "regressor_file")])
-                       ])
+        model.connect(inputnode, "regressor_file",
+                      modelsetup, "regressor_file")
+    if exp_info["contrasts"]:
+        model.connect(contrastestimate, "zstat_files",
+                      modelreport, "zstat_files")
+        modelreport.iterfields.append("zstat_files")
 
     return model, inputnode, outputnode
 
 
-# Main Interface Functions
-# ========================
+# =========================================================================== #
 
 
-def setup_model(design_file, realign_file, artifact_file, regressor_file,
-                exp_info, run):
-    """Build the model design."""
-    design = pd.read_csv(design_file)
-    design = design[design["run"] == run]
+class ModelSetupInput(BaseInterfaceInputSpec):
 
-    realign = pd.read_csv(realign_file)
-    realign = realign.filter(regex="rot|trans").apply(stats.zscore)
-
-    artifacts = pd.read_csv(artifact_file).max(axis=1)
-    ntp = len(artifacts)
-    tr = exp_info["TR"]
-
-    if regressor_file is None:
-        regressors = None
-    else:
-        regressors = pd.read_csv(regressor_file)
-        regressors = regressors[regressors["run"] == run].drop("run", axis=1)
-        if exp_info["regressor_names"] is not None:
-            regressors = regressors[exp_info["regressor_names"]]
-        regressors.index = np.arange(ntp) * tr
-
-    # Set up the HRF model
-    hrf = getattr(glm, exp_info["hrf_model"])
-    hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
-
-    # Keep tabs on the keyword arguments for the design matrix
-    design_kwargs = dict(confounds=realign,
-                         artifacts=artifacts,
-                         regressors=regressors,
-                         tr=tr,
-                         condition_names=exp_info["condition_names"],
-                         confound_pca=exp_info["confound_pca"],
-                         hpf_cutoff=exp_info["hpf_cutoff"])
-
-    # Create the main design matrix object
-    X = glm.DesignMatrix(design, hrf, ntp, **design_kwargs)
-
-    # Also create one without high pass filtering
-    design_kwargs["hpf_cutoff"] = None
-    X_unfiltered = glm.DesignMatrix(design, hrf, ntp, **design_kwargs)
-
-    # Now we build up the report, with lots of lovely images
-    sns.set()
-    design_png = op.abspath("design.png")
-    X.plot(fname=design_png)
-
-    corr_png = op.abspath("design_correlation.png")
-    X.plot_confound_correlation(fname=corr_png)
-
-    svd_png = op.abspath("design_singular_values.png")
-    X.plot_singular_values(fname=svd_png)
-
-    # Build a list of images sumarrizing the model
-    report = [design_png, corr_png, svd_png]
-
-    # Now plot the information loss from the filter
-    for i, (name, cols, weights) in enumerate(exp_info["contrasts"], 1):
-        C = X.contrast_vector(cols, weights)
-
-        y_filt = X.design_matrix.dot(C)
-        y_unfilt = X_unfiltered.design_matrix.dot(C)
-
-        fs, pxx_filt = signal.welch(y_filt, 1. / tr, nperseg=ntp)
-        fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
-
-        f, ax = plt.subplots(1, 1, figsize=(8, 4))
-        ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
-        ax.axvline(1.0 / exp_info["hpf_cutoff"], c="#222222", ls=":", lw=1.5)
-        ax.fill_between(fs, pxx_filt, color="#444444")
-        ax.set_xlabel("Frequency")
-        ax.set_ylabel("Spectral Density")
-        ax.set_xlim(0, .15)
-        plt.tight_layout()
-        fname = op.abspath("cope%d_filter.png" % i)
-        f.savefig(fname, dpi=100)
-        plt.close(f)
-        report.append(fname)
-
-    # Write out the X object as a pkl to pass to the report function
-    design_matrix_pkl = op.abspath("design.pkl")
-    X.to_pickle(design_matrix_pkl)
-
-    # Finally, write out the design files in FSL format
-    design_matrix_file = op.abspath("design.mat")
-    contrast_file = op.abspath("design.con")
-    X.to_fsl_files("design", exp_info["contrasts"])
-
-    # Close the open figures
-    plt.close("all")
-
-    return design_matrix_file, contrast_file, design_matrix_pkl, report
+    exp_info = traits.Dict()
+    timeseries = File(exists=True)
+    design_file = File(exists=True)
+    realign_file = File(exists=True)
+    artifact_file = File(exists=True)
+    regressor_file = File(exists=True)
 
 
-def compute_rsquareds(design_matrix_pkl, timeseries, pe_files):
-    """Compute partial r2 for various parts of the design matrix."""
-    X = glm.DesignMatrix.from_pickle(design_matrix_pkl)
+class ModelSetupOutput(TraitedSpec):
 
-    # Load the timeseries
-    ts_img = nib.load(timeseries)
-    ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
-    y = ts_img.get_data().reshape(-1, ts_img.shape[-1]).T
-    y -= y.mean(axis=0)
-
-    outshape = ts_img.shape[:3]
-
-    # Load the parameter estimates
-    pes = [nib.load(f).get_data()[..., np.newaxis] for f in pe_files]
-    pes = np.concatenate(pes, axis=3).reshape(-1, len(pe_files)).T
-
-    # Get the sum of squares of the data
-    ybar = y.mean(axis=0)
-    sstot = np.square(y - ybar).sum(axis=0)
-
-    # Store the sum of squares
-    sstot_img = nib.Nifti1Image(sstot.reshape(outshape),
-                                ts_aff, ts_header)
-    sstot_file = op.abspath("sstot.nii.gz")
-    sstot_img.to_filename(sstot_file)
-
-    # Now get the r2 for the full model
-    yhat_full = X.design_matrix.dot(pes)
-    ssres_full = np.square(yhat_full - y).sum(axis=0)
-    r2_full = (1 - ssres_full / sstot).reshape(outshape)
-
-    full_img = nib.Nifti1Image(r2_full, ts_aff, ts_header)
-    full_file = op.abspath("r2_full.nii.gz")
-    full_img.to_filename(full_file)
-
-    ssres_full_img = nib.Nifti1Image(ssres_full.reshape(outshape),
-                                     ts_aff, ts_header)
-    ssres_full_file = op.abspath("ssres_full.nii.gz")
-    ssres_full_img.to_filename(ssres_full_file)
-
-    # Next just the "main" submatrix(conditions and regressors)
-    yhat_main = X.design_matrix.dot(pes * X.main_vector)
-    ssres_main = np.square(yhat_main - y).sum(axis=0)
-    r2_main = (1 - ssres_main / sstot).reshape(outshape)
-
-    main_img = nib.Nifti1Image(r2_main, ts_aff, ts_header)
-    main_file = op.abspath("r2_main.nii.gz")
-    main_img.to_filename(main_file)
-
-    ssres_main_img = nib.Nifti1Image(ssres_main.reshape(outshape),
-                                     ts_aff, ts_header)
-    ssres_main_file = op.abspath("ssres_main.nii.gz")
-    ssres_main_img.to_filename(ssres_main_file)
-
-    # Finally the confound submatrix
-    yhat_conf = X.design_matrix.dot(pes * X.confound_vector)
-    ssres_conf = np.square(yhat_conf - y).sum(axis=0)
-    r2_conf = (1 - ssres_conf / sstot).reshape(outshape)
-
-    conf_img = nib.Nifti1Image(r2_conf, ts_aff, ts_header)
-    conf_file = op.abspath("r2_confound.nii.gz")
-    conf_img.to_filename(conf_file)
-
-    return ([full_file, main_file, conf_file],
-            [sstot_file, ssres_full_file, ssres_main_file])
+    design_matrix_file = File(exists=True)
+    contrast_file = File(exists=True)
+    design_matrix_pkl = File(exists=True)
+    report = OutputMultiPath(File(exists=True))
 
 
-def report_model(timeseries, sigmasquareds_file, zstat_files, r2_files):
-    """Build the model report images, mostly from axial montages."""
-    sns.set()
+class ModelSetup(BaseInterface):
 
-    # Load the timeseries, get a mean image
-    ts_img = nib.load(timeseries)
-    ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
-    ts_data = ts_img.get_data()
-    mean_data = ts_data.mean(axis=-1)
-    mlow, mhigh = 0, moss.percentiles(mean_data, 98)
+    input_spec = ModelSetupInput
+    output_spec = ModelSetupOutput
 
-    # Get the plot params. OMG I need a general function for this
-    n_slices = mean_data.shape[-1]
-    n_row, n_col = n_slices // 8, 8
-    start = n_slices % n_col // 2
-    figsize = (10, 1.4 * n_row)
-    spkws = dict(nrows=n_row, ncols=n_col, figsize=figsize, facecolor="k")
-    savekws = dict(dpi=100, bbox_inches="tight", facecolor="k", edgecolor="k")
+    def _run_interface(self, runtime):
 
-    def add_colorbar(f, cmap, low, high, left, width, fmt):
-        cbar = np.outer(np.arange(0, 1, .01), np.ones(10))
-        cbar_ax = f.add_axes([left, 0, width, .03])
-        cbar_ax.imshow(cbar.T, aspect="auto", cmap=cmap)
-        cbar_ax.axis("off")
-        f.text(left - .01, .018, fmt % low, ha="right", va="center",
-               color="white", size=13, weight="demibold")
-        f.text(left + width + .01, .018, fmt % high, ha="left",
-               va="center", color="white", size=13, weight="demibold")
+        # Get all the information for the design
+        design_kwargs = self.build_design_information()
 
-    report = []
+        # Initialize the design matrix object
+        X = glm.DesignMatrix(**design_kwargs)
 
-    # Plot the residual image (sigmasquareds)
-    ss = nib.load(sigmasquareds_file).get_data()
-    sslow, sshigh = moss.percentiles(ss, [2, 98])
-    ss[mean_data == 0] = np.nan
-    f, axes = plt.subplots(**spkws)
-    for i, ax in enumerate(axes.ravel(), start):
-        ax.imshow(mean_data[..., i].T, cmap="gray",
-                  vmin=mlow, vmax=mhigh, interpolation="nearest")
-        ax.imshow(ss[..., i].T, cmap="PuRd_r",
-                  vmin=sslow, vmax=sshigh, alpha=.7)
-        ax.axis("off")
-    add_colorbar(f, "PuRd_r", sslow, sshigh, .35, .3, "%d")
-    ss_png = op.abspath("sigmasquareds.png")
-    f.savefig(ss_png, **savekws)
-    plt.close(f)
-    report.append(ss_png)
+        # Report on the design
+        self.design_report(self.inputs.exp_info, X, design_kwargs)
 
-    # Now plot each zstat file
-    for z_i, zname in enumerate(zstat_files, 1):
-        zdata = nib.load(zname).get_data()
-        pos = zdata.copy()
-        pos[pos < 2.3] = np.nan
-        neg = zdata.copy()
-        neg[neg > -2.3] = np.nan
-        zlow = 2.3
-        zhigh = max(np.abs(zdata).max(), 3.71)
-        f, axes = plt.subplots(**spkws)
-        for i, ax in enumerate(axes.ravel()):
-            ax.imshow(mean_data[..., i].T, cmap="gray",
-                      vmin=mlow, vmax=mhigh)
-            ax.imshow(pos[..., i].T, cmap="Reds_r",
-                      vmin=zlow, vmax=zhigh)
-            ax.imshow(neg[..., i].T, cmap="Blues",
-                      vmin=-zhigh, vmax=-zlow)
-            ax.axis("off")
-        add_colorbar(f, "Blues", -zhigh, -zlow, .15, .3, "%.1f")
-        add_colorbar(f, "Reds_r", zlow, zhigh, .55, .3, "%.1f")
+        # Write out the design object as a pkl to pass to the report function
+        X.to_pickle("design.pkl")
 
-        fname = op.abspath("zstat%d.png" % z_i)
-        f.savefig(fname, **savekws)
-        plt.close(f)
-        report.append(fname)
+        # Finally, write out the design files in FSL format
+        X.to_fsl_files("design", self.inputs.exp_info["contrasts"])
 
-    # Now the r_2 files
-    for rname, cmap in zip(r2_files, ["GnBu_r", "YlGn_r", "OrRd_r"]):
-        data = nib.load(rname).get_data()
-        rhigh = moss.percentiles(np.nan_to_num(data), 99)
-        f, axes = plt.subplots(**spkws)
-        for i, ax in enumerate(axes.ravel(), start):
-            ax.imshow(mean_data[..., i].T, cmap="gray",
-                      vmin=mlow, vmax=mhigh, interpolation="nearest")
-            ax.imshow(data[..., i].T, cmap=cmap, vmin=0, vmax=rhigh, alpha=.7)
-            ax.axis("off")
-        add_colorbar(f, cmap, 0, rhigh, .35, .3, "%.2f")
+        return runtime
 
-        fname = op.abspath(op.basename(rname).replace(".nii.gz", ".png"))
-        f.savefig(fname, **savekws)
-        plt.close(f)
-        report.append(fname)
+    def build_design_information(self):
 
-    return report
+        # Load in the design information
+        exp_info = self.inputs.exp_info
+        tr = self.inputs.exp_info["TR"]
+
+        # Derive the length of the scan and run number from the timeseries
+        ntp = nib.load(self.inputs.timeseries).shape[-1]
+        run = int(re.search("run_(\d+)", self.inputs.timeseries).group(1))
+
+        # Get the experimental design
+        if isdefined(self.inputs.design_file):
+            design = pd.read_csv(self.inputs.design_file)
+            design = design[design["run"] == run]
+        else:
+            design = None
+
+        # Get the motion correction parameters
+        realign = pd.read_csv(self.inputs.realign_file)
+        realign = realign.filter(regex="rot|trans").apply(stats.zscore)
+
+        # Get the image artifacts
+        artifacts = pd.read_csv(self.inputs.artifact_file).max(axis=1)
+
+        # Get the additional model regressors
+        if isdefined(self.inputs.regressor_file):
+            regressors = pd.read_csv(self.inputs.regressor_file)
+            regressors = regressors[regressors["run"] == run]
+            regressors = regressors.drop("run", axis=1)
+            if exp_info["regressor_names"] is not None:
+                regressors = regressors[exp_info["regressor_names"]]
+            regressors.index = np.arange(ntp) * tr
+        else:
+            regressors = None
+
+        # Set up the HRF model
+        hrf = getattr(glm, exp_info["hrf_model"])
+        hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
+
+        # Build a dict of keyword arguments for the design matrix
+        design_kwargs = dict(design=design,
+                             hrf_model=hrf,
+                             ntp=ntp,
+                             tr=tr,
+                             confounds=realign,
+                             artifacts=artifacts,
+                             regressors=regressors,
+                             condition_names=exp_info["condition_names"],
+                             confound_pca=exp_info["confound_pca"],
+                             hpf_cutoff=exp_info["hpf_cutoff"])
+
+        return design_kwargs
+
+    def design_report(self, exp_info, X, design_kwargs):
+        """Generate static images summarizing the design."""
+        # Plot the design itself
+        design_png = op.abspath("design.png")
+        X.plot(fname=design_png, close=True)
+
+        with sns.axes_style("whitegrid"):
+            # Plot the eigenvalue spectrum
+            svd_png = op.abspath("design_singular_values.png")
+            X.plot_singular_values(fname=svd_png, close=True)
+
+            # Plot the correlations between design elements and confounds
+            corr_png = op.abspath("design_correlation.png")
+            if design_kwargs["design"] is None:
+                with open(corr_png, "wb"):
+                    pass
+            else:
+                X.plot_confound_correlation(fname=corr_png, close=True)
+
+        # Build a list of images sumarrizing the model
+        report = [design_png, corr_png, svd_png]
+
+        # Now plot the information loss from the high-pass filter
+        design_kwargs["hpf_cutoff"] = None
+        X_unfiltered = glm.DesignMatrix(**design_kwargs)
+        tr = design_kwargs["tr"]
+        ntp = design_kwargs["ntp"]
+
+        # Plot for each contrast
+        for i, (name, cols, weights) in enumerate(exp_info["contrasts"], 1):
+
+            # Compute the contrast predictors
+            C = X.contrast_vector(cols, weights)
+            y_filt = X.design_matrix.dot(C)
+            y_unfilt = X_unfiltered.design_matrix.dot(C)
+
+            # Compute the spectral density for filtered and unfiltered
+            fs, pxx_filt = signal.welch(y_filt, 1. / tr, nperseg=ntp)
+            fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
+
+            # Draw the spectral density
+            f, ax = plt.subplots(figsize=(9, 3))
+            ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
+            ax.axvline(1.0 / exp_info["hpf_cutoff"], c=".3", ls=":", lw=1.5)
+            ax.fill_between(fs, pxx_filt, color=".5")
+
+            # Label the plot
+            ax.set(xlabel="Frequency",
+                   ylabel="Spectral Density",
+                   xlim=(0, .15))
+            plt.tight_layout()
+
+            # Save the plot
+            fname = op.abspath("cope%d_filter.png" % i)
+            f.savefig(fname, dpi=100)
+            plt.close(f)
+            report.append(fname)
+
+        # Store the report files for later
+        self.report_files = report
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["report"] = self.report_files
+        outputs["contrast_file"] = op.abspath("design.con")
+        outputs["design_matrix_pkl"] = op.abspath("design.pkl")
+        outputs["design_matrix_file"] = op.abspath("design.mat")
+        return outputs
+
+
+class ModelSummaryInput(BaseInterfaceInputSpec):
+
+    design_matrix_pkl = File(exists=True)
+    timeseries = File(exists=True)
+    pe_files = InputMultiPath(File(exists=True))
+
+
+class ModelSummaryOutput(TraitedSpec):
+
+    r2_files = OutputMultiPath(File(exists=True))
+    ss_files = OutputMultiPath(File(exists=True))
+    tsnr_file = File(exists=True)
+
+
+class ModelSummary(BaseInterface):
+
+    input_spec = ModelSummaryInput
+    output_spec = ModelSummaryOutput
+
+    def _run_interface(self, runtime):
+
+        # Load the design matrix object
+        X = glm.DesignMatrix.from_pickle(self.inputs.design_matrix_pkl)
+
+        # Load and de-mean the timeseries
+        ts_img = nib.load(self.inputs.timeseries)
+        ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
+        y = ts_img.get_data()
+        ybar = y.mean(axis=-1)[..., np.newaxis]
+        y -= ybar
+        self.y = y
+
+        # Store the image attributes
+        self.affine = ts_aff
+        self.header = ts_header
+
+        # Load the parameter estimates, make 4D, and concatenate
+        pes = [nib.load(f).get_data() for f in self.inputs.pe_files]
+        pes = [pe[..., np.newaxis] for pe in pes]
+        pes = np.concatenate(pes, axis=-1)
+
+        # Compute and save the total sum of squares
+        self.sstot = np.sum(np.square(y), axis=-1)
+        self.save_image(self.sstot, "sstot")
+
+        # Compute the full model r squared
+        yhat_full = self.dot_by_slice(X, pes)
+        ss_full, r2_full = self.compute_r2(yhat_full)
+        self.save_image(ss_full, "ssres_full")
+        self.save_image(r2_full, "r2_full")
+
+        # Compute the main model r squared
+        yhat_main = self.dot_by_slice(X, pes, "main")
+        ss_main, r2_main = self.compute_r2(yhat_main)
+        self.save_image(ss_main, "ssres_main")
+        self.save_image(r2_main, "r2_main")
+
+        # Compute the confound model r squared
+        yhat_confound = self.dot_by_slice(X, pes, "confound")
+        _, r2_confound = self.compute_r2(yhat_confound)
+        self.save_image(r2_confound, "r2_confound")
+
+        # Compute and save the residual tSNR
+        std = np.sqrt(ss_full / len(y))
+        tsnr = np.squeeze(ybar) / std
+        self.save_image(tsnr, "tsnr")
+
+        return runtime
+
+    def save_image(self, data, fname):
+        """Save data to the output structure."""
+        img = nib.Nifti1Image(data, self.affine, self.header)
+        img.to_filename(fname + ".nii.gz")
+
+    def dot_by_slice(self, X, pes, component=None):
+        """Broadcast a dot product by image slices to balance speed/memory."""
+        if component is not None:
+            pes = pes * getattr(X, component + "_vector").T[np.newaxis,
+                                                            np.newaxis, :, :]
+        # Set up the output data structure
+        n_x, n_y, n_z, n_pe = pes.shape
+        n_t = X.design_matrix.shape[0]
+        out = np.empty((n_x, n_y, n_z, n_t))
+
+        # Do the dot product, broadcasted for each Z slice
+        for k in range(n_z):
+            slice_pe = pes[:, :, k, :].reshape(-1, n_pe).T
+            slice_dot = X.design_matrix.values.dot(slice_pe)
+            out[:, :, k, :] = slice_dot.T.reshape(n_x, n_y, n_t)
+
+        return out
+
+    def compute_r2(self, yhat):
+
+        ssres = np.sum(np.square(yhat - self.y), axis=-1)
+        r2 = 1 - ssres / self.sstot
+        return ssres, r2
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+
+        outputs["r2_files"] = [op.abspath("r2_full.nii.gz"),
+                               op.abspath("r2_main.nii.gz"),
+                               op.abspath("r2_confound.nii.gz")]
+        outputs["ss_files"] = [op.abspath("sstot.nii.gz"),
+                               op.abspath("ssres_full.nii.gz"),
+                               op.abspath("ssres_main.nii.gz")]
+        outputs["tsnr_file"] = op.abspath("tsnr.nii.gz")
+
+        return outputs
+
+
+class ModelReportInput(BaseInterfaceInputSpec):
+
+    timeseries = File(exists=True)
+    sigmasquareds_file = File(exists=True)
+    tsnr_file = File(exists=True)
+    zstat_files = InputMultiPath(File(exists=True))
+    r2_files = InputMultiPath(File(exists=True))
+
+
+class ModelReport(BaseInterface):
+
+    input_spec = ModelReportInput
+    output_spec = ManyOutFiles
+
+    def _run_interface(self, runtime):
+
+        # Load the sigmasquareds and use it to infer the model mask
+        var_img = nib.load(self.inputs.sigmasquareds_file).get_data()
+        self.mask = (var_img > 0).astype(np.int16)
+
+        # Load the timeseries and take the mean over time for a background
+        ts_img = nib.load(self.inputs.timeseries)
+        self.mean = nib.Nifti1Image(ts_img.get_data().mean(axis=-1),
+                                    ts_img.get_affine(),
+                                    ts_img.get_header())
+
+        # Set up the output list
+        self.out_files = []
+
+        # Plot the data
+        self.plot_residuals()
+        self.plot_rsquareds()
+        self.plot_tsnr()
+        if isdefined(self.inputs.zstat_files):
+            self.plot_zstats()
+
+        return runtime
+
+    def plot_residuals(self):
+        """Plot the variance of the model residuals across time."""
+        ss = self.inputs.sigmasquareds_file
+        m = Mosaic(self.mean, ss, self.mask, step=1)
+        m.plot_overlay("cube:.8:.2", 0, alpha=.6, fmt="%d")
+        png_name = nii_to_png(ss)
+        m.savefig(png_name)
+        m.close()
+        self.out_files.append(png_name)
+
+    def plot_tsnr(self):
+
+        tsnr = self.inputs.tsnr_file
+        m = Mosaic(self.mean, tsnr, self.mask, step=1)
+        m.plot_overlay("cube:1.9:.5", 0, alpha=1, fmt="%d")
+        png_name = nii_to_png(tsnr)
+        m.savefig(png_name)
+        m.close()
+        self.out_files.append(png_name)
+
+    def plot_rsquareds(self):
+        """Plot the full, main, and confound R squared maps."""
+        cmaps = ["cube:2:0", "cube:2.6:0", "cube:1.5:0"]
+        for r2_file, cmap in zip(self.inputs.r2_files, cmaps):
+            m = Mosaic(self.mean, r2_file, self.mask, step=1)
+            m.plot_overlay(cmap, 0, alpha=.6)
+            png_name = nii_to_png(r2_file)
+            m.savefig(png_name)
+            m.close()
+            self.out_files.append(png_name)
+
+    def plot_zstats(self):
+        """Plot the positive and negative z stats with a low threshold."""
+        for z_file in self.inputs.zstat_files:
+            m = Mosaic(self.mean, z_file, self.mask, step=1)
+            m.plot_activation(pos_cmap="Reds_r", neg_cmap="Blues",
+                              thresh=1.7, alpha=.85)
+            png_name = nii_to_png(z_file)
+            m.savefig(png_name)
+            m.close()
+            self.out_files.append(png_name)
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_files"] = self.out_files
+        return outputs
 
 
 def dump_exp_info(exp_info, timeseries):
     """Dump the exp_info dict into a json file."""
+    import os.path as op
+    import json
     json_file = op.abspath("experiment_info.json")
     with open(json_file, "w") as fp:
         json.dump(exp_info, fp, sort_keys=True, indent=2)
     return json_file
-
-
-# Smaller helper functions
-# ========================
-
-
-def run_indices(ts_files):
-    """Find the run numbers associated with timeseries files."""
-    import re
-    if not isinstance(ts_files, list):
-        ts_files = [ts_files]
-    runs = [re.search("run_(\d+)", f).group(1) for f in ts_files]
-    return map(int, runs)
