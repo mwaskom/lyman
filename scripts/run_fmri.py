@@ -205,10 +205,11 @@ def main(arglist):
     reg_lists = reg_templates.keys()
 
     if space == "mni":
+        aff_ext = "mat" if warp_method == "fsl" else "txt"
         reg_templates["warpfield"] = op.join(data_dir, "{subject_id}",
                                              "normalization/warpfield.nii.gz")
         reg_templates["affine"] = op.join(data_dir, "{subject_id}",
-                                          "normalization/affine.mat")
+                                          "normalization/affine." + aff_ext)
 
     rigid_stem = "{subject_id}/preproc/run_*/func2anat_"
     if warp_method == "ants" and space == "mni":

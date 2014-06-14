@@ -166,6 +166,8 @@ class Registration(BaseInterface):
                         "3",
                         out_rigid,
                         out_file,
+                        self.inputs.warpfield,
+                        self.inputs.affine,
                         "-R", self.ref_file]
         if interp != "trilin":
             cmdline_warp.append("--use-" + interp)
