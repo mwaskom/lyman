@@ -70,7 +70,9 @@ processed in Freesurfer (recon-all)
 
 - `run_fmri.py`: perform subject-level functional preprocessing and analyses
 
-- `run_group.py`: perform basic group-level mixed effects analyses
+- `make_masks.py`: generate ROI masks in native EPI space from a variety of sources
+
+- `run_group.py`: perform basic whole-brain mixed-effects analyses
 
 - `surface_snapshots.py`: plot the results of the subject- and group-level models on a surface mesh
 
