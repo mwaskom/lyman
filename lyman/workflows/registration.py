@@ -282,12 +282,14 @@ class MNIModelRegistration(MNIRegistration,
             run_varcopes = varcopes[i]
             run_sumsquares = sumsquares[i]
             run_mask = [self.inputs.masks[i]]
-            all_files = run_copes + run_varcopes + run_sumsquares + run_mask
+            run_mean = [self.inputs.means[i]]
+            all_files = (run_copes + run_varcopes +
+                         run_sumsquares + run_mask + run_mean)
 
             # Apply the transformation to each file
             for in_file in all_files:
 
-                out_fname = op.basename(add_suffix(in_file, "xfm"))
+                out_fname = op.basename(add_suffix(in_file, "warp"))
                 out_file = op.join(out_dir, out_fname)
                 runtime = warp_func(runtime, in_file, out_file, run_rigid)
 
