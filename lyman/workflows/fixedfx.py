@@ -17,7 +17,8 @@ from nipype.interfaces.base import (BaseInterface,
                                     InputMultiPath, OutputMultiPath,
                                     traits)
 
-from lyman.tools import ManyOutFiles, nii_to_png, submit_cmdline
+import lyman
+from lyman.tools import SaveParameters, nii_to_png, submit_cmdline
 
 
 imports = ["import os",
@@ -32,10 +33,13 @@ imports = ["import os",
            "from nipype.interfaces import fsl"]
 
 
-def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
+def create_ffx_workflow(name="mni_ffx", space="mni",
+                        contrasts=None, exp_info=None):
     """Return a workflow object to execute a fixed-effects mode."""
     if contrasts is None:
         contrasts = []
+    if exp_info is None:
+        exp_info = lyman.default_experiment_parameters()
 
     inputnode = Node(IdentityInterface(["copes",
                                         "varcopes",
@@ -57,10 +61,14 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
     # Plot the fixedfx results
     report = Node(FFXReport(space=space), "report")
 
+    # Save the experiment info
+    saveparams = Node(SaveParameters(exp_info=exp_info), "saveparams")
+
     outputnode = Node(IdentityInterface(["flame_results",
                                          "r2_files",
                                          "tsnr_file",
                                          "summary_report",
+                                         "json_file",
                                          "zstat_report"]),
                       "outputs")
 
@@ -79,6 +87,8 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
         (inputnode, report,
             [("anatomy", "anatomy"),
              ("masks", "masks")]),
+        (inputnode, saveparams,
+            [("timeseries", "in_file")]),
         (ffxmodel, report,
             [("zstat_files", "zstat_files")]),
         (ffxsummary, report,
@@ -88,10 +98,12 @@ def create_ffx_workflow(name="mni_ffx", space="mni", contrasts=None):
             [("flame_results", "flame_results")]),
         (ffxsummary, outputnode,
             [("r2_files", "r2_files"),
-            ("tsnr_file", "tsnr_file")]),
+             ("tsnr_file", "tsnr_file")]),
         (report, outputnode,
             [("summary_files", "summary_report"),
              ("zstat_files", "zstat_report")]),
+        (saveparams, outputnode,
+            [("json_file", "json_file")]),
     ])
 
     return ffx, inputnode, outputnode

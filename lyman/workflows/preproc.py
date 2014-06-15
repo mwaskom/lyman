@@ -1,7 +1,6 @@
 """Preprocessing workflow definition."""
 import os
 import os.path as op
-import json
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -11,8 +10,7 @@ from moss.mosaic import Mosaic
 import seaborn as sns
 
 from nipype.interfaces import io, fsl, freesurfer as fs
-from nipype import (Node, MapNode, Workflow,
-                    IdentityInterface, Function)
+from nipype import Node, MapNode, Workflow, IdentityInterface
 from nipype.interfaces.base import (BaseInterface,
                                     BaseInterfaceInputSpec,
                                     InputMultiPath, OutputMultiPath,
@@ -21,7 +19,7 @@ from nipype.workflows.fmri.fsl import create_susan_smooth
 
 import lyman
 from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
-                         list_out_file)
+                         SaveParameters, list_out_file)
 
 # For nipype Function interfaces
 imports = ["import os",
@@ -99,11 +97,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     artifacts.inputs.spike_thresh = exp_info["spike_threshold"]
 
     # Save the experiment info for this run
-    dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
-                                dump_exp_info, imports),
-                       "timeseries",
-                       "dumpjson")
-    dumpjson.inputs.exp_info = exp_info
+    saveparams = MapNode(SaveParameters(exp_info=exp_info),
+                         "timeseries", "saveparams")
 
     preproc.connect([
         (inputnode, prepare,
@@ -137,8 +132,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("outputs.mask_file", "inputs.mask_file")]),
         (filter_rough, artifacts,
             [("outputs.timeseries", "timeseries")]),
-        (inputnode, dumpjson,
-            [("timeseries", "timeseries")]),
+        (inputnode, saveparams,
+            [("timeseries", "in_file")]),
         ])
 
     if bool(exp_info["whole_brain_template"]):
@@ -181,7 +176,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
         (filter_rough, outputnode,
             [("outputs.timeseries", "unsmoothed_timeseries"),
              ("outputs.mean_file", "mean_func")]),
-        (dumpjson, outputnode,
+        (saveparams, outputnode,
             [("json_file", "json_file")]),
         ])
 
@@ -905,11 +900,3 @@ class ScaleTimeseries(BaseInterface):
         return scaled_data
 
     _list_outputs = list_out_file("timeseries_scaled.nii.gz")
-
-
-def dump_exp_info(exp_info, timeseries):
-    """Dump the exp_info dict into a json file."""
-    json_file = op.abspath("experiment_info.json")
-    with open(json_file, "w") as fp:
-        json.dump(exp_info, fp, sort_keys=True, indent=2)
-        return json_file
