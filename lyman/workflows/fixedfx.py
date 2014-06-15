@@ -393,7 +393,7 @@ class FFXReport(BaseInterface):
         for fname, cmap in zip(self.inputs.r2_files, cmaps):
             m = Mosaic(self.inputs.anatomy, fname,
                        self.every_mask, step=self.step)
-            m.plot_overlay(cmap, 0, alpha=.6)
+            m.plot_overlay(cmap, 0, alpha=.85)
             out_fname = op.abspath(nii_to_png(fname))
             self.summary_files.append(out_fname)
             m.savefig(out_fname)
@@ -405,7 +405,7 @@ class FFXReport(BaseInterface):
             m = Mosaic(self.inputs.anatomy, fname,
                        self.every_mask, step=self.step)
             m.plot_activation(pos_cmap="Reds_r", neg_cmap="Blues",
-                              thresh=2.3, alpha=.8)
+                              thresh=2.3, alpha=.85)
             contrast = fname.split("/")[-2]
             os.mkdir(contrast)
             out_fname = op.join(contrast, "zstat1.png")
