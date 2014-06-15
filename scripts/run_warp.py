@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import shutil
+import argparse
 import nipype
 import lyman
 from lyman import tools
@@ -44,6 +45,7 @@ def main(arglist):
     # Process cmdline args
     parser = tools.parser
     parser.description = help
+    parser.formatter_class = argparse.RawDescriptionHelpFormatter
     args = tools.parser.parse_args(arglist)
     plugin, plugin_args = lyman.determine_engine(args)
 
