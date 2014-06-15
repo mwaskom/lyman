@@ -70,7 +70,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     # Save the experiment info for this run
     # Save the experiment info for this run
     saveparams = MapNode(SaveParameters(exp_info=exp_info),
-                         "timeseries", "saveparams")
+                         "in_file", "saveparams")
 
     # Report on the results of the model
     # Note: see below for a conditional iterfield

@@ -92,7 +92,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
 
     # Save the experiment info for this run
     saveparams = MapNode(SaveParameters(exp_info=exp_info),
-                         "timeseries", "saveparams")
+                         "in_file", "saveparams")
 
     preproc.connect([
         (inputnode, prepare,
