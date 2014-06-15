@@ -440,11 +440,7 @@ def create_filtering_workflow(name="filter",
                      "inputs")
 
     # Grand-median scale within the brain mask
-    scale = MapNode(Function(["in_file",
-                              "mask_file"],
-                             ["out_file"],
-                             scale_timeseries,
-                             imports),
+    scale = MapNode(ScaleTimeseries(statistic="median", target=10000),
                     ["in_file", "mask_file"],
                     "scale")
 
@@ -866,27 +862,49 @@ class ArtifactDetection(BaseInterface):
         return outputs
 
 
-def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
-    """Scale an entire series with a single number."""
-    ts_img = nib.load(in_file)
-    ts_data = ts_img.get_data()
-    mask = nib.load(mask_file).get_data().astype(bool)
+class ScaleTimeseriesInput(BaseInterfaceInputSpec):
 
-    # Flexibly get the statistic value.
-    # This has to be stringly-typed because nipype
-    # can't pass around functions
-    stat_value = getattr(np, statistic)(ts_data[mask])
+    in_file = File(exists=True)
+    mask_file = File(exists=True)
+    statistic = traits.Str()
+    target = traits.Float()
 
-    scale_value = float(target) / stat_value
-    scaled_ts = ts_data * scale_value
-    scaled_img = nib.Nifti1Image(scaled_ts,
-                                 ts_img.get_affine(),
-                                 ts_img.get_header())
+class ScaleTimeseries(BaseInterface):
 
-    out_file = os.path.abspath("timeseries_scaled.nii.gz")
-    scaled_img.to_filename(out_file)
+    input_spec = ScaleTimeseriesInput
+    output_spec = SingleOutFile
 
-    return out_file
+    def _run_interface(self, runtime):
+
+        ts_img = nib.load(self.inputs.in_file)
+        ts_data = ts_img.get_data()
+        mask = nib.load(self.inputs.mask_file).get_data().astype(bool)
+
+        # Flexibly get the statistic value.
+        # This has to be stringly-typed because nipype
+        # can't pass around functions
+        stat_func = getattr(np, self.inputs.statistic)
+
+        # Do the scaling
+        scaled_ts = self.scale_timeseries(stat_func, ts_data,
+                                          mask, self.inputs.target)
+
+        # Save the resulting image
+        scaled_img = nib.Nifti1Image(scaled_ts,
+                                     ts_img.get_affine(),
+                                     ts_img.get_header())
+        scaled_img.to_filename("timeseries_scaled.nii.gz")
+
+        return runtime
+
+    def scale_timeseries(self, stat_func, data, mask, target):
+        """Make scale timeseries across four dimensions to a target."""
+        stat_value = stat_func(data[mask])
+        scale_value = target / stat_value
+        scaled_data = data * scale_value
+        return scaled_data
+
+    _list_outputs = list_out_file("timeseries_scaled.nii.gz")
 
 
 def dump_exp_info(exp_info, timeseries):
