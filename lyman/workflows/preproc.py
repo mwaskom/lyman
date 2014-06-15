@@ -168,8 +168,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("outputs.example_func", "example_func"),
              ("outputs.report", "realign_report")]),
         (skullstrip, outputnode,
-            [("outputs.mean_file", "mean_func"),
-             ("outputs.mask_file", "functional_mask"),
+            [("outputs.mask_file", "functional_mask"),
              ("outputs.report", "mask_report")]),
         (artifacts, outputnode,
             [("out_files", "artifact_report")]),
@@ -180,7 +179,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
         (filter_smooth, outputnode,
             [("outputs.timeseries", "smoothed_timeseries")]),
         (filter_rough, outputnode,
-            [("outputs.timeseries", "unsmoothed_timeseries")]),
+            [("outputs.timeseries", "unsmoothed_timeseries"),
+             ("outputs.mean_file", "mean_func")]),
         (dumpjson, outputnode,
             [("json_file", "json_file")]),
         ])
@@ -283,7 +283,7 @@ def create_skullstrip_workflow(name="skullstrip"):
                      "inputs")
 
     # Mean the timeseries across the fourth dimension
-    origmean = MapNode(fsl.MeanImage(), "in_file", name="origmean")
+    origmean = MapNode(fsl.MeanImage(), "in_file", "origmean")
 
     # Grab the Freesurfer aparc+aseg file as an anatomical brain mask
     getaseg = Node(io.SelectFiles({"aseg": "{subject_id}/mri/aparc+aseg.mgz"},
@@ -307,8 +307,7 @@ def create_skullstrip_workflow(name="skullstrip"):
     stripts = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripts")
 
     # Use the mask to skullstrip the mean image
-    stripmean = MapNode(fs.ApplyMask(out_file="mean_func.nii.gz"),
-                        ["in_file", "mask_file"], "stripmean")
+    stripmean = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripmean")
 
     # Generate images summarizing the skullstrip and resulting data
     reportmask = MapNode(MaskReport(), ["mask_file", "orig_file", "mean_file"],
@@ -456,7 +455,12 @@ def create_filtering_workflow(name="filter",
                      "in_file",
                      "filter")
 
-    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
+    # Compute a final mean functional volume
+    meanfunc = MapNode(fsl.MeanImage(out_file="mean_func.nii.gz"),
+                       "in_file", "meanfunc")
+
+    outputnode = Node(IdentityInterface(["timeseries",
+                                         "mean_file"]), "outputs")
 
     filtering = Workflow(name)
     filtering.connect([
@@ -465,8 +469,12 @@ def create_filtering_workflow(name="filter",
              ("mask_file", "mask_file")]),
         (scale, filter,
             [("out_file", "in_file")]),
+        (filter, meanfunc,
+            [("out_file", "in_file")]),
         (filter, outputnode,
             [("out_file", "timeseries")]),
+        (meanfunc, outputnode,
+            [("out_file", "mean_file")]),
         ])
 
     return filtering
