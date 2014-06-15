@@ -1,12 +1,9 @@
-import os
 import os.path as op
 import shutil
 from glob import glob
 
 import numpy as np
-import matplotlib as mpl
 from scipy import stats
-import nibabel as nib
 
 from nipype import IdentityInterface, Function, Node, MapNode, Workflow
 from nipype.interfaces import freesurfer as fs
@@ -51,8 +48,7 @@ def create_surface_ols_workflow(name="surface_group",
         sampling_units=exp_info["sampling_units"],
         smooth_surf=exp_info["surf_smooth"],
         target_subject="fsaverage"),
-                          ["subject_id", "reg_file", "source_file"],
-                          "surfsample")
+        ["subject_id", "reg_file", "source_file"], "surfsample")
 
     # Concatenate the subject files into a 4D image
     mergecope = Node(fs.Concatenate(), "mergecope")

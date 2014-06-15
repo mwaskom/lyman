@@ -83,7 +83,6 @@ def create_volume_mixedfx_workflow(name="volume_group",
     # Save the experiment info
     saveparams = Node(SaveParameters(exp_info=exp_info), "saveparams")
 
-
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",

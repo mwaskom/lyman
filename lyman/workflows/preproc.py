@@ -21,12 +21,6 @@ import lyman
 from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
                          SaveParameters, list_out_file)
 
-# For nipype Function interfaces
-imports = ["import os",
-           "import json",
-           "import numpy as np",
-           "import nibabel as nib"]
-
 
 def create_preprocessing_workflow(name="preproc", exp_info=None):
     """Return a Nipype workflow for fMRI preprocessing.
@@ -863,6 +857,7 @@ class ScaleTimeseriesInput(BaseInterfaceInputSpec):
     mask_file = File(exists=True)
     statistic = traits.Str()
     target = traits.Float()
+
 
 class ScaleTimeseries(BaseInterface):
 

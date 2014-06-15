@@ -3,10 +3,6 @@ import os
 import os.path as op
 import numpy as np
 import nibabel as nib
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import seaborn as sns
-import moss
 from moss.mosaic import Mosaic
 
 from nipype import Workflow, Node, IdentityInterface
@@ -19,18 +15,6 @@ from nipype.interfaces.base import (BaseInterface,
 
 import lyman
 from lyman.tools import SaveParameters, nii_to_png, submit_cmdline
-
-
-imports = ["import os",
-           "import os.path as op",
-           "import subprocess as sub",
-           "import numpy as np",
-           "import nibabel as nib",
-           "import matplotlib as mpl",
-           "import matplotlib.pyplot as plt",
-           "import seaborn as sns",
-           "import moss",
-           "from nipype.interfaces import fsl"]
 
 
 def create_ffx_workflow(name="mni_ffx", space="mni",
