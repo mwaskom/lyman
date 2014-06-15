@@ -399,6 +399,7 @@ class ModelSummary(BaseInterface):
         # Compute and save the residual tSNR
         std = np.sqrt(ss_full / len(y))
         tsnr = np.squeeze(ybar) / std
+        tsnr = np.nan_to_num(tsnr)
         self.save_image(tsnr, "tsnr")
 
         return runtime

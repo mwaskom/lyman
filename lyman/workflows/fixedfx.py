@@ -310,6 +310,7 @@ class FFXSummary(BaseInterface):
         res_sumsquares = self.sum_squares("ssres", "full")
         res_std = np.sqrt(res_sumsquares / n)
         tsnr = mean_data / res_std
+        tsnr = np.nan_to_num(tsnr)
         self.save_image(tsnr, "tsnr")
 
     def save_image(self, data, fname):
