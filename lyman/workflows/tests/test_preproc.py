@@ -1,5 +1,6 @@
 import numpy as np
 import nose.tools as nt
+import numpy.testing as npt
 from .. import preproc
 
 
@@ -39,3 +40,17 @@ def test_robust_normalization():
     art = preproc.ArtifactDetection()
     out = art.normalize_timeseries(ts, mask)
     nt.assert_equal(out.shape, (ntp,))
+
+
+def test_scale_timeseries():
+
+    rs = np.random.RandomState(99)
+    data = rs.randn(10, 10, 10, 20)
+    mask = rs.rand(10, 10, 10) > .25
+
+    scaler = preproc.ScaleTimeseries()
+
+    for target in [20, 40]:
+        for func in [np.mean, np.median]:
+            out = scaler.scale_timeseries(func, data, mask, target)
+            npt.assert_almost_equal(func(out[mask]), target)

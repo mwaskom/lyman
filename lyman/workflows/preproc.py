@@ -1,7 +1,6 @@
 """Preprocessing workflow definition."""
 import os
 import os.path as op
-import json
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -11,8 +10,7 @@ from moss.mosaic import Mosaic
 import seaborn as sns
 
 from nipype.interfaces import io, fsl, freesurfer as fs
-from nipype import (Node, MapNode, Workflow,
-                    IdentityInterface, Function)
+from nipype import Node, MapNode, Workflow, IdentityInterface
 from nipype.interfaces.base import (BaseInterface,
                                     BaseInterfaceInputSpec,
                                     InputMultiPath, OutputMultiPath,
@@ -21,7 +19,7 @@ from nipype.workflows.fmri.fsl import create_susan_smooth
 
 import lyman
 from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
-                         list_out_file)
+                         SaveParameters, list_out_file)
 
 # For nipype Function interfaces
 imports = ["import os",
@@ -99,11 +97,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     artifacts.inputs.spike_thresh = exp_info["spike_threshold"]
 
     # Save the experiment info for this run
-    dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
-                                dump_exp_info, imports),
-                       "timeseries",
-                       "dumpjson")
-    dumpjson.inputs.exp_info = exp_info
+    saveparams = MapNode(SaveParameters(exp_info=exp_info),
+                         "timeseries", "saveparams")
 
     preproc.connect([
         (inputnode, prepare,
@@ -137,8 +132,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("outputs.mask_file", "inputs.mask_file")]),
         (filter_rough, artifacts,
             [("outputs.timeseries", "timeseries")]),
-        (inputnode, dumpjson,
-            [("timeseries", "timeseries")]),
+        (inputnode, saveparams,
+            [("timeseries", "in_file")]),
         ])
 
     if bool(exp_info["whole_brain_template"]):
@@ -168,8 +163,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("outputs.example_func", "example_func"),
              ("outputs.report", "realign_report")]),
         (skullstrip, outputnode,
-            [("outputs.mean_file", "mean_func"),
-             ("outputs.mask_file", "functional_mask"),
+            [("outputs.mask_file", "functional_mask"),
              ("outputs.report", "mask_report")]),
         (artifacts, outputnode,
             [("out_files", "artifact_report")]),
@@ -180,8 +174,9 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
         (filter_smooth, outputnode,
             [("outputs.timeseries", "smoothed_timeseries")]),
         (filter_rough, outputnode,
-            [("outputs.timeseries", "unsmoothed_timeseries")]),
-        (dumpjson, outputnode,
+            [("outputs.timeseries", "unsmoothed_timeseries"),
+             ("outputs.mean_file", "mean_func")]),
+        (saveparams, outputnode,
             [("json_file", "json_file")]),
         ])
 
@@ -283,7 +278,7 @@ def create_skullstrip_workflow(name="skullstrip"):
                      "inputs")
 
     # Mean the timeseries across the fourth dimension
-    origmean = MapNode(fsl.MeanImage(), "in_file", name="origmean")
+    origmean = MapNode(fsl.MeanImage(), "in_file", "origmean")
 
     # Grab the Freesurfer aparc+aseg file as an anatomical brain mask
     getaseg = Node(io.SelectFiles({"aseg": "{subject_id}/mri/aparc+aseg.mgz"},
@@ -307,8 +302,7 @@ def create_skullstrip_workflow(name="skullstrip"):
     stripts = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripts")
 
     # Use the mask to skullstrip the mean image
-    stripmean = MapNode(fs.ApplyMask(out_file="mean_func.nii.gz"),
-                        ["in_file", "mask_file"], "stripmean")
+    stripmean = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripmean")
 
     # Generate images summarizing the skullstrip and resulting data
     reportmask = MapNode(MaskReport(), ["mask_file", "orig_file", "mean_file"],
@@ -441,11 +435,7 @@ def create_filtering_workflow(name="filter",
                      "inputs")
 
     # Grand-median scale within the brain mask
-    scale = MapNode(Function(["in_file",
-                              "mask_file"],
-                             ["out_file"],
-                             scale_timeseries,
-                             imports),
+    scale = MapNode(ScaleTimeseries(statistic="median", target=10000),
                     ["in_file", "mask_file"],
                     "scale")
 
@@ -456,7 +446,12 @@ def create_filtering_workflow(name="filter",
                      "in_file",
                      "filter")
 
-    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
+    # Compute a final mean functional volume
+    meanfunc = MapNode(fsl.MeanImage(out_file="mean_func.nii.gz"),
+                       "in_file", "meanfunc")
+
+    outputnode = Node(IdentityInterface(["timeseries",
+                                         "mean_file"]), "outputs")
 
     filtering = Workflow(name)
     filtering.connect([
@@ -465,8 +460,12 @@ def create_filtering_workflow(name="filter",
              ("mask_file", "mask_file")]),
         (scale, filter,
             [("out_file", "in_file")]),
+        (filter, meanfunc,
+            [("out_file", "in_file")]),
         (filter, outputnode,
             [("out_file", "timeseries")]),
+        (meanfunc, outputnode,
+            [("out_file", "mean_file")]),
         ])
 
     return filtering
@@ -858,32 +857,46 @@ class ArtifactDetection(BaseInterface):
         return outputs
 
 
-def scale_timeseries(in_file, mask_file, statistic="median", target=10000):
-    """Scale an entire series with a single number."""
-    ts_img = nib.load(in_file)
-    ts_data = ts_img.get_data()
-    mask = nib.load(mask_file).get_data().astype(bool)
+class ScaleTimeseriesInput(BaseInterfaceInputSpec):
 
-    # Flexibly get the statistic value.
-    # This has to be stringly-typed because nipype
-    # can't pass around functions
-    stat_value = getattr(np, statistic)(ts_data[mask])
+    in_file = File(exists=True)
+    mask_file = File(exists=True)
+    statistic = traits.Str()
+    target = traits.Float()
 
-    scale_value = float(target) / stat_value
-    scaled_ts = ts_data * scale_value
-    scaled_img = nib.Nifti1Image(scaled_ts,
-                                 ts_img.get_affine(),
-                                 ts_img.get_header())
+class ScaleTimeseries(BaseInterface):
 
-    out_file = os.path.abspath("timeseries_scaled.nii.gz")
-    scaled_img.to_filename(out_file)
+    input_spec = ScaleTimeseriesInput
+    output_spec = SingleOutFile
 
-    return out_file
+    def _run_interface(self, runtime):
 
+        ts_img = nib.load(self.inputs.in_file)
+        ts_data = ts_img.get_data()
+        mask = nib.load(self.inputs.mask_file).get_data().astype(bool)
 
-def dump_exp_info(exp_info, timeseries):
-    """Dump the exp_info dict into a json file."""
-    json_file = op.abspath("experiment_info.json")
-    with open(json_file, "w") as fp:
-        json.dump(exp_info, fp, sort_keys=True, indent=2)
-        return json_file
+        # Flexibly get the statistic value.
+        # This has to be stringly-typed because nipype
+        # can't pass around functions
+        stat_func = getattr(np, self.inputs.statistic)
+
+        # Do the scaling
+        scaled_ts = self.scale_timeseries(stat_func, ts_data,
+                                          mask, self.inputs.target)
+
+        # Save the resulting image
+        scaled_img = nib.Nifti1Image(scaled_ts,
+                                     ts_img.get_affine(),
+                                     ts_img.get_header())
+        scaled_img.to_filename("timeseries_scaled.nii.gz")
+
+        return runtime
+
+    def scale_timeseries(self, stat_func, data, mask, target):
+        """Make scale timeseries across four dimensions to a target."""
+        stat_value = stat_func(data[mask])
+        scale_value = target / stat_value
+        scaled_data = data * scale_value
+        return scaled_data
+
+    _list_outputs = list_out_file("timeseries_scaled.nii.gz")

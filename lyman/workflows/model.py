@@ -10,7 +10,7 @@ from moss import glm
 from moss.mosaic import Mosaic
 import seaborn as sns
 
-from nipype import Node, MapNode, Workflow, IdentityInterface, Function
+from nipype import Node, MapNode, Workflow, IdentityInterface
 from nipype.interfaces import fsl
 from nipype.interfaces.base import (BaseInterface,
                                     BaseInterfaceInputSpec,
@@ -18,7 +18,7 @@ from nipype.interfaces.base import (BaseInterface,
                                     TraitedSpec, File, traits,
                                     isdefined)
 import lyman
-from lyman.tools import ManyOutFiles, nii_to_png
+from lyman.tools import ManyOutFiles, SaveParameters, nii_to_png
 
 
 def create_timeseries_model_workflow(name="model", exp_info=None):
@@ -68,11 +68,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                            "modelsummary")
 
     # Save the experiment info for this run
-    dumpjson = MapNode(Function(["exp_info", "timeseries"], ["json_file"],
-                                dump_exp_info),
-                       "timeseries",
-                       "dumpjson")
-    dumpjson.inputs.exp_info = exp_info
+    # Save the experiment info for this run
+    saveparams = MapNode(SaveParameters(exp_info=exp_info),
+                         "timeseries", "saveparams")
 
     # Report on the results of the model
     # Note: see below for a conditional iterfield
@@ -106,8 +104,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
              ("timeseries", "timeseries")]),
         (inputnode, modelestimate,
             [("timeseries", "in_file")]),
-        (inputnode, dumpjson,
-            [("timeseries", "timeseries")]),
+        (inputnode, saveparams,
+            [("timeseries", "in_file")]),
         (modelsetup, modelestimate,
             [("design_matrix_file", "design_file")]),
         (modelestimate, contrastestimate,
@@ -135,7 +133,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
              ("contrast_file", "contrast_mat"),
              ("design_matrix_pkl", "design_pkl"),
              ("report", "design_report")]),
-        (dumpjson, outputnode,
+        (saveparams, outputnode,
             [("json_file", "json_file")]),
         (modelestimate, outputnode,
             [("results_dir", "results")]),
@@ -158,9 +156,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         model.connect(inputnode, "regressor_file",
                       modelsetup, "regressor_file")
     if exp_info["contrasts"]:
-        model.connect(contrastestimate, "zstat_files",
+        model.connect(contrastestimate, "zstats",
                       modelreport, "zstat_files")
-        modelreport.iterfields.append("zstat_files")
+        modelreport.iterfield.append("zstat_files")
 
     return model, inputnode, outputnode
 
@@ -399,6 +397,7 @@ class ModelSummary(BaseInterface):
         # Compute and save the residual tSNR
         std = np.sqrt(ss_full / len(y))
         tsnr = np.squeeze(ybar) / std
+        tsnr = np.nan_to_num(tsnr)
         self.save_image(tsnr, "tsnr")
 
         return runtime
@@ -532,13 +531,3 @@ class ModelReport(BaseInterface):
         outputs = self._outputs().get()
         outputs["out_files"] = self.out_files
         return outputs
-
-
-def dump_exp_info(exp_info, timeseries):
-    """Dump the exp_info dict into a json file."""
-    import os.path as op
-    import json
-    json_file = op.abspath("experiment_info.json")
-    with open(json_file, "w") as fp:
-        json.dump(exp_info, fp, sort_keys=True, indent=2)
-    return json_file

@@ -192,6 +192,7 @@ def main(arglist):
     if regtype == "model":
         reg_base = "{subject_id}/model/{smoothing}/run_*/"
         reg_templates.update(dict(
+            means="{subject_id}/preproc/run_*/mean_func.nii.gz",
             copes=op.join(reg_base, "cope*.nii.gz"),
             varcopes=op.join(reg_base, "varcope*.nii.gz"),
             sumsquares=op.join(reg_base, "ss*.nii.gz"),
@@ -204,10 +205,11 @@ def main(arglist):
     reg_lists = reg_templates.keys()
 
     if space == "mni":
+        aff_ext = "mat" if warp_method == "fsl" else "txt"
         reg_templates["warpfield"] = op.join(data_dir, "{subject_id}",
                                              "normalization/warpfield.nii.gz")
         reg_templates["affine"] = op.join(data_dir, "{subject_id}",
-                                          "normalization/affine.mat")
+                                          "normalization/affine." + aff_ext)
 
     rigid_stem = "{subject_id}/preproc/run_*/func2anat_"
     if warp_method == "ants" and space == "mni":
@@ -269,8 +271,10 @@ def main(arglist):
         copes=op.join(ffx_base, "cope*" + ext),
         varcopes=op.join(ffx_base, "varcope*" + ext),
         masks=op.join(ffx_base, "functional_mask" + ext),
+        means=op.join(ffx_base, "mean_func" + ext),
         dofs="{subject_id}/model/{smoothing}/run_*/results/dof",
         ss_files=op.join(ffx_base, "ss*" + ext),
+        timeseries="{subject_id}/preproc/run_*/{smoothing}_timeseries.nii.gz",
                          )
     ffx_lists = ffx_templates.keys()
 

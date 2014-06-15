@@ -35,7 +35,7 @@ def create_reg_workflow(name="reg", space="mni",
 
     # Define the input fields flexibly
     if regtype == "model":
-        fields = ["copes", "varcopes", "sumsquares"]
+        fields = ["means", "copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
     fields.extend(["masks", "rigids"])
@@ -78,6 +78,7 @@ class RegistrationInput(BaseInterfaceInputSpec):
 
 class ModelRegInput(BaseInterfaceInputSpec):
 
+    means = InputMultiPath(File(exists=True))
     copes = InputMultiPath(File(exists=True))
     varcopes = InputMultiPath(File(exists=True))
     sumsquares = InputMultiPath(File(exists=True))
@@ -165,6 +166,8 @@ class Registration(BaseInterface):
                         "3",
                         out_rigid,
                         out_file,
+                        self.inputs.warpfield,
+                        self.inputs.affine,
                         "-R", self.ref_file]
         if interp != "trilin":
             cmdline_warp.append("--use-" + interp)
@@ -281,12 +284,14 @@ class MNIModelRegistration(MNIRegistration,
             run_varcopes = varcopes[i]
             run_sumsquares = sumsquares[i]
             run_mask = [self.inputs.masks[i]]
-            all_files = run_copes + run_varcopes + run_sumsquares + run_mask
+            run_mean = [self.inputs.means[i]]
+            all_files = (run_copes + run_varcopes +
+                         run_sumsquares + run_mask + run_mean)
 
             # Apply the transformation to each file
             for in_file in all_files:
 
-                out_fname = op.basename(add_suffix(in_file, "xfm"))
+                out_fname = op.basename(add_suffix(in_file, "warp"))
                 out_file = op.join(out_dir, out_fname)
                 runtime = warp_func(runtime, in_file, out_file, run_rigid)
 
@@ -334,7 +339,9 @@ class EPIModelRegistration(EPIRegistration,
             run_varcopes = varcopes[i]
             run_sumsquares = sumsquares[i]
             run_mask = [self.inputs.masks[i]]
-            all_files = run_copes + run_varcopes + run_sumsquares + run_mask
+            run_mean = [self.inputs.means[i]]
+            all_files = (run_copes + run_varcopes +
+                         run_sumsquares + run_mask + run_mean)
 
             # Apply the transformation to each file
             for in_file in all_files:

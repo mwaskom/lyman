@@ -20,7 +20,7 @@ from moss import locator
 from moss.mosaic import Mosaic
 
 import lyman
-from lyman.tools import add_suffix, nii_to_png
+from lyman.tools import SaveParameters, add_suffix, nii_to_png
 
 
 def create_volume_mixedfx_workflow(name="volume_group",
@@ -80,6 +80,10 @@ def create_volume_mixedfx_workflow(name="volume_group",
     report = Node(MFXReport(), "report")
     report.inputs.subjects = subject_list
 
+    # Save the experiment info
+    saveparams = Node(SaveParameters(exp_info=exp_info), "saveparams")
+
+
     # Define the workflow outputs
     outputnode = Node(IdentityInterface(["copes",
                                          "varcopes",
@@ -92,7 +96,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
                                          "seg_file",
                                          "peak_file",
                                          "lut_file",
-                                         "report"]),
+                                         "report",
+                                         "json_file"]),
                       "outputnode")
 
     # Define and connect up the workflow
@@ -102,6 +107,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
             [("copes", "cope_files"),
              ("varcopes", "varcope_files"),
              ("dofs", "dof_files")]),
+        (inputnode, saveparams,
+            [("copes", "in_file")]),
         (merge, flameo,
             [("cope_file", "cope_file"),
              ("varcope_file", "var_cope_file"),
@@ -155,6 +162,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("outputs.surf_mask", "surf_mask")]),
         (report, outputnode,
             [("out_files", "report")]),
+        (saveparams, outputnode,
+            [("json_file", "json_file")]),
         ])
 
     return group, inputnode, outputnode
