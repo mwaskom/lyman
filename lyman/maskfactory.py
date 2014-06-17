@@ -11,9 +11,8 @@ import numpy as np
 import nibabel as nib
 import matplotlib as mpl
 mpl.use("Agg")
-import matplotlib.pyplot as plt
 
-import moss
+from moss.mosaic import Mosaic
 import lyman
 
 
@@ -78,6 +77,9 @@ class MaskFactory(object):
         self.epi_template = op.join(self.anal_dir, self.experiment,
                                     "%(subj)s",
                                     "preproc/run_1/mean_func.nii.gz")
+        self.fov_template = op.join(self.anal_dir, self.experiment,
+                                    "%(subj)s",
+                                    "preproc/run_1/functional_mask.nii.gz")
         self.reg_template = op.join(self.anal_dir, self.experiment,
                                     "%(subj)s",
                                     "preproc/run_1/func2anat_tkreg.dat")
@@ -213,7 +215,8 @@ class MaskFactory(object):
                  "--nearest"])
         self.execute(xfm_cmds, self.out_template)
 
-    def apply_statistical_mask(self, stat_file_temp, thresh=None, n_voxels=None):
+    def apply_statistical_mask(self, stat_file_temp,
+                               thresh=None, n_voxels=None):
         """Create a mask by binarizing an epi-space fixed effects zstat map."""
         if n_voxels is not None:
             return self.take_top_voxels(stat_file_temp, n_voxels)
@@ -242,7 +245,8 @@ class MaskFactory(object):
             mask = img.get_data().astype(bool)
             stat = nib.load(stat_file).get_data()
             stat[~mask] = -np.inf
-            mask.flat[np.argsort(stat.flat).argsort() < (mask.size - n_voxels)] = 0
+            not_mask = np.argsort(stat.flat).argsort() < (mask.size - n_voxels)
+            mask.flat[not_mask] = 0
             new_img = nib.Nifti1Image(mask, img.get_affine(), img.get_header())
             new_img.to_filename(mask_file)
 
@@ -254,33 +258,16 @@ class MaskFactory(object):
         slices_temp = op.join(self.data_dir, "%(subj)s/masks",
                               self.roi_name + ".png")
 
-        cmap = mpl.colors.ListedColormap(["#C41E3A"])
         for subj in self.subject_list:
             args = dict(subj=subj)
-            epi = nib.load(self.epi_template % args).get_data()
-            mask = nib.load(self.out_template % args).get_data()
-            mask = mask.astype(np.float)
-            mask[mask == 0] = np.nan
-
-            n_slices = epi.shape[-1]
-            n_row, n_col = n_slices // 8, 8
-            start = n_slices % n_col // 2
-            figsize = (10, 1.375 * n_row)
-
-            # Write the functional mask image
-            f, axes = plt.subplots(n_row, n_col,
-                                   figsize=figsize,
-                                   facecolor="k")
-            vmin, vmax = 0, moss.percentiles(epi, 98)
-
-            for i, ax in enumerate(axes.ravel(), start):
-                ax.imshow(epi[..., i].T, cmap="gray", vmin=vmin, vmax=vmax)
-                ax.imshow(mask[..., i].T, cmap=cmap, interpolation="nearest")
-                ax.axis("off")
-            f.subplots_adjust(hspace=1e-5, wspace=1e-5)
-            plt.savefig(slices_temp % args, dpi=100, bbox_inches="tight",
-                        facecolor="k", edgecolor="k")
-            plt.close(f)
+            m = Mosaic(self.epi_template % args,
+                       self.out_template % args,
+                       self.fov_template % args,
+                       step=1, show_mask=False)
+            cmap = mpl.colors.ListedColormap(["#C41E3A"])
+            m.plot_overlay(cmap, thresh=.5, alpha=.9, colorbar=False)
+            m.savefig(slices_temp % args)
+            m.close()
 
     def execute(self, cmd_list, out_temp):
         """Exceute a list of commands and verify output file existence."""
