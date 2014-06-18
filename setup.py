@@ -22,7 +22,7 @@ def check_dependencies():
     # tested what the minimal versions that will work are
     needed_deps = ["IPython", "numpy", "scipy", "matplotlib",
                    "sklearn", "skimage", "pandas", "statsmodels", 
-                   "nibabel", "nipype", "seaborn", "moss"]
+                   "nibabel", "nipype", "seaborn"]
     missing_deps = []
     for dep in needed_deps:
         try:
@@ -57,6 +57,7 @@ if __name__ == "__main__":
         version=VERSION,
         url=URL,
         download_url=DOWNLOAD_URL,
+        install_requires=["moss==0.3.0"],
         packages=['lyman', 'lyman.tests',
                   'lyman.workflows', 'lyman.workflows.tests',
                   'lyman.tools', 'lyman.tools.tests'],
