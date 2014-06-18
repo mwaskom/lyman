@@ -57,7 +57,7 @@ if __name__ == "__main__":
         version=VERSION,
         url=URL,
         download_url=DOWNLOAD_URL,
-        install_requires=["moss==0.3.0"],
+        install_requires=["moss>=0.3.1"],
         packages=['lyman', 'lyman.tests',
                   'lyman.workflows', 'lyman.workflows.tests',
                   'lyman.tools', 'lyman.tools.tests'],
