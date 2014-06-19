@@ -302,7 +302,8 @@ class ModelSetup(BaseInterface):
             fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
 
             # Draw the spectral density
-            f, ax = plt.subplots(figsize=(9, 3))
+            with sns.axes_style("whitegrid"):
+                f, ax = plt.subplots(figsize=(9, 3))
             ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
             ax.axvline(1.0 / exp_info["hpf_cutoff"], c=".3", ls=":", lw=1.5)
             ax.fill_between(fs, pxx_filt, color=".5")
