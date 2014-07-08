@@ -44,12 +44,16 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                          ["timeseries", "realign_file", "artifact_file"],
                          "modelsetup")
 
+    # For some nodes, make it possible to request extra memory
+    mem_request = {"qsub_args": "-l h_vmem=%dG" % exp_info["memory_request"]}
+
     # Use film_gls to estimate the timeseries model
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
                                         mask_size=5,
                                         threshold=100),
                             ["design_file", "in_file"],
                             "modelestimate")
+    modelestimate.plugin_args = mem_request
 
     # Run the contrast estimation routine
     contrastestimate = MapNode(fsl.ContrastMgr(),
@@ -66,6 +70,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                             "timeseries",
                             "pe_files"],
                            "modelsummary")
+    modelsummary.plugin_args = mem_request
 
     # Save the experiment info for this run
     # Save the experiment info for this run

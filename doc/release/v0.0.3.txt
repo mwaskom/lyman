@@ -1,0 +1,11 @@
+
+v.0.0.3 (??)
+------------
+
+Model workflow
+~~~~~~~~~~~~~~
+
+- Added the ``memory_request`` field to the experiment file so that you can
+  request more memory on memory-intensive nodes (those involving model
+  estimation) when using a managed distribution engine (such as SGE). This can
+  be helpful for whole-brain high-resolution studies.

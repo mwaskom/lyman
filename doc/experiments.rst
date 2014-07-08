@@ -152,6 +152,11 @@ Model Parameters
     these conditions and prepended to this list. Importantly, the contrast names
     end up in file paths for the analysis results, so you should avoid spaces.
 
+   memory_request
+    An integer with the number of gigabytes of memory to request for model
+    workflow nodes that involve large memory computations. This only applies to
+    submission through a ``qsub``-based distribution plugin.
+
 Group Analysis Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

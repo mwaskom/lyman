@@ -117,6 +117,7 @@ def default_experiment_parameters():
         confound_pca=False,
         hrf_params={},
         contrasts=[],
+        memory_request=5,
 
         flame_mode="flame1",
         cluster_zthresh=2.3,
