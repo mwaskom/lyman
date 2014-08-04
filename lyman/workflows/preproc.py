@@ -62,7 +62,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
 
     # Estimate a registration from funtional to anatomical space
     coregister = create_bbregister_workflow(
-        partial_brain=bool(exp_info["whole_brain_template"]))
+        partial_brain=bool(exp_info["whole_brain_template"]),
+        init_with=exp_info["coreg_init"])
 
     # Skullstrip the brain using the Freesurfer segmentation
     skullstrip = create_skullstrip_workflow()
@@ -356,7 +357,8 @@ def create_skullstrip_workflow(name="skullstrip"):
 
 def create_bbregister_workflow(name="bbregister",
                                contrast_type="t2",
-                               partial_brain=False):
+                               partial_brain=False,
+                               init_with="fsl"):
     """Find a linear transformation to align the EPI file with the anatomy."""
     in_fields = ["subject_id", "timeseries"]
     if partial_brain:
@@ -371,7 +373,7 @@ def create_bbregister_workflow(name="bbregister",
 
     # Estimate the registration to Freesurfer conformed space
     func2anat = MapNode(fs.BBRegister(contrast_type=contrast_type,
-                                      init="fsl",
+                                      init=init_with,
                                       epi_mask=True,
                                       registered_file=True,
                                       out_reg_file="func2anat_tkreg.dat",
