@@ -67,6 +67,12 @@ Preprocessing Parameters
     A boolean that specifies whether the data were acquired with an interleaved
     protocol. Only relevant if ``temporal_interp`` is True.
 
+   coreg_init
+    A string that is either ``"fsl"`` or ``"header"``. This controls how the
+    boundary-based registration algorithm is initialized. Using ``"header"``
+    may give better performance for partial brain acquisitions, but only
+    if the anatomicals were acquired in the same session as the functionals.
+
    slice_order
     A string that is either ``"up"`` or ``"down"``. This corresponds to the
     slice acquisition order, and is only relevant if ``temporal_interp`` is

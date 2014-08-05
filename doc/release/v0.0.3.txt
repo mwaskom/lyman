@@ -2,6 +2,16 @@
 v.0.0.3 (??)
 ------------
 
+Preprocessing workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Added the ``coreg_init`` field to the experiment file. This is ``"fsl"`` by
+  default, which uses ``FLIRT`` to get a rough coregistration before using the
+  boundary-based algorithm (this was the old behavior). It can also be set to
+  ``"header"``, which assumes that the functional and anatomy are roughly in
+  register in real space and that a mapping can be found with the header
+  geometry.
+
 Model workflow
 ~~~~~~~~~~~~~~
 
@@ -9,3 +19,4 @@ Model workflow
   request more memory on memory-intensive nodes (those involving model
   estimation) when using a managed distribution engine (such as SGE). This can
   be helpful for whole-brain high-resolution studies.
+

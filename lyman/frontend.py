@@ -101,6 +101,7 @@ def default_experiment_parameters():
         frames_to_toss=0,
         temporal_interp=False,
         interleaved=True,
+        coreg_init="fsl",
         slice_order="up",
         intensity_threshold=4.5,
         motion_threshold=1,
