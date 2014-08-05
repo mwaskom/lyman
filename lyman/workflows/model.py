@@ -63,6 +63,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
                                 "param_estimates",
                                 "sigmasquareds"],
                                "contrastestimate")
+    contrastestimate.plugin_args = mem_request
 
     # Compute summary statistics about the model fit
     modelsummary = MapNode(ModelSummary(),
