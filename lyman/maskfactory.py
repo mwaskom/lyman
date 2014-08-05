@@ -263,7 +263,8 @@ class MaskFactory(object):
             m = Mosaic(self.epi_template % args,
                        self.out_template % args,
                        self.fov_template % args,
-                       step=1, show_mask=False)
+                       step=1, show_mask=False,
+                       stat_interp="nearest")
             cmap = mpl.colors.ListedColormap(["#C41E3A"])
             m.plot_overlay(cmap, thresh=.5, alpha=.9, colorbar=False)
             m.savefig(slices_temp % args)
