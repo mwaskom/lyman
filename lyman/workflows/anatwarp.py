@@ -300,7 +300,7 @@ class ANTSIntroduction(BaseInterface):
         runtime.environ["ITK_NUM_THREADS"] = "1"
         runtime = submit_cmdline(runtime, cmdline)
 
-        os.rename("ants_affine.txt", "affine.txt")
+        os.rename("ants_Affine.txt", "affine.txt")
         os.rename("ants_Warp.nii.gz", "warpfield.nii.gz")
         os.rename("ants_deformed.nii.gz", "brain_warp.nii.gz")
         os.rename("ants_InverseWarp.nii.gz", "inverse_warpfield.nii.gz")
