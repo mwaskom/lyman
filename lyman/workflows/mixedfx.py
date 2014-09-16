@@ -191,14 +191,16 @@ def create_surface_projection_workflow(name="surfproj", exp_info=None):
 
     # Sample the mask to the surface
     maskproj = Node(freesurfer.SampleToSurface(
-        sampling_method="max",
         sampling_range=exp_info["sampling_range"],
         sampling_units=exp_info["sampling_units"],
-        smooth_surf=exp_info["surf_smooth"],
         subject_id="fsaverage",
         mni152reg=True,
         target_subject="fsaverage"),
         "maskproj")
+    if exp_info["sampling_method"] == "point":
+        maskproj.inputs.sampling_method = "point"
+    else:
+        maskproj.inputs.sampling_method = "max"
 
     outputnode = Node(IdentityInterface(["surf_zstat",
                                          "surf_mask"]), "outputs")

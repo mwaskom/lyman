@@ -136,8 +136,9 @@ def add_mask_overlay(b, mask_file):
 
     # Plot the mask
     mask_data = np.logical_not(mask_data.astype(bool)).squeeze()
-    b.add_data(mask_data, min=0, max=10, thresh=.5,
-               colormap="bone", alpha=.6, colorbar=False)
+    if mask_data.any():
+        b.add_data(mask_data, min=0, max=10, thresh=.5,
+                   colormap="bone", alpha=.6, colorbar=False)
 
 
 def add_stat_overlay(b, stat_file, thresh, max, sign, sig_to_z=False):
