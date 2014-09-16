@@ -1,6 +1,6 @@
 
-v.0.0.3 (??)
-------------
+v.0.0.3 (September 16, 2014)
+----------------------------
 
 Preprocessing workflow
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -20,3 +20,9 @@ Model workflow
   estimation) when using a managed distribution engine (such as SGE). This can
   be helpful for whole-brain high-resolution studies.
 
+Anatomical normalization
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Fixed a bug in ANTS-based anatomical normalization that affected non-OSX
+  systems. This bug caused a workflow crash, so if you haven't seen it, don't
+  worry about it.
