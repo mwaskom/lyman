@@ -1,0 +1,14 @@
+
+v.0.0.4 (??)
+------------
+
+Mixed effects workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Fixed a bug where the analysis mask was getting smoothed on the surface.
+
+Surface snapshots script
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Fixed a bug where surface visualization would crash when the analysis mask
+  includes all vertices.
