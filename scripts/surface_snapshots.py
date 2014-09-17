@@ -186,7 +186,7 @@ def save_view_panes(b, sign, hemi):
 
         # Set the view and screenshot
         b.show_view(view, distance=330)
-        pause(0.2) # pause for show_view
+        pause(0.2)  # pause for show_view
         image_panes.append(b.screenshot())
 
     # Stitch the images together and return the array
