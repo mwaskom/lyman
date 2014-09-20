@@ -470,11 +470,11 @@ def _decode_subject(dataset, model, cv="run", split_pred=None,
 
     # Set up the cross-validation
     if cv == "run":
-        cv_ = LeaveOneLabelOut(runs, indices=False)
+        cv_ = LeaveOneLabelOut(runs)
     elif cv == "sample":
-        cv_ = LeaveOneOut(len(y), indices=False)
+        cv_ = LeaveOneOut(len(y))
     elif isinstance(cv, int):
-        cv_ = KFold(len(y), cv, indices=False)
+        cv_ = KFold(len(y), cv)
     else:
         raise ValueError("CV argument was not understood")
 

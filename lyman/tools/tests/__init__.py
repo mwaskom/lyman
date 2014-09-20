@@ -1,5 +1,1 @@
-import main
-import commandline
-import fileutils
-import graphutils
-import submission
+# Empty __init__ file so this directory is a subpackage

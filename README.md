@@ -89,6 +89,13 @@ https://github.com/mwaskom/lyman
 Please [submit](https://github.com/mwaskom/lyman/issues/new) any bugs you
 encounter to the Github issue tracker.
 
+Testing
+-------
+
+[![Build Status](https://travis-ci.org/mwaskom/lyman.svg?branch=master)](https://travis-ci.org/mwaskom/lyman)
+
+You can exercise the unit-test suite by running `nosetests` in the source directory.
+
 License
 -------
 

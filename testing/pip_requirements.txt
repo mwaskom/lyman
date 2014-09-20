@@ -1,0 +1,4 @@
+nibabel
+nipype
+nitime
+seaborn
