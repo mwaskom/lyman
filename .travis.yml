@@ -1,0 +1,30 @@
+language: python
+
+env:
+  - PYTHON=2.7
+
+install:
+  - conda update conda --yes
+  - conda create -n testenv --yes pip python=$PYTHON
+  - conda update conda --yes
+  - source activate testenv
+  - conda install --yes --file testing/conda_requirements.txt
+  - pip install -r testing/pip_requirements.txt
+  - pip install pep8
+  - pip install https://github.com/dcramer/pyflakes/tarball/master  
+  - pip install .
+
+before_install:
+  - if [ ${PYTHON:0:1} == "2" ]; then
+    wget http://repo.continuum.io/miniconda/Miniconda-2.2.2-Linux-x86_64.sh -O miniconda.sh; else
+    wget http://repo.continuum.io/miniconda/Miniconda3-2.2.2-Linux-x86_64.sh -O miniconda.sh;
+    fi
+  - chmod +x miniconda.sh
+  - ./miniconda.sh -b
+  - export PATH=/home/travis/anaconda/bin:$PATH
+
+before_script:
+  -  make lint
+
+script:
+  - nosetests --with-doctest
