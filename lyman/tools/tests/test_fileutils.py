@@ -23,4 +23,3 @@ class TestAddSuffix(object):
 
         fname = "foo/bar/buz.nii"
         nt.assert_equal(fu.add_suffix(fname, "bang"), "foo/bar/buz_bang.nii")
-

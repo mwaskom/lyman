@@ -1,5 +1,6 @@
 import subprocess as sp
 
+
 def submit_cmdline(runtime, cmdline):
     """Submit a command-line job and capture the output."""
 

@@ -3,6 +3,7 @@ from nose.tools import assert_equal
 
 from .. import frontend
 
+
 def test_determine_engine():
 
     plugin_dict = dict(linear="Linear",

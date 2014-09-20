@@ -51,7 +51,9 @@ def gather_experiment_info(exp_name=None, altmodel=None):
 
     exp_dict = default_experiment_parameters()
 
-    def keep(k): return not re.match("__.*__", k)
+    def keep(k):
+        return not re.match("__.*__", k)
+
     exp_dict.update({k: v for k, v in exp.__dict__.items() if keep(k)})
 
     # Possibly import the alternate model details
@@ -131,7 +133,8 @@ def default_experiment_parameters():
         sampling_range=(0, 1, .1),
         surf_corr_sign="pos",
 
-               )
+        )
+
     return exp
 
 

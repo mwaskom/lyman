@@ -5,3 +5,5 @@ build/
 doc/_build/
 doc/commandline/
 dist/
+.coverage
+cover/

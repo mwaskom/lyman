@@ -31,7 +31,8 @@ class TestSubmitCmdLine(object):
     def test_stdout_addition(self):
 
         cmdline = ["echo", "oh why hello"]
-        runtime = Bunch(stdout="hello test\n", cwd=os.getcwd(), environ=os.environ)
+        runtime = Bunch(stdout="hello test\n",
+                        cwd=os.getcwd(), environ=os.environ)
         out = submission.submit_cmdline(runtime, cmdline)
         nt.assert_equal(out.stdout, "hello test\noh why hello\n")
 
