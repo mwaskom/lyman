@@ -9,6 +9,7 @@ install:
   - conda update conda --yes
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
+  - pip install nibabel  # Must happen before nipype gets installed
   - pip install -r testing/pip_requirements.txt
   - pip install pep8
   - pip install https://github.com/dcramer/pyflakes/tarball/master  
