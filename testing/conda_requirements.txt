@@ -1,4 +1,4 @@
-IPython
+ipython-notebook
 numpy
 scipy
 matplotlib
@@ -6,3 +6,5 @@ pandas
 statsmodels
 scikit-learn
 scikit-image
+traits
+networkx
