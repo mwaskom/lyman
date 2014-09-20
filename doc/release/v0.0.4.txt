@@ -12,3 +12,6 @@ Surface snapshots script
 
 - Fixed a bug where surface visualization would crash when the analysis mask
   includes all vertices.
+
+- Added a brief pause between updating the view and saving a snapshot to allow
+  redrawing to finish.
