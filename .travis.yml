@@ -29,4 +29,4 @@ before_script:
   -  make lint
 
 script:
-  - nosetests --with-doctest
+    - make test

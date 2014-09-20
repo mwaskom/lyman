@@ -2,7 +2,7 @@ export SHELL := /bin/bash
 
 test:
 
-	nosetests --with-doctest
+	nosetests
 
 coverage:
 
