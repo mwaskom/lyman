@@ -24,6 +24,7 @@ before_install:
   - ./miniconda.sh -b
   - export PATH=/home/travis/anaconda/bin:$PATH
   - export FSLDIR=`pwd`/testing
+  - export SUBJECTS_DIR=`pwd`/testing
 
 before_script:
   -  make lint
