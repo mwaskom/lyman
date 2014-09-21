@@ -57,6 +57,8 @@ Python Packages
 
 - matplotlib 1.3
 
+- seaborn 0.4
+
 - nipype 0.9
 
 - nibabel 1.3
@@ -72,5 +74,3 @@ Python Packages
 - PySurfer 0.4
 
 - `moss <https://github.com/mwaskom/moss>`_
-
-- `seaborn <https://github.com/mwaskom/seaborn>`_
