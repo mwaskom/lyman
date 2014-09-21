@@ -21,7 +21,7 @@ Dependencies
 As a high-level package, lyman depends on a relatively large amount of external
 software. Getting set up to run an initial analysis can thus be somewhat of a
 hassle, which we apologize for. Below, we attempt to list the required packages
-and versions that are known to work with lyman. (For the most part 
+and versions that are known to work with lyman.
 
 Depending on what you are trying to do, it may not be necessary to install all
 of these packages. In the event that you don't want to exhaust this list, the
