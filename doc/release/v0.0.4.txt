@@ -12,6 +12,13 @@ Mixed effects workflow
 
 - Fixed a bug where the analysis mask was getting smoothed on the surface.
 
+FNIRT-based normalization workflow
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Fixed a bug where the outputs of FNIRT were not properly renamed and thus
+  were not correctly picked up by the registration stage of the functional
+  pipeline.
+
 Surface snapshots script
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -60,8 +60,9 @@ def create_fsl_workflow(data_dir=None, subjects=None, name="fslwarp"):
                          name="subjectsource")
 
     # Grab recon-all outputs
+    head_image = "T1"
     templates = dict(aseg="{subject_id}/mri/aparc+aseg.mgz",
-                     head="{subject_id}/mri/T1.mgz")
+                     head="{subject_id}/mri/" + head_image + ".mgz")
     datasource = Node(SelectFiles(templates,
                                   base_directory=data_dir),
                       "datasource")
@@ -108,13 +109,13 @@ def create_fsl_workflow(data_dir=None, subjects=None, name="fslwarp"):
     warpreport = Node(WarpReport(), "warpreport")
 
     # Save relevant files to the data directory
+    fnirt_subs = [(head_image + "_out_masked_flirt.mat", "affine.mat"),
+                  (head_image + "_out_fieldwarp", "warpfield"),
+                  (head_image + "_out_masked", "brain"),
+                  (head_image + "_out", "T1")]
     datasink = Node(DataSink(base_directory=data_dir,
                              parameterization=False,
-                             substitutions=[
-                                 ("orig_out_masked_flirt.mat", "affine.mat"),
-                                 ("orig_out_fieldwarp", "warpfield"),
-                                 ("orig_out_masked", "brain"),
-                                 ("orig_out", "T1")]),
+                             substitutions=fnirt_subs),
                     "datasink")
 
     # Define and connect the workflow
