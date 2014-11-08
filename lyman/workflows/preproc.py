@@ -442,6 +442,14 @@ def create_filtering_workflow(name="filter",
                      "in_file",
                      "filter")
 
+    # Possibly replace the mean
+    # (In later versions of FSL, the highpass filter removes the
+    # mean component. Put it back, but be flexible so this isn't
+    # broken on older versions of FSL).
+    replacemean = MapNode(ReplaceMean(),
+                          ["orig_file", "filtered_file"],
+                          "replacemean")
+
     # Compute a final mean functional volume
     meanfunc = MapNode(fsl.MeanImage(out_file="mean_func.nii.gz"),
                        "in_file", "meanfunc")
@@ -456,9 +464,13 @@ def create_filtering_workflow(name="filter",
              ("mask_file", "mask_file")]),
         (scale, filter,
             [("out_file", "in_file")]),
-        (filter, meanfunc,
+        (scale, replacemean,
+            [("out_file", "orig_file")]),
+        (filter, replacemean,
+            [("out_file", "filtered_file")]),
+        (replacemean, meanfunc,
             [("out_file", "in_file")]),
-        (filter, outputnode,
+        (replacemean, outputnode,
             [("out_file", "timeseries")]),
         (meanfunc, outputnode,
             [("out_file", "mean_file")]),
@@ -897,3 +909,55 @@ class ScaleTimeseries(BaseInterface):
         return scaled_data
 
     _list_outputs = list_out_file("timeseries_scaled.nii.gz")
+
+
+class ReplaceMeanInput(BaseInterfaceInputSpec):
+
+    orig_file = File(exists=True)
+    filtered_file = File(exists=True)
+
+
+class ReplaceMean(BaseInterface):
+    """Ensure that filtered timeseries mean is same as before filtering.
+
+    This works around some changes in later version of FSL (as of 11/2014)
+    that return a de-meaned timeseries from the FSL highpass filter.
+    In FEAT, the mean is replaced, and the rest of the processing carries
+    on as usual. Because I don't want to break compatability with older
+    versions of FSL, this adds back in the mean but only if it looks
+    like the filtered timeseries has been de-meaned.
+
+    """
+    input_spec = ReplaceMeanInput
+    output_spec = SingleOutFile
+
+    def _run_interface(self, runtime):
+
+        # Load the original and filtered timeseries data
+        orig_img = nib.load(self.inputs.orig_file)
+        orig_mean = orig_img.get_data().mean(axis=-1)
+
+        filtered_img = nib.load(self.inputs.filtered_file)
+        filtered_data = filtered_img.get_data()
+        filtered_mean = filtered_data.mean(axis=-1)
+
+        # Simple heuristic: if the maximum value in the mean image
+        # is less than 1, it looks like this timeseries has been
+        # de-meaned. In practice these values seem to be around
+        # 1e-5, so this should be safe.
+        if filtered_mean.max() < 1:
+            replacement = orig_mean
+        else:
+            replacement = np.zeros_like(orig_mean)
+        replacement = replacement[..., np.newaxis]
+
+        # Add back in what is needed and write out the image
+        new_data = filtered_data + replacement
+        new_img = nib.Nifti1Image(new_data,
+                                  filtered_img.get_affine(),
+                                  filtered_img.get_header())
+        new_img.to_filename("timeseries_filtered.nii.gz")
+
+        return runtime
+
+    _list_outputs = list_out_file("timeseries_filtered.nii.gz")
