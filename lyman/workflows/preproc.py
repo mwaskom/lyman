@@ -437,8 +437,7 @@ def create_filtering_workflow(name="filter",
 
     # Gaussian running-line filter
     hpf_sigma = (hpf_cutoff / 2.0) / TR
-    filter = MapNode(fsl.TemporalFilter(highpass_sigma=hpf_sigma,
-                                        out_file=output_name + ".nii.gz"),
+    filter = MapNode(fsl.TemporalFilter(highpass_sigma=hpf_sigma),
                      "in_file",
                      "filter")
 
@@ -446,7 +445,7 @@ def create_filtering_workflow(name="filter",
     # (In later versions of FSL, the highpass filter removes the
     # mean component. Put it back, but be flexible so this isn't
     # broken on older versions of FSL).
-    replacemean = MapNode(ReplaceMean(),
+    replacemean = MapNode(ReplaceMean(output_name=output_name),
                           ["orig_file", "filtered_file"],
                           "replacemean")
 
@@ -915,6 +914,7 @@ class ReplaceMeanInput(BaseInterfaceInputSpec):
 
     orig_file = File(exists=True)
     filtered_file = File(exists=True)
+    output_name = traits.String()
 
 
 class ReplaceMean(BaseInterface):
@@ -956,8 +956,14 @@ class ReplaceMean(BaseInterface):
         new_img = nib.Nifti1Image(new_data,
                                   filtered_img.get_affine(),
                                   filtered_img.get_header())
-        new_img.to_filename("timeseries_filtered.nii.gz")
+        out_fname = "{}.nii.gz".format(self.inputs.output_name)
+        new_img.to_filename(out_fname)
 
         return runtime
 
-    _list_outputs = list_out_file("timeseries_filtered.nii.gz")
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        out_fname = "{}.nii.gz".format(self.inputs.output_name)
+        outputs["out_file"] = op.abspath(out_fname)
+        return outputs

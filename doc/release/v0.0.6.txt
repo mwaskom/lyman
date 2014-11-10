@@ -1,0 +1,11 @@
+
+v0.0.6 (November 10, 2014)
+-------------------------
+
+This is a bugfix release that anyone using v0.0.5 should upgrade to.
+
+Preprocessing workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Fix a bug that was introduced in v0.0.5 where the preprocessed timeseries
+  was not being written out by the DataSink.
