@@ -175,7 +175,8 @@ def main(arglist):
     reg, reg_input, reg_output = wf.create_reg_workflow(flow_name,
                                                         space,
                                                         regtype,
-                                                        warp_method)
+                                                        warp_method,
+                                                        args.residual)
 
     # Define a smoothing info node here. Use an iterable so that running
     # with/without smoothing doesn't clobber working directory files
@@ -245,8 +246,6 @@ def main(arglist):
     # Reg has some additional substitutions to strip out iterables
     # and rename the timeseries file
     reg_subs = [("_smoothing_", "")]
-    if args.residual:
-        reg_subs.append(("timeseries_xfm", "res4d_xfm"))
     reg_outwrap.add_regexp_substitutions(reg_subs)
 
     # Add dummy substitutions for the contasts to make sure the DataSink
