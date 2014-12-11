@@ -166,7 +166,7 @@ def main(arglist):
     # ----------------------------------------------------------------------- #
 
     # Is this a model or timeseries registration?
-    regtype = "timeseries" if args.timeseries else "model"
+    regtype = "timeseries" if (args.timeseries or args.residual) else "model"
 
     # Retrieve the right workflow function for registration
     # Get the workflow function dynamically based on the space
@@ -175,7 +175,8 @@ def main(arglist):
     reg, reg_input, reg_output = wf.create_reg_workflow(flow_name,
                                                         space,
                                                         regtype,
-                                                        warp_method)
+                                                        warp_method,
+                                                        args.residual)
 
     # Define a smoothing info node here. Use an iterable so that running
     # with/without smoothing doesn't clobber working directory files
@@ -187,21 +188,24 @@ def main(arglist):
     # Set up the registration inputs and templates
     reg_templates = dict(
         masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
+        means="{subject_id}/preproc/run_*/mean_func.nii.gz",
                          )
 
     if regtype == "model":
         reg_base = "{subject_id}/model/{smoothing}/run_*/"
         reg_templates.update(dict(
-            means="{subject_id}/preproc/run_*/mean_func.nii.gz",
             copes=op.join(reg_base, "cope*.nii.gz"),
             varcopes=op.join(reg_base, "varcope*.nii.gz"),
             sumsquares=op.join(reg_base, "ss*.nii.gz"),
                                   ))
     else:
-        reg_templates.update(dict(
-            timeseries=op.join("{subject_id}/preproc/run_*/",
-                               "{smoothing}_timeseries.nii.gz"),
-                                  ))
+        if args.residual:
+            ts_file = op.join("{subject_id}/model/{smoothing}/run_*/",
+                              "results/res4d.nii.gz")
+        else:
+            ts_file = op.join("{subject_id}/preproc/run_*/",
+                              "{smoothing}_timeseries.nii.gz")
+        reg_templates.update(dict(timeseries=ts_file))
     reg_lists = reg_templates.keys()
 
     if space == "mni":
@@ -241,7 +245,8 @@ def main(arglist):
 
     # Reg has some additional substitutions to strip out iterables
     # and rename the timeseries file
-    reg_outwrap.add_regexp_substitutions([("_smoothing_", "")])
+    reg_subs = [("_smoothing_", "")]
+    reg_outwrap.add_regexp_substitutions(reg_subs)
 
     # Add dummy substitutions for the contasts to make sure the DataSink
     # reruns when the deisgn has changed. This accounts for the problem where
@@ -446,13 +451,13 @@ def parse_args(arglist):
         with the experiment details defined in $LYMAN_DIR/nback-parametric.py.
         This assumes preprocessing has been performed for the nback experiment.
 
-    run_fmri.py -w preproc reg -t -u -r epi
+    run_fmri.py -w preproc reg -t -u -reg epi
 
         Preprocess the default experiment for all subjects, and then align
         the unsmoothed timeseries into the epi space. This is the standard set
         of processing that must be performed before multivariate analyses.
 
-    run_fmri.py -w reg ffx -r epi
+    run_fmri.py -w reg ffx -reg epi
 
         Align the summary statistics for all subjects into the epi space and
         then combine across runs. This is the standard processing that must
@@ -480,6 +485,8 @@ def parse_args(arglist):
                         help="common space for registration and fixed effects")
     parser.add_argument("-timeseries", action="store_true",
                         help="perform registration on preprocessed timeseries")
+    parser.add_argument("-residual", action="store_true",
+                        help="perform registration on residual timeseries")
     parser.add_argument("-unsmoothed", action="store_true",
                         help="used unsmoothed data for model, reg, and ffx")
     return parser.parse_args(arglist)

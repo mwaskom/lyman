@@ -30,15 +30,15 @@ spaces = ["epi", "mni"]
 
 
 def create_reg_workflow(name="reg", space="mni",
-                        regtype="model", method="fsl"):
+                        regtype="model", method="fsl", residual=False):
     """Flexibly register files into one of several common spaces."""
 
     # Define the input fields flexibly
     if regtype == "model":
-        fields = ["means", "copes", "varcopes", "sumsquares"]
+        fields = ["copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
-    fields.extend(["masks", "rigids"])
+    fields.extend(["means", "masks", "rigids"])
 
     if space == "mni":
         fields.extend(["affine", "warpfield"])
@@ -50,6 +50,14 @@ def create_reg_workflow(name="reg", space="mni",
                                                regtype.capitalize())
     reg_interface = globals()[interface_name]
     transform = Node(reg_interface(method=method), "transform")
+
+    # Sanity check on inputs
+    if regtype == "model" and residual:
+        raise ValueError("residual and regtype=model does not make sense")
+
+    # Set the kind of timeseries
+    if residual:
+        transform.inputs.residual = True
 
     outputnode = Node(IdentityInterface(["out_files"]), "outputnode")
 
@@ -71,6 +79,7 @@ def create_reg_workflow(name="reg", space="mni",
 
 class RegistrationInput(BaseInterfaceInputSpec):
 
+    means = InputMultiPath(File(exists=True))
     masks = InputMultiPath(File(exists=True))
     rigids = InputMultiPath(File(exists=True))
     method = traits.Enum("ants", "fsl")
@@ -78,7 +87,6 @@ class RegistrationInput(BaseInterfaceInputSpec):
 
 class ModelRegInput(BaseInterfaceInputSpec):
 
-    means = InputMultiPath(File(exists=True))
     copes = InputMultiPath(File(exists=True))
     varcopes = InputMultiPath(File(exists=True))
     sumsquares = InputMultiPath(File(exists=True))
@@ -87,6 +95,7 @@ class ModelRegInput(BaseInterfaceInputSpec):
 class TimeseriesRegInput(BaseInterfaceInputSpec):
 
     timeseries = InputMultiPath(File(exists=True))
+    residual = traits.Bool(default=False)
 
 
 class MNIRegInput(BaseInterfaceInputSpec):
@@ -378,16 +387,23 @@ class MNITimeseriesRegistration(MNIRegistration,
 
             # Warp the timeseries files
             run_timeseries = self.inputs.timeseries[i]
-            out_timeseries = op.join(out_dir, "timeseries_xfm.nii.gz")
+            name = "res4d" if self.inputs.residual else "timeseries"
+            out_timeseries = op.join(out_dir, name + "_warp.nii.gz")
             run_rigid = self.inputs.rigids[i]
             runtime = warp_func(runtime, run_timeseries,
                                 out_timeseries, run_rigid)
 
             # Warp the mask file
             run_mask = self.inputs.masks[i]
-            out_mask_fname = op.basename(add_suffix(run_mask, "xfm"))
+            out_mask_fname = op.basename(add_suffix(run_mask, "warp"))
             out_mask = op.join(out_dir, out_mask_fname)
             runtime = warp_func(runtime, run_mask, out_mask, run_rigid)
+
+            # Warp the mean file
+            run_mean = self.inputs.means[i]
+            out_mean_fname = op.basename(add_suffix(run_mean, "warp"))
+            out_mean = op.join(out_dir, out_mean_fname)
+            runtime = warp_func(runtime, run_mean, out_mean, run_rigid)
 
         self.out_files = out_files
         return runtime
@@ -425,7 +441,8 @@ class EPITimeseriesRegistration(EPIRegistration,
 
             # Warp the timeseries files
             run_timeseries = self.inputs.timeseries[i]
-            out_timeseries = op.join(out_dir, "timeseries_xfm.nii.gz")
+            name = "res4d" if self.inputs.residual else "timeseries"
+            out_timeseries = op.join(out_dir, name + "_xfm.nii.gz")
             runtime = self.apply_fsl_rigid(runtime, run_timeseries,
                                            out_timeseries, full_rigid)
 
@@ -435,6 +452,13 @@ class EPITimeseriesRegistration(EPIRegistration,
             out_mask = op.join(out_dir, out_mask_fname)
             runtime = self.apply_fsl_rigid(runtime, run_mask,
                                            out_mask, full_rigid)
+
+            # Warp the mean file
+            run_mean = self.inputs.means[i]
+            out_mean_fname = op.basename(add_suffix(run_mean, "xfm"))
+            out_mean = op.join(out_dir, out_mean_fname)
+            runtime = self.apply_fsl_rigid(runtime, run_mean,
+                                           out_mean, run_rigid)
 
         self.out_files = out_files
         return runtime
