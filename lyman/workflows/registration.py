@@ -460,6 +460,5 @@ class EPITimeseriesRegistration(EPIRegistration,
             runtime = self.apply_fsl_rigid(runtime, run_mean,
                                            out_mean, run_rigid)
 
-
         self.out_files = out_files
         return runtime
