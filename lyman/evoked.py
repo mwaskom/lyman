@@ -19,7 +19,7 @@ from lyman import gather_project_info
 
 
 def extract_subject(subj, mask_name, summary_func=np.mean,
-                    exp_name=None):
+                    residual=False, exp_name=None):
     """Extract timeseries from within a mask, summarizing flexibly.
 
     Parameters
@@ -33,6 +33,8 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
         ``axis`` argument to operate over each frame, if this
         argument does not exist the function will be called on the
         n_tr x n_voxel array. if None, simply returns all voxels.
+    residual : boolean
+        If True, extract from the registered residual timecourse.
     exp_name : string
         experiment name, if not using the default experiment
 
@@ -70,8 +72,10 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
     ts_dir = op.join(project["analysis_dir"], exp_name, subj,
                      "reg", "epi", "unsmoothed")
     n_runs = len(glob(op.join(ts_dir, "run_*")))
-    ts_files = [op.join(ts_dir, "run_%d" % (r_i + 1),
-                        "timeseries_xfm.nii.gz") for r_i in range(n_runs)]
+
+    ftemp = op.join(ts_dir, "run_{:d}/{}_xfm.nii.gz")
+    fstem = "res4d" if residual else "timeseries"
+    ts_files = [ftemp.format(r_i, fstem) for r_i in range(n_runs)]
 
     # Get the hash value for this extraction
     cache_hash = hashlib.sha1()
@@ -108,7 +112,7 @@ def extract_subject(subj, mask_name, summary_func=np.mean,
 
         data.append(roi_data)
 
-    data = map(np.squeeze, data)
+    data = np.array(list(map(np.squeeze, data)))
 
     # Save the results and return them
     data_dict = dict(data=data, subj=subj, hash=cache_hash)
