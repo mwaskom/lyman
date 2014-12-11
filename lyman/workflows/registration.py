@@ -35,10 +35,10 @@ def create_reg_workflow(name="reg", space="mni",
 
     # Define the input fields flexibly
     if regtype == "model":
-        fields = ["means", "copes", "varcopes", "sumsquares"]
+        fields = ["copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
-    fields.extend(["masks", "rigids"])
+    fields.extend(["means", "masks", "rigids"])
 
     if space == "mni":
         fields.extend(["affine", "warpfield"])
@@ -79,6 +79,7 @@ def create_reg_workflow(name="reg", space="mni",
 
 class RegistrationInput(BaseInterfaceInputSpec):
 
+    means = InputMultiPath(File(exists=True))
     masks = InputMultiPath(File(exists=True))
     rigids = InputMultiPath(File(exists=True))
     method = traits.Enum("ants", "fsl")
@@ -86,7 +87,6 @@ class RegistrationInput(BaseInterfaceInputSpec):
 
 class ModelRegInput(BaseInterfaceInputSpec):
 
-    means = InputMultiPath(File(exists=True))
     copes = InputMultiPath(File(exists=True))
     varcopes = InputMultiPath(File(exists=True))
     sumsquares = InputMultiPath(File(exists=True))
@@ -399,6 +399,12 @@ class MNITimeseriesRegistration(MNIRegistration,
             out_mask = op.join(out_dir, out_mask_fname)
             runtime = warp_func(runtime, run_mask, out_mask, run_rigid)
 
+            # Warp the mean file
+            run_mean = self.inputs.means[i]
+            out_mean_fname = op.basename(add_suffix(run_mean, "warp"))
+            out_mean = op.join(out_dir, out_mean_fname)
+            runtime = warp_func(runtime, run_mean, out_mean, run_rigid)
+
         self.out_files = out_files
         return runtime
 
@@ -446,6 +452,14 @@ class EPITimeseriesRegistration(EPIRegistration,
             out_mask = op.join(out_dir, out_mask_fname)
             runtime = self.apply_fsl_rigid(runtime, run_mask,
                                            out_mask, full_rigid)
+
+            # Warp the mean file
+            run_mean = self.inputs.means[i]
+            out_mean_fname = op.basename(add_suffix(run_mean, "xfm"))
+            out_mean = op.join(out_dir, out_mean_fname)
+            runtime = self.apply_fsl_rigid(runtime, run_mean,
+                                           out_mean, run_rigid)
+
 
         self.out_files = out_files
         return runtime

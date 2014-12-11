@@ -188,23 +188,23 @@ def main(arglist):
     # Set up the registration inputs and templates
     reg_templates = dict(
         masks="{subject_id}/preproc/run_*/functional_mask.nii.gz",
+        means="{subject_id}/preproc/run_*/mean_func.nii.gz",
                          )
 
     if regtype == "model":
         reg_base = "{subject_id}/model/{smoothing}/run_*/"
         reg_templates.update(dict(
-            means="{subject_id}/preproc/run_*/mean_func.nii.gz",
             copes=op.join(reg_base, "cope*.nii.gz"),
             varcopes=op.join(reg_base, "varcope*.nii.gz"),
             sumsquares=op.join(reg_base, "ss*.nii.gz"),
                                   ))
     else:
-        if args.timeseries:
-            ts_file = op.join("{subject_id}/preproc/run_*/",
-                              "{smoothing}_timeseries.nii.gz")
-        else:
+        if args.residual:
             ts_file = op.join("{subject_id}/model/{smoothing}/run_*/",
                               "results/res4d.nii.gz")
+        else:
+            ts_file = op.join("{subject_id}/preproc/run_*/",
+                              "{smoothing}_timeseries.nii.gz")
         reg_templates.update(dict(timeseries=ts_file))
     reg_lists = reg_templates.keys()
 
