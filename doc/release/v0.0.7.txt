@@ -1,0 +1,11 @@
+
+v0.0.7 (Unreleased)
+-------------------------
+
+Registration workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Added ability to register the residual timeseries after model-fitting, using
+  the ``-residual`` flag in ``run_fmri.py`` when ``reg`` is in the workflow
+  spec. This file will be called ``res4d_xfm.nii.gz`` in the registration
+  output.
