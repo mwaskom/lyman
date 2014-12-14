@@ -458,7 +458,7 @@ class EPITimeseriesRegistration(EPIRegistration,
             out_mean_fname = op.basename(add_suffix(run_mean, "xfm"))
             out_mean = op.join(out_dir, out_mean_fname)
             runtime = self.apply_fsl_rigid(runtime, run_mean,
-                                           out_mean, run_rigid)
+                                           out_mean, full_rigid)
 
         self.out_files = out_files
         return runtime
