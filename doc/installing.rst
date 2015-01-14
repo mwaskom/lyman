@@ -39,6 +39,15 @@ Non-Python Software
 
 - FSL 5.0
 
+.. warning::
+
+   FSL 5.0.7 included some unexpected non backwards-compatibile changes that
+   break the lyman model workflow. These changes are not fully documented in
+   the FSL release notes, and I have not yet had a chance to figure out how
+   to work around them. If you want to use the model workflow, you should
+   install FSL 5.0.6 (or not upgrade). If you just want to do preprocessing
+   and registration, this should not be a problem.
+
 - Freesurfer 5.3
 
 - ANTs 1.9
