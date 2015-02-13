@@ -7,8 +7,8 @@ parser.add_argument("-subjects", nargs="*", dest="subjects",
                           "directory, or full path to text file with "
                           "subject ids"))
 parser.add_argument("-plugin", default="multiproc",
-                    choices=["linear", "multiproc",
-                             "ipython", "torque", "sge"],
+                    choices=["linear", "multiproc", "ipython",
+                             "torque", "sge", "slurm"],
                     help="worklow execution plugin")
 parser.add_argument("-nprocs", default=4, type=int,
                     help="number of MultiProc processes to use")
