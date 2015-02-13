@@ -227,7 +227,7 @@ def main(arglist):
                                   base_directory=analysis_dir),
                       "reg_source")
 
-    # Registration inutnode
+    # Registration inputnode
     reg_inwrap = tools.InputWrapper(reg, subj_source,
                                     reg_source, reg_input)
     reg_inwrap.connect_inputs()
