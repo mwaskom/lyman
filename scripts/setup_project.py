@@ -118,6 +118,9 @@ analysis_dir = '%(analysis_dir)s'
 # Working directory is where data lives during workflow execution
 working_dir = '%(working_dir)s'
 
+# Crash directory is where debugging info will be written if things go wrong
+crash_dir = '%(crash_dir)s'
+
 # Set this to True to remove the working directory after each excecution
 rm_working_dir = %(rm_work_dir)s
 
@@ -256,6 +259,10 @@ Please use relative paths.
     
     do_prompt(d, "working_dir", "Working tree path", 
               op.join(d['analysis_dir'], 'workingdir'), is_path)
+
+    crash_stem = "niypype-" + os.environ.get("LOGNAME", "-") + "-crashes"
+    do_prompt(d, "crash_dir", "Crashdump path",
+              op.join("/tmp", crash_stem))
 
     do_prompt(d, "rm_work_dir", "Remove working directory after execution? (Y/n)",
               "y", boolean)

@@ -51,11 +51,7 @@ def main(arglist):
     data_dir = project["data_dir"]
     analysis_dir = op.join(project["analysis_dir"], exp_name)
     working_dir = op.join(project["working_dir"], exp_name)
-
-    # Just stick crashdumps in a unique /tmp directory
-    nipype.config.set("execution", "crashdump_dir",
-                      "/tmp/%s-nipype_crashes-%d" % (os.getlogin(),
-                                                     time.time()))
+    nipype.config.set("execution", "crashdump_dir", project["crash_dir"])
 
     # Create symlinks to the preproc directory for altmodels
     if not op.exists(analysis_dir):

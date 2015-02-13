@@ -59,10 +59,8 @@ def main(arglist):
     normalize = wf_func(project["data_dir"], subject_list)
     normalize.base_dir = project["working_dir"]
     
-    # Put crashdumps in a unique /tmp directory
-    nipype.config.set("execution", "crashdump_dir",
-                      "/tmp/%s-nipype_crashes-%d" % (os.getlogin(),
-                                                     time.time()))
+    # Put crashdumps somewhere out of the way
+    nipype.config.set("execution", "crashdump_dir", project["crash_dir"])
 
     # Execute the workflow
     lyman.run_workflow(normalize, args=args)

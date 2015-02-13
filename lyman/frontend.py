@@ -18,7 +18,7 @@ def gather_project_info():
         project = imp.load_source("project", proj_file)
 
     project_dict = dict()
-    for dir in ["data", "analysis", "working"]:
+    for dir in ["data", "analysis", "working", "crash"]:
         path = op.abspath(op.join(lyman_dir, getattr(project, dir + "_dir")))
         project_dict[dir + "_dir"] = path
     project_dict["default_exp"] = project.default_exp
