@@ -158,7 +158,8 @@ def determine_subjects(subject_arg=None):
 def determine_engine(args):
     """Read command line args and return Workflow.run() args."""
     plugin_dict = dict(linear="Linear", multiproc="MultiProc",
-                       ipython="IPython", torque="PBS", sge="SGE")
+                       ipython="IPython", torque="PBS", sge="SGE",
+                       slurm="SLURM")
 
     plugin = plugin_dict[args.plugin]
 

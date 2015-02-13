@@ -1,6 +1,11 @@
 
 v0.0.7 (Unreleased)
--------------------------
+-------------------
+
+Execution
+~~~~~~~~~
+
+- Added the option to submit jobs using slurm.
 
 Registration workflow
 ~~~~~~~~~~~~~~~~~~~~~~
