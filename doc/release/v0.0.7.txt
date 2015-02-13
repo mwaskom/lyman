@@ -6,6 +6,16 @@ Execution
 ~~~~~~~~~
 
 - Added the option to submit jobs using slurm.
+- Added the ``crash_dir`` parameter at the project level (i.e. it will be
+  defined when you run ``setup_project.py`` and will be stored in
+  ``$LYMAN_DIR/project.py``). This allows you to specify where debugging
+  information will be written if something goes wrong during workflow
+  execution. The previous approach to selecting where crash files would be
+  written was not robust in all execution contexts. **Important:** if you
+  upgrade to this version and try to rerun something in an existing project,
+  you will get an error.  This can be avoided by defining ``crash_dir`` in your
+  project file. These files are usually only transiently useful, so the default
+  location for new projects is ``/tmp/nipype-$USER-crashes``.
 
 Registration workflow
 ~~~~~~~~~~~~~~~~~~~~~~

@@ -44,9 +44,7 @@ def main(arglist):
     # Set roots of output storage
     anal_dir_base = op.join(project["analysis_dir"], exp_name)
     work_dir_base = op.join(project["working_dir"], exp_name)
-    nipype.config.set("execution", "crashdump_dir",
-                      "/tmp/%s-nipype_crashes-%d" % (os.getlogin(),
-                                                     time.time()))
+    nipype.config.set("execution", "crashdump_dir", project["crash_dir"])
 
     # Subject source (no iterables here)
     subject_list = lyman.determine_subjects(args.subjects)
