@@ -14,7 +14,7 @@ MAINTAINER_EMAIL = 'mwaskom@stanford.edu'
 LICENSE = 'BSD (3-clause)'
 URL = 'http://stanford.edu/~mwaskom/software/lyman/'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
-VERSION = '0.0.7.dev'
+VERSION = '0.0.7'
 
 def check_dependencies():
 
