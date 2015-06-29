@@ -515,11 +515,18 @@ class MFXReport(BaseInterface):
         with sns.axes_style("whitegrid"):
             f, ax = plt.subplots(figsize=(9, float(len(peaks)) / 3 + 0.33))
 
-        pal = sns.husl_palette(peak_dists.shape[1])[::-1]
-        sns.boxplot(peak_dists[:, ::-1], color=pal, ax=ax, vert=False)
+        try:
+            # seaborn >= 0.6
+            sns.boxplot(data=peak_dists, palette="husl", orient="h", ax=ax)
+            labels = np.arange(len(peaks)) + 1
+        except TypeError:
+            # seaborn < 0.6
+            pal = sns.husl_palette(peak_dists.shape[1])[::-1]
+            sns.boxplot(peak_dists[:, ::-1], color=pal, ax=ax, vert=False)
+            labels = np.arange(len(peaks))[::-1] + 1
+
         sns.despine(left=True, bottom=True)
         ax.axvline(0, c=".3", ls="--")
-        labels = np.arange(len(peaks))[::-1] + 1
         ax.set(yticklabels=labels, ylabel="Local Maximum", xlabel="COPE Value")
 
         out_fname = op.realpath("peak_boxplot.png")
