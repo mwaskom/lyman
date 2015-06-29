@@ -1,0 +1,8 @@
+
+v0.0.7 (Unreleased)
+-------------------
+
+Mixed-effects workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Updated the mixed effects boxplot code for compatability with seaborn 0.6.
