@@ -31,27 +31,27 @@ useful for finding missing dependencies.
 Lyman requires Python 2.7, and does not run on Python 3. We strongly recommend
 using the `Anaconda <https://store.continuum.io/cshop/anaconda/>`_
 distribution, which ships with the majority of the Python packages needed to
-run lyman. The rest can be easily intalled with pip.
+run lyman. The rest can be easily installed with `pip`.
 
 
 Non-Python Software
 ~~~~~~~~~~~~~~~~~~~
 
-- FSL 5.0
-
-.. warning::
-
-   FSL 5.0.7 included some unexpected non backwards-compatibile changes that
-   break the lyman model workflow. These changes are not fully documented in
-   the FSL release notes, and I have not yet had a chance to figure out how
-   to work around them. If you want to use the model workflow, you should
-   install FSL 5.0.6 (or not upgrade). If you just want to do preprocessing
-   and registration, this should not be a problem.
-
 - Freesurfer 5.3
+
+- FSL 5.0.7+
+
+.. note::
+
+   Due to changes in FSL, the lyman 0.0.7 and earlier only compatibile
+   with FSL 5.0.6 and earlier, and lyman 0.0.8 and later are only compatibile
+   with FSL 5.0.7 and later.
 
 - ANTs 1.9
 
+.. note::
+
+    Lyman is not compatible with later versions of ANTs.
 
 Python Packages
 ~~~~~~~~~~~~~~~
@@ -66,11 +66,11 @@ Python Packages
 
 - matplotlib 1.3
 
-- seaborn 0.4
+- seaborn 0.6
 
-- nipype 0.9
+- nipype 0.10
 
-- nibabel 1.3
+- nibabel 2.0
 
 - pandas 0.12
 

@@ -2,7 +2,16 @@
 v0.0.7 (Unreleased)
 -------------------
 
+Model workflow
+~~~~~~~~~~~~~~
+
+- Upgraded the model workflow to be compatible with FSL 5.0.7 and later. If you
+  upgrade lyman, you will have to upgrade your FSL installation (i.e. it does
+  not maintain backwards compatibility with older FSL). You should also upgrade
+  to nipype 0.10. The main advantage of upgrading should be increased memory
+  performance in the model estimation.
+
 Mixed-effects workflow
 ~~~~~~~~~~~~~~~~~~~~~~
 
-- Updated the mixed effects boxplot code for compatability with seaborn 0.6.
+- Updated the mixed effects boxplot code for compatibility with seaborn 0.6.

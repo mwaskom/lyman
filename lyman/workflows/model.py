@@ -51,19 +51,9 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
                                         mask_size=5,
                                         threshold=100),
-                            ["design_file", "in_file"],
+                            ["design_file", "in_file", "tcon_file"],
                             "modelestimate")
     modelestimate.plugin_args = mem_request
-
-    # Run the contrast estimation routine
-    contrastestimate = MapNode(fsl.ContrastMgr(),
-                               ["tcon_file",
-                                "dof_file",
-                                "corrections",
-                                "param_estimates",
-                                "sigmasquareds"],
-                               "contrastestimate")
-    contrastestimate.plugin_args = mem_request
 
     # Compute summary statistics about the model fit
     modelsummary = MapNode(ModelSummary(),
@@ -113,14 +103,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         (inputnode, saveparams,
             [("timeseries", "in_file")]),
         (modelsetup, modelestimate,
-            [("design_matrix_file", "design_file")]),
-        (modelestimate, contrastestimate,
-            [("dof_file", "dof_file"),
-             ("corrections", "corrections"),
-             ("param_estimates", "param_estimates"),
-             ("sigmasquareds", "sigmasquareds")]),
-        (modelsetup, contrastestimate,
-            [("contrast_file", "tcon_file")]),
+            [("design_matrix_file", "design_file"),
+             ("contrast_file", "tcon_file")]),
         (modelsetup, modelsummary,
             [("design_matrix_pkl", "design_matrix_pkl")]),
         (inputnode, modelsummary,
@@ -142,9 +126,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         (saveparams, outputnode,
             [("json_file", "json_file")]),
         (modelestimate, outputnode,
-            [("results_dir", "results")]),
-        (contrastestimate, outputnode,
-            [("copes", "copes"),
+            [("results_dir", "results"),
+             ("copes", "copes"),
              ("varcopes", "varcopes"),
              ("zstats", "zstats")]),
         (modelsummary, outputnode,
@@ -162,7 +145,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         model.connect(inputnode, "regressor_file",
                       modelsetup, "regressor_file")
     if exp_info["contrasts"]:
-        model.connect(contrastestimate, "zstats",
+        model.connect(modelestimate, "zstats",
                       modelreport, "zstat_files")
         modelreport.iterfield.append("zstat_files")
 
