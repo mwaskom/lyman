@@ -11,24 +11,21 @@ Dependencies:
 - Nibabel
 - PySurfer
 
-The resulting files can be most easily viewed using the Ziegler app.
-
-There is a bug in Mayavi on some 64 bit versions of Python that causes
-a segfault when repeatedly closing figures. If you encounter this bug,
-you can try the `-noclose` switch which will keep all of the PySurfer
-figures open until the script exits.
+The resulting files can be most easily viewed using the ziegler app.
 
 """
+from __future__ import division
 import os
 import os.path as op
 import sys
-import subprocess as sub
 import argparse
 
 import numpy as np
-import matplotlib as mpl
 import nibabel as nib
-from mayavi import mlab
+from scipy.interpolate import NearestNDInterpolator
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 from surfer import Brain
 
 from moss.mosaic import Mosaic
@@ -54,58 +51,138 @@ def main(arglist):
             os.mkdir(out_dir)
 
         # Do each chunk of reporting
-        inflated_surfaces(out_dir, subj, args.close)
-        curvature_normalization(data_dir, subj, args.close)
+        surface_images(out_dir, subj)
+        curvature_normalization(data_dir, subj)
         volume_images(data_dir, subj)
 
 
-def inflated_surfaces(out_dir, subj, close=True):
-    """Native inflated surfaces with cortical label."""
-    for hemi in ["lh", "rh"]:
-        b = Brain(subj, hemi, "inflated", curv=False,
-                  config_opts=dict(background="white",
-                                   width=800, height=500))
-        b.add_label("cortex", color="#6B6B6B")
+def crop(img):
+    """Closely crop a brain screenshot."""
+    x, y = np.argwhere((img != 255).any(axis=-1)).T
+    return img[x.min():x.max(), y.min():y.max(), :]
 
-        for view in ["lat", "med"]:
-            b.show_view(view)
-            mlab.view(distance=400)
-            png = op.join(out_dir, "%s.surface_%s.png" % (hemi, view))
-            b.save_image(png)
-        if close:
+
+def six_panel_brain_figure(panels):
+    """Make a matplotlib figure with the brain screenshots."""
+    # Reorient the brains to be "wide"
+    plot_panels = []
+    for img in panels:
+        if (img.shape[1] < img.shape[0]):
+            img = np.rot90(img)
+        plot_panels.append(img)
+
+    # Infer the size of the figure and the axes
+    sizes = np.array([p.shape for p in plot_panels[:3]])
+    full_size = sizes.sum(axis=0)
+    height_ratios = sizes[:, 0] / full_size[0]
+    ratio = full_size[0] / (sizes.max(axis=0)[1] * 2)
+    figsize = (9, 9 * ratio)
+
+    # Plot the brains onto the figure
+    f, axes = plt.subplots(3, 2, figsize=figsize,
+                           gridspec_kw={"height_ratios": height_ratios})
+    for ax, img in zip(axes.T.flat, plot_panels):
+        ax.imshow(img)
+        ax.set_axis_off()
+    f.subplots_adjust(0, 0, 1, 1, .05, .05)
+
+    return f
+
+
+def surface_images(out_dir, subj):
+    """Plot the white, pial, and inflated surfaces to look for defects."""
+    for surf in ["white", "pial", "inflated"]:
+        panels = []
+        for hemi in ["lh", "rh"]:
+
+            try:
+                b = Brain(subj, hemi, surf, curv=False, background="white")
+            except TypeError:
+                # PySurfer <= 0.5
+                b = Brain(subj, hemi, surf, curv=False,
+                          config_opts=dict(background="white"))
+
+            for view in ["lat", "med", "ven"]:
+                b.show_view(view, distance="auto")
+                panels.append(crop(b.screenshot()))
             b.close()
 
+        # Make and save a figure
+        f = six_panel_brain_figure(panels)
+        fname = op.join(out_dir, "{}_surface.png".format(surf))
+        f.savefig(fname, bbox_inches="tight")
+        plt.close(f)
 
-def curvature_normalization(data_dir, subj, close=True):
+
+def apply_surface_warp(data_dir, subj, hemi, vals):
+    """Apply the spherical normalization from subject to fsaverage space."""
+    # Load the files containing registration information
+    sphere_reg_fname = op.join(data_dir, subj, "surf",
+                               "{}.sphere.reg".format(hemi))
+    avg_sphere_fname = op.join(data_dir, "fsaverage/surf",
+                               "{}.sphere".format(hemi))
+    sphere_reg, _ = nib.freesurfer.read_geometry(sphere_reg_fname)
+    avg_sphere, _ = nib.freesurfer.read_geometry(avg_sphere_fname)
+
+    # Apply the registration
+    interpolator = NearestNDInterpolator(sphere_reg, vals, 0)
+    normalized_vals = interpolator(avg_sphere)
+    return normalized_vals
+
+
+def curvature_normalization(data_dir, subj):
     """Normalize the curvature map and plot contour over fsaverage."""
     surf_dir = op.join(data_dir, subj, "surf")
     snap_dir = op.join(data_dir, subj, "snapshots")
+    panels = []
     for hemi in ["lh", "rh"]:
 
-        cmd = ["mri_surf2surf",
-               "--srcsubject", subj,
-               "--trgsubject", "fsaverage",
-               "--hemi", hemi,
-               "--sval", op.join(surf_dir, "%s.curv" % hemi),
-               "--tval", op.join(surf_dir, "%s.curv.fsaverage.mgz" % hemi)]
+        # Load the curv values and apply registration to fsaverage
+        curv_fname = op.join(surf_dir, "{}.curv".format(hemi))
+        curv_vals = nib.freesurfer.read_morph_data(curv_fname)
+        subj_curv_vals = apply_surface_warp(data_dir, subj,
+                                            hemi, curv_vals)
+        subj_curv_binary = (subj_curv_vals > 0)
 
-        sub.check_output(cmd)
+        # Load the template curvature
+        norm_fname = op.join(data_dir, "fsaverage", "surf",
+                             "{}.curv".format(hemi))
+        norm_curv_vals = nib.freesurfer.read_morph_data(norm_fname)
+        norm_curv_binary = (norm_curv_vals > 0)
 
-        b = Brain("fsaverage", hemi, "inflated",
-                  config_opts=dict(background="white",
-                                   width=700, height=500))
-        curv = nib.load(op.join(surf_dir, "%s.curv.fsaverage.mgz" % hemi))
-        curv = (curv.get_data() > 0).squeeze()
-        b.add_contour_overlay(curv, min=0, max=1.5, n_contours=2, line_width=4)
-        b.contour["colorbar"].visible = False
-        for view in ["lat", "med"]:
-            b.show_view(view)
-            mlab.view(distance=330)
-            png = op.join(snap_dir, "%s.surf_warp_%s.png" % (hemi, view))
-            b.save_image(png)
+        # Compute the curvature overlap image
+        curv_overlap = np.zeros_like(norm_curv_binary, np.int)
+        curv_overlap[norm_curv_binary & subj_curv_binary] = 1
+        curv_overlap[norm_curv_binary ^ subj_curv_binary] = 2
 
-        if close:
-            b.close()
+        # Mask out the medial wall
+        cortex_fname = op.join(data_dir, "fsaverage", "label",
+                               "{}.cortex.label".format(hemi))
+        cortex = nib.freesurfer.read_label(cortex_fname)
+        medial_wall = ~np.in1d(np.arange(curv_overlap.size), cortex)
+        curv_overlap[medial_wall] = 1
+
+        # Plot the curvature overlap image
+        try:
+            b = Brain("fsaverage", hemi, "inflated", background="white")
+        except TypeError:
+            # PySurfer <= 0.5
+            b = Brain("fsaverage", hemi, "inflated",
+                      config_opts=dict(background="white"))
+
+        b.add_data(curv_overlap, min=0, max=2,
+                   colormap=[".9", ".45", "indianred"], colorbar=False)
+
+        for view in ["lat", "med", "ven"]:
+            b.show_view(view, distance="auto")
+            panels.append(crop(b.screenshot()))
+        b.close()
+
+    # Save a four-panel image
+    f = six_panel_brain_figure(panels)
+    fname = op.join(snap_dir, "surface_registration.png")
+    f.savefig(fname, bbox_inches="tight")
+    plt.close(f)
 
 
 def volume_images(data_dir, subj):
@@ -149,8 +226,6 @@ def parse_args(arglist):
     parser = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-subjects", nargs="*", help="lyman subjects argument")
-    parser.add_argument("-noclose", dest="close", action="store_false",
-                        help="don't close mayavi figures during runtime")
     args = parser.parse_args(arglist)
 
     return args
