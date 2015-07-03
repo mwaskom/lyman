@@ -11,6 +11,17 @@ Model workflow
   to nipype 0.10. The main advantage of upgrading should be increased memory
   performance in the model estimation.
 
+Registration workflow
+~~~~~~~~~~~~~~~~~~~~~
+
+- Added the ability to do cross-experiment registration, e.g. in the case where
+  you have a functional localizer. This is accomplished through the ``-regexp``
+  flag in ``run_fmri.py``. For example, the cmdline
+  ``run_fmri.py -exp A -regexp B -regspace epi -timeseries`` will combine
+  the func-to-anat matrices from experiment A and the anat-to-func
+  matrix from the first run of experiment B, placing the experiment A
+  files in a common space with experiment B files.
+
 Anatomy snapshots script
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
