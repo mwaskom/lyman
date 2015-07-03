@@ -22,7 +22,8 @@ from nipype.interfaces import fsl
 from nipype.interfaces.base import (BaseInterface,
                                     BaseInterfaceInputSpec,
                                     InputMultiPath, OutputMultiPath,
-                                    TraitedSpec, File, Directory, traits)
+                                    TraitedSpec, File, Directory,
+                                    traits, isdefined)
 
 from lyman.tools import add_suffix, submit_cmdline
 
@@ -30,7 +31,8 @@ spaces = ["epi", "mni"]
 
 
 def create_reg_workflow(name="reg", space="mni",
-                        regtype="model", method="fsl", residual=False):
+                        regtype="model", method="fsl",
+                        residual=False, cross_exp=False):
     """Flexibly register files into one of several common spaces."""
 
     # Define the input fields flexibly
@@ -38,6 +40,8 @@ def create_reg_workflow(name="reg", space="mni",
         fields = ["copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
+    if cross_exp:
+        fields.extend(["first_rigid"])
     fields.extend(["means", "masks", "rigids"])
 
     if space == "mni":
@@ -107,6 +111,7 @@ class MNIRegInput(BaseInterfaceInputSpec):
 class EPIRegInput(BaseInterfaceInputSpec):
 
     rigids = InputMultiPath(File(exists=True))
+    first_rigid = File(exists=True)
 
 
 class MNIModelRegInput(MNIRegInput,
@@ -322,7 +327,10 @@ class EPIModelRegistration(EPIRegistration,
     def _run_interface(self, runtime):
 
         n_runs = len(self.inputs.rigids)
-        first_rigid = self.inputs.rigids[0]
+        if isdefined(self.inputs.first_rigid):
+            first_rigid = self.inputs.first_rigid
+        else:
+            first_rigid = self.inputs.rigids[0]
 
         # Unpack the long file lists to be ordered by run
         copes = self.unpack_files("copes", n_runs)
@@ -423,7 +431,10 @@ class EPITimeseriesRegistration(EPIRegistration,
     def _run_interface(self, runtime):
 
         n_runs = len(self.inputs.rigids)
-        first_rigid = self.inputs.rigids[0]
+        if isdefined(self.inputs.first_rigid):
+            first_rigid = self.inputs.first_rigid
+        else:
+            first_rigid = self.inputs.rigids[0]
 
         out_files = []
         for i in range(n_runs):

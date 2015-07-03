@@ -164,6 +164,9 @@ def main(arglist):
     # Is this a model or timeseries registration?
     regtype = "timeseries" if (args.timeseries or args.residual) else "model"
 
+    # Are we registering across experiments?
+    cross_exp = args.regexp is not None
+
     # Retrieve the right workflow function for registration
     # Get the workflow function dynamically based on the space
     warp_method = project["normalization"]
@@ -172,7 +175,8 @@ def main(arglist):
                                                         space,
                                                         regtype,
                                                         warp_method,
-                                                        args.residual)
+                                                        args.residual,
+                                                        cross_exp)
 
     # Define a smoothing info node here. Use an iterable so that running
     # with/without smoothing doesn't clobber working directory files
@@ -188,6 +192,7 @@ def main(arglist):
                          )
 
     if regtype == "model":
+        # First-level model summary statistic images
         reg_base = "{subject_id}/model/{smoothing}/run_*/"
         reg_templates.update(dict(
             copes=op.join(reg_base, "cope*.nii.gz"),
@@ -195,6 +200,7 @@ def main(arglist):
             sumsquares=op.join(reg_base, "ss*.nii.gz"),
                                   ))
     else:
+        # Timeseries images
         if args.residual:
             ts_file = op.join("{subject_id}/model/{smoothing}/run_*/",
                               "results/res4d.nii.gz")
@@ -204,6 +210,7 @@ def main(arglist):
         reg_templates.update(dict(timeseries=ts_file))
     reg_lists = reg_templates.keys()
 
+    # Native anatomy to group anatomy affine matrix and warpfield
     if space == "mni":
         aff_ext = "mat" if warp_method == "fsl" else "txt"
         reg_templates["warpfield"] = op.join(data_dir, "{subject_id}",
@@ -211,11 +218,19 @@ def main(arglist):
         reg_templates["affine"] = op.join(data_dir, "{subject_id}",
                                           "normalization/affine." + aff_ext)
 
+    # Rigid (6dof) functional-to-anatomical matrices
     rigid_stem = "{subject_id}/preproc/run_*/func2anat_"
     if warp_method == "ants" and space == "mni":
         reg_templates["rigids"] = rigid_stem + "tkreg.dat"
     else:
         reg_templates["rigids"] = rigid_stem + "flirt.mat"
+
+    # Rigid matrix from anatomy to target experiment space
+    if args.regexp is not None:
+        targ_analysis_dir = op.join(project["analysis_dir"], args.regexp)
+        reg_templates["first_rigid"] = op.join(targ_analysis_dir,
+                                               "{subject_id}", "preproc",
+                                               "run_1", "func2anat_flirt.mat")
 
     # Define the registration data source node
     reg_source = Node(SelectFiles(reg_templates,
@@ -479,6 +494,8 @@ def parse_args(arglist):
                         help="which workflows to run")
     parser.add_argument("-regspace", default="mni", choices=wf.spaces,
                         help="common space for registration and fixed effects")
+    parser.add_argument("-regexp",
+                        help="perform cross-experiment epi registration")
     parser.add_argument("-timeseries", action="store_true",
                         help="perform registration on preprocessed timeseries")
     parser.add_argument("-residual", action="store_true",
