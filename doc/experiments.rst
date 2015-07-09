@@ -140,9 +140,8 @@ Model Parameters
 
    confound_pca
     A boolean specifying whether the dimensionality of the confound matrix
-    (currently just the 6 motion parameters) should be reduced using PCA.
-    The resulting dimensionality is automatically inferred using an MLE
-    approach.
+    (currently just the 6 motion parameters) should be reduced using PCA
+    to include dimensions explaining 99% of the variance.
 
    hrf_params
     A dictionary with keyword arguments for the HRF model class.
@@ -194,20 +193,20 @@ Group Analysis Parameters
 
    sampling_range
     A 3-tuple of floats where where to start, stop and the size of the step
-    (all in `sampling_units`) when projecting data onto the white surface. This
+    (all in ``sampling_units``) when projecting data onto the white surface. This
     only applies to group analysis in fsaverage space.
 
    sampling_units
     A string that is either "frac" or "mm" that makes up part of the
     specification for projecting results onto the surface manifold (it
-    determines the units of the `sampling_range` paramters`). This only applies
+    determines the units of the ``sampling_range`` paramters). This only applies
     to group analysis in fsaverage space.
 
    sampling_method
     A string that is either "average", "max", or "point" that makes up part of
     the specification for projecting results onto the surface manifold (it
-    determines how to summarize the samples obtained using `sampling_range` and
-    `sampling_method` into a single value at each verex). This only applies to
+    determines how to summarize the samples obtained using ``sampling_range`` and
+    ``sampling_method`` into a single value at each verex). This only applies to
     group analysis in fsaverage space.
 
    surf_corr_sign
