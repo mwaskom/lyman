@@ -198,7 +198,6 @@ class FFXModel(BaseInterface):
                 projcmd = ["mri_vol2surf",
                            "--mov", "%s/zstat1.nii.gz" % contrast,
                            "--reg", self.inputs.reg_file,
-                           "--surf-fwhm", "5",
                            "--hemi", hemi,
                            "--projfrac-avg", "0", "1", ".1",
                            "--o", "%s/%s.zstat1.mgz" % (contrast, hemi)]

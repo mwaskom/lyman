@@ -1,31 +1,24 @@
 #! /usr/bin/env python
 """Make static images of lyman results using PySurfer."""
-import os
 import os.path as op
 import sys
-import tempfile
 import argparse
 from textwrap import dedent
-from time import sleep
 
 import numpy as np
 from scipy import stats
 import nibabel as nib
-import matplotlib.image as mplimg
-from mayavi import mlab
-from surfer import Brain, io
+import matplotlib.pyplot as plt
+from surfer import Brain
 
-import moss
 import lyman
+from lyman.tools.plotting import multi_panel_brain_figure, crop, add_colorbars
 
 
 def main(arglist):
 
     # Parse the command line
     args = parse_args(arglist)
-
-    # Configure mayavi
-    mlab.options.offscreen = args.nowindow
 
     # Load the lyman data
     subjects = lyman.determine_subjects(args.subjects)
@@ -84,19 +77,22 @@ def main(arglist):
 def contrast_loop(subj, contrasts, stat_temp, mask_temp, png_temp,
                   args, z_thresh, sign):
     """Iterate over contrasts and make surface images."""
-    config_opts = dict(background="white", width=600, height=370)
-
     for contrast in contrasts:
 
         # Calculate where the overlay should saturate
-        z_max = calculate_sat_point(stat_temp, contrast, subj)
-        png_panes = []
+        z_max = calculate_sat_point(stat_temp, contrast, sign, subj)
+        panels = []
         for hemi in ["lh", "rh"]:
 
             # Initialize the brain object
             b_subj = subj if args.regspace == "epi" else "fsaverage"
-            b = Brain(b_subj, hemi, args.geometry,
-                      config_opts=config_opts)
+
+            try:
+                b = Brain(b_subj, hemi, args.geometry, background="white")
+            except TypeError:
+                # PySurfer <= v0.5
+                b = Brain(b_subj, hemi, args.geometry,
+                          config_opts={"background": "white"})
 
             # Plot the mask
             mask_file = mask_temp.format(contrast=contrast,
@@ -108,19 +104,30 @@ def contrast_loop(subj, contrasts, stat_temp, mask_temp, png_temp,
                                          hemi=hemi, subj=subj)
             add_stat_overlay(b, stat_file, z_thresh, z_max, sign,
                              sig_to_z=args.regspace == "fsaverage")
-            png_panes.append(save_view_panes(b, sign, hemi))
 
-            # Maybe close the current figure
-            if args.close:
-                b.close()
+            # Take screenshots
+            for view in ["lat", "med", "ven"]:
+                b.show_view(view, distance="auto")
+                panels.append(crop(b.screenshot()))
+            b.close()
 
-        # Stitch the hemisphere pngs together and save
-        full_png = np.concatenate(png_panes, axis=1)
-        png_file = png_temp.format(contrast=contrast, hemi=hemi, subj=subj)
-        mplimg.imsave(png_file, full_png)
+        # Make a single figure with all the panels
+        f = multi_panel_brain_figure(panels)
+        kwargs = {}
+        if sign in ["pos", "abs"]:
+            kwargs["pos_cmap"] = "Reds_r"
+        if sign in ["neg", "abs"]:
+            kwargs["neg_cmap"] = "Blues"
+        add_colorbars(f, z_thresh, z_max, **kwargs)
+
+        # Save the figure in both hemisphere outputs
+        for hemi in ["lh", "rh"]:
+            png_file = png_temp.format(hemi=hemi, contrast=contrast, subj=subj)
+            f.savefig(png_file, bbox_inches="tight")
+        plt.close(f)
 
 
-def calculate_sat_point(template, contrast, subj=None):
+def calculate_sat_point(template, contrast, sign, subj=None):
     """Calculate the point at which the colormap should saturate."""
     data = []
     for hemi in ["lh", "rh"]:
@@ -128,7 +135,13 @@ def calculate_sat_point(template, contrast, subj=None):
         hemi_data = nib.load(hemi_file).get_data()
         data.append(hemi_data)
     data = np.concatenate(data)
-    return max(3.71, moss.percentiles(data, 98))
+    if sign == "pos":
+        z_max = max(3.71, np.percentile(data, 98))
+    elif sign == "neg":
+        z_max = max(3.71, np.percentile(-data, 98))
+    elif sign == "abs":
+        z_max = max(3.71, np.percentile(np.abs(data), 98))
+    return z_max
 
 
 def add_mask_overlay(b, mask_file):
@@ -155,44 +168,14 @@ def add_stat_overlay(b, stat_file, thresh, max, sign, sig_to_z=False):
         stat_data = z_data
 
     # Plot the statistical data
-    plot_stat = ((sign == "pos" and (stat_data > thresh).any())
-                 or (sign == "neg" and (stat_data < -thresh).any())
-                 or (sign == "abs" and (np.abs(stat_data) > thresh).any()))
-    if plot_stat:
-        stat_data = stat_data.squeeze()
-        b.add_overlay(stat_data, min=thresh, max=max, sign=sign, name="stat")
+    stat_data = stat_data.squeeze()
+    if sign in ["pos", "abs"] and (stat_data > thresh).any():
+        b.add_data(stat_data, thresh, max, thresh,
+                   colormap="Reds_r", colorbar=False)
 
-
-def remove_stat_overlay(b):
-    """Remove any overlays from the brain."""
-    for name, overlay in b.overlays.items():
-        overlay.remove()
-
-
-def save_view_panes(b, sign, hemi):
-    """Save lat, med and ven views, return a stacked image array."""
-    views = ["lat", "med", "ven"]
-    image_panes = []
-    for view in views:
-
-        # Handle the colorbar
-        if "stat" in b.overlays:
-            show_pos = hemi == "rh" and view == "ven"
-            show_neg = hemi == "lh" and view == "ven"
-            if sign in ("pos", "abs"):
-                b.overlays["stat"].pos_bar.visible = show_pos
-            if sign in ("neg", "abs"):
-                b.overlays["stat"].neg_bar.visible = show_neg
-
-        # Set the view and screenshot
-        b.show_view(view, distance=330)
-        sleep(0.2)  # pause for show_view
-        image_panes.append(b.screenshot())
-
-    # Stitch the images together and return the array
-    full_image = np.concatenate(image_panes, axis=0)
-
-    return full_image
+    if sign in ["neg", "abs"] and (stat_data < -thresh).any():
+        b.add_data(-stat_data, thresh, max, thresh,
+                   colormap="Blues_r", colorbar=False)
 
 
 def parse_args(arglist):
@@ -215,15 +198,6 @@ def parse_args(arglist):
     group-level plots, some aspects of how the results are rendered onto the
     cortex can be controlled through parameters in the experiment file. Other
     parameters are available as command-line options.
-
-    In an effort to allow flexibility for some particular issues that PySurfer
-    can have, a few command-line options control what happens with the PySurfer
-    window during the execution of the script. By default, a window is actually
-    opened as the plot is drawn, but this can happen offscreen on systems for
-    which this is possible. Additionally, on some platforms closing multiple
-    PySurfer figures will cause a segfault, so the plots can be drawn into a
-    single window for the whole script (unfortunately this may cause issues
-    with the orientation of the scene lighting).
 
     It is important to emphasize that because this script must be executed
     separately from the processing workflows, it is possible for the static
@@ -260,17 +234,6 @@ def parse_args(arglist):
         `subj1` and `subj2` in MNI space on the `smoothwm` surface of the
         fsaverage brain.
 
-    surface_snapshots.py -k
-
-        Same as the first example, but don't close the PySurfer window until the
-        very end of the script. This can avoid a nasty segmentation fault issue
-        on some systems.
-
-    surface_snapshots.py -n
-
-        Same as the first example, but don't show a PySurfer window while
-        drawing. This is not guaranteed to work on all systems.
-
     Usage Details
     -------------
 
@@ -294,10 +257,6 @@ def parse_args(arglist):
                         help="group analysis output name")
     parser.add_argument("-geometry", default="inflated",
                         help="surface geometry for the rendering.")
-    parser.add_argument("-nowindow", action="store_true",
-                        help="plot offscreen (does not work on all platforms")
-    parser.add_argument("-keepopen", dest="close", action="store_false",
-                        help="do not close each figure after plotting")
     return parser.parse_args(arglist)
 
 

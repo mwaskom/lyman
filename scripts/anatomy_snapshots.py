@@ -30,6 +30,7 @@ from surfer import Brain
 
 from moss.mosaic import Mosaic
 import lyman
+from lyman.tools.plotting import crop, six_panel_brain_figure
 
 
 def main(arglist):
@@ -54,39 +55,6 @@ def main(arglist):
         surface_images(out_dir, subj)
         curvature_normalization(data_dir, subj)
         volume_images(data_dir, subj)
-
-
-def crop(img):
-    """Closely crop a brain screenshot."""
-    x, y = np.argwhere((img != 255).any(axis=-1)).T
-    return img[x.min():x.max(), y.min():y.max(), :]
-
-
-def six_panel_brain_figure(panels):
-    """Make a matplotlib figure with the brain screenshots."""
-    # Reorient the brains to be "wide"
-    plot_panels = []
-    for img in panels:
-        if (img.shape[1] < img.shape[0]):
-            img = np.rot90(img)
-        plot_panels.append(img)
-
-    # Infer the size of the figure and the axes
-    sizes = np.array([p.shape for p in plot_panels[:3]])
-    full_size = sizes.sum(axis=0)
-    height_ratios = sizes[:, 0] / full_size[0]
-    ratio = full_size[0] / (sizes.max(axis=0)[1] * 2)
-    figsize = (9, 9 * ratio)
-
-    # Plot the brains onto the figure
-    f, axes = plt.subplots(3, 2, figsize=figsize,
-                           gridspec_kw={"height_ratios": height_ratios})
-    for ax, img in zip(axes.T.flat, plot_panels):
-        ax.imshow(img)
-        ax.set_axis_off()
-    f.subplots_adjust(0, 0, 1, 1, .05, .05)
-
-    return f
 
 
 def surface_images(out_dir, subj):

@@ -1,5 +1,5 @@
 
-v0.0.7 (Unreleased)
+v0.0.8 (Unreleased)
 -------------------
 
 Model workflow
@@ -50,7 +50,17 @@ Anatomy snapshots script
   motivated it have been identified.
 
 Note that there are corresponding changes in ziegler that are needed to
-properly view the new images, and there isn't backwards compatability
+properly view the new images, and there isn't backwards compatibility
 with the old outputs. This script can be rerun on older lyman analyses
 without affecting any results.
 
+Surface snapshots script
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Changed how the individual frames of the surface snapshots are stitched
+  together to maximize the use of space. This (and the changes in the anatomy
+  snapshots script) rely on some new functions in ``lyman.tools.plotting``
+  that may be generally useful.
+- Remove the "-keep-open" option, as better ways to avoid the problem that
+  motivated it have been identified, and removed the "-no-window" option,
+  as it is not clear whether this ever worked.
