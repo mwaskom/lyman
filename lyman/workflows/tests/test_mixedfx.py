@@ -48,3 +48,9 @@ class TestGroupMerge(object):
         out_data = out_img.get_data()
         in_data_reordered = np.asarray(in_data).transpose(1, 2, 3, 0)
         npt.assert_array_equal(in_data_reordered, out_data)
+
+        merge = mixedfx.MergeAcrossSubjects()
+        good_indices = range(8)
+        out_img = merge._merge_subject_images(in_imgs, good_indices)
+        nt.assert_is_instance(out_img, nib.Nifti1Image)
+        nt.assert_equal(out_img.shape, (91, 109, 91, 8))

@@ -47,11 +47,10 @@ def create_volume_mixedfx_workflow(name="volume_group",
                      "inputnode")
 
     # Merge the fixed effect summary images into one 4D image
-    merge = Node(MergeAcrossSubjects(), "merge")
+    merge = Node(MergeAcrossSubjects(regressors=regressors), "merge")
 
     # Make a simple design
-    design = Node(fsl.MultipleRegressDesign(regressors=regressors,
-                                            contrasts=contrasts),
+    design = Node(fsl.MultipleRegressDesign(contrasts=contrasts),
                   "design")
 
     # Fit the mixed effects model
@@ -113,6 +112,8 @@ def create_volume_mixedfx_workflow(name="volume_group",
              ("varcope_file", "var_cope_file"),
              ("dof_file", "dof_var_cope_file"),
              ("mask_file", "mask_file")]),
+        (merge, design,
+            [("regressors", "regressors")]),
         (design, flameo,
             [("design_con", "t_con_file"),
              ("design_grp", "cov_split_file"),
@@ -233,6 +234,7 @@ class MergeInput(BaseInterfaceInputSpec):
     cope_files = InputMultiPath(File(exists=True))
     varcope_files = InputMultiPath(File(exists=True))
     dof_files = InputMultiPath(File(exists=True))
+    regressors = traits.Dict()
 
 
 class MergeOutput(TraitedSpec):
@@ -241,6 +243,7 @@ class MergeOutput(TraitedSpec):
     varcope_file = File(exists=True)
     dof_file = File(exists=True)
     mask_file = File(exists=True)
+    regressors = traits.Dict()
 
 
 class MergeAcrossSubjects(BaseInterface):
@@ -250,27 +253,42 @@ class MergeAcrossSubjects(BaseInterface):
 
     def _run_interface(self, runtime):
 
+        # Find indices for subjects with non-empty varcopes
+        good_indices = self._find_good_images(self.inputs.varcope_files)
+
         for ftype in ["cope", "varcope", "dof"]:
 
             in_files = getattr(self.inputs, ftype + "_files")
             in_imgs = [nib.load(f) for f in in_files]
-            out_img = self._merge_subject_images(in_imgs)
+            out_img = self._merge_subject_images(in_imgs, good_indices)
             out_img.to_filename(ftype + "_merged.nii.gz")
 
-            # Use the varcope image to make a gropu mask
+            # Use the varcope image to make a group mask
             if ftype == "varcope":
                 mask_img = self._create_group_mask(out_img)
                 mask_img.to_filename("group_mask.nii.gz")
 
+        # Filter the regressor columns
+        filtered_regressors = {}
+        for name, col in self.inputs.regressors.items():
+            filtered_col = [r for i, r in enumerate(col)
+                            if i in good_indices]
+            filtered_regressors[name] = filtered_col
+        self.filtered_regressors = filtered_regressors
+
         return runtime
 
-    def _merge_subject_images(self, images):
+    def _find_good_images(self, filenames):
+        """Find indices of non-empty images."""
+        return [i for i, f in enumerate(filenames)
+                if not np.allclose(nib.load(f).get_data(), 0)]
+
+    def _merge_subject_images(self, images, good_indices=None):
         """Stack a list of 3D images into 4D image."""
-        in_data = [i.get_data() for i in images]
-        out_data = np.asarray(in_data).transpose(1, 2, 3, 0)
-        out_img = nib.Nifti1Image(out_data,
-                                  images[0].get_affine(),
-                                  images[0].get_header())
+        if good_indices is None:
+            good_indices = range(len(images))
+        images = [img for i, img in enumerate(images) if i in good_indices]
+        out_img = nib.concat_images(images)
         return out_img
 
     def _create_group_mask(self, var_img):
@@ -299,6 +317,7 @@ class MergeAcrossSubjects(BaseInterface):
         for ftype in ["cope", "varcope", "dof"]:
             outputs[ftype + "_file"] = op.realpath(ftype + "_merged.nii.gz")
         outputs["mask_file"] = op.realpath("group_mask.nii.gz")
+        outputs["regressors"] = self.filtered_regressors
         return outputs
 
 

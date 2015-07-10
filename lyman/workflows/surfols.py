@@ -6,8 +6,12 @@ import subprocess as sub
 import numpy as np
 from scipy import stats
 
+import nibabel as nib
 from nipype import IdentityInterface, Function, Node, MapNode, Workflow
 from nipype.interfaces import freesurfer as fs
+from nipype.interfaces.base import (BaseInterface,
+                                    BaseInterfaceInputSpec, TraitedSpec,
+                                    InputMultiPath, OutputMultiPath, File)
 
 import lyman
 
@@ -16,11 +20,8 @@ imports = ["import os",
            "import shutil",
            "from glob import glob",
            "import numpy as np",
-           "import matplotlib as mpl",
            "from scipy import stats",
-           "import nibabel as nib",
-           "import subprocess as sub",
-           "import seaborn"]
+           "import subprocess as sub"]
 
 
 def create_surface_ols_workflow(name="surface_group",
@@ -50,6 +51,9 @@ def create_surface_ols_workflow(name="surface_group",
         smooth_surf=exp_info["surf_smooth"],
         target_subject="fsaverage"),
         ["subject_id", "reg_file", "source_file"], "surfsample")
+
+    # Remove subjects with completely empty images
+    removeempty = Node(RemoveEmpty(), "removeempty")
 
     # Concatenate the subject files into a 4D image
     mergecope = Node(fs.Concatenate(), "mergecope")
@@ -89,8 +93,10 @@ def create_surface_ols_workflow(name="surface_group",
              ("subject_id", "subject_id")]),
         (hemisource, surfsample,
             [("hemi", "hemi")]),
-        (surfsample, mergecope,
+        (surfsample, removeempty,
             [("out_file", "in_files")]),
+        (removeempty, mergecope,
+            [("out_files", "in_files")]),
         (mergecope, glmfit,
             [("concatenated_file", "in_file")]),
         (hemisource, glmfit,
@@ -106,6 +112,35 @@ def create_surface_ols_workflow(name="surface_group",
         ])
 
     return group, inputnode, outputnode
+
+
+class RemoveEmptyInput(BaseInterfaceInputSpec):
+
+    in_files = InputMultiPath(File(exists=True))
+
+
+class RemoveEmptyOutput(TraitedSpec):
+
+    out_files = OutputMultiPath(File(exists=True))
+
+
+class RemoveEmpty(BaseInterface):
+
+    input_spec = RemoveEmptyInput
+    output_spec = RemoveEmptyOutput
+
+    def _run_interface(self, runtime):
+
+        good_images = [f for f in self.inputs.in_files
+                       if not np.allclose(nib.load(f).get_data(), 0).any()]
+        self.good_images = good_images
+        return runtime
+
+    def _list_outputs(self):
+
+        outputs = self._outputs().get()
+        outputs["out_files"] = self.good_images
+        return outputs
 
 
 def glm_corrections(y_file, glm_dir, sign, cluster_zthresh, p_thresh):

@@ -16,32 +16,41 @@ Registration workflow
 
 - Added the ability to do cross-experiment registration, e.g. in the case where
   you have a functional localizer. This is accomplished through the ``-regexp``
-  flag in ``run_fmri.py``. For example, the cmdline
-  ``run_fmri.py -exp A -regexp B -regspace epi -timeseries`` will combine
-  the func-to-anat matrices from experiment A and the anat-to-func
-  matrix from the first run of experiment B, placing the experiment A
-  files in a common space with experiment B files.
+  flag in ``run_fmri.py``. For example, the cmdline ``run_fmri.py -exp A
+  -regexp B -regspace epi -timeseries`` will combine the func-to-anat matrices
+  from experiment A and the anat-to-func matrix from the first run of
+  experiment B, placing the experiment A files in a common space with
+  experiment B files.
+
+Fixed-effects workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- The fixed effects analysis no longer crashes when a subject did not have any
+  observations for an event.
+
+Mixed-effects workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- The mixed effects workflow now excludes empty images, allowing you to run it
+  on a group where some subjects did not have any observations for a specific
+  event/contrast.
+- Updated the mixed effects boxplot code for compatibility with seaborn 0.6.
 
 Anatomy snapshots script
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Added plots of the native white and pial surfaces
-- Surface plots are now saved in one image file with all views,
-  and the subplot size is automatically inferred to maximize the
-  usage of space
+- Surface plots are now saved in one image file with all views, and the subplot
+  size is automatically inferred to maximize the usage of space
 - Added ventral views to the surface images
-- Changed how the surface normalization is summarized. The new
-  visualization highlights vertices where the binarized curvature
-  value is different between the normalized subject and template
-- Remove the "-noclose" option, as better ways to avoid the problem
-  that motivated it have been identified.
+- Changed how the surface normalization is summarized. The new visualization
+  highlights vertices where the binarized curvature value is different between
+  the normalized subject and template
+- Remove the "-noclose" option, as better ways to avoid the problem that
+  motivated it have been identified.
 
 Note that there are corresponding changes in ziegler that are needed to
 properly view the new images, and there isn't backwards compatability
 with the old outputs. This script can be rerun on older lyman analyses
-ithout affecting anything.
+without affecting any results.
 
-Mixed-effects workflow
-~~~~~~~~~~~~~~~~~~~~~~
-
-- Updated the mixed effects boxplot code for compatibility with seaborn 0.6.

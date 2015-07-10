@@ -155,6 +155,10 @@ class FFXModel(BaseInterface):
             good_vs = [not np.allclose(d, 0) for d in vs]
             good = np.all([good_cs, good_vs], axis=0)
 
+            # Handle the case where no events occured for this contrast
+            if not good.any():
+                good = np.ones(len(cs), bool)
+
             # Concatenate the cope and varcope data, save only the good frames
             c_data = np.concatenate(cs, axis=-1)[:, :, :, good]
             v_data = np.concatenate(vs, axis=-1)[:, :, :, good]
