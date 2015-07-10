@@ -30,7 +30,7 @@ from surfer import Brain
 
 from moss.mosaic import Mosaic
 import lyman
-from lyman.tools.plotting import crop, six_panel_brain_figure
+from lyman.tools.plotting import crop, multi_panel_brain_figure
 
 
 def main(arglist):
@@ -76,7 +76,7 @@ def surface_images(out_dir, subj):
             b.close()
 
         # Make and save a figure
-        f = six_panel_brain_figure(panels)
+        f = multi_panel_brain_figure(panels)
         fname = op.join(out_dir, "{}_surface.png".format(surf))
         f.savefig(fname, bbox_inches="tight")
         plt.close(f)
@@ -146,8 +146,8 @@ def curvature_normalization(data_dir, subj):
             panels.append(crop(b.screenshot()))
         b.close()
 
-    # Save a four-panel image
-    f = six_panel_brain_figure(panels)
+    # Make and save a figure
+    f = multi_panel_brain_figure(panels)
     fname = op.join(snap_dir, "surface_registration.png")
     f.savefig(fname, bbox_inches="tight")
     plt.close(f)
