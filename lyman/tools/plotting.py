@@ -2,6 +2,7 @@ from __future__ import division
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 def crop(img):
     """Closely crop a brain screenshot.
 
@@ -65,9 +66,9 @@ def _add_cbar_to_ax(ax, min, max, cmap):
     ax.annotate("{:.2g}".format(min),
                 ha="right", va="center", size=14, family="Arial",
                 xy=(-.02, .5), xycoords="axes fraction")
-    ax.annotate("{:.2g}".format(max), 
+    ax.annotate("{:.2g}".format(max),
                 ha="left", va="center", size=14, family="Arial",
-                xy=(1.02, .5), xycoords="axes fraction")                
+                xy=(1.02, .5), xycoords="axes fraction")
 
 
 def add_colorbars(f, min, max, pos_cmap="YlOrRd_r", neg_cmap=None):
@@ -105,5 +106,5 @@ def add_colorbars(f, min, max, pos_cmap="YlOrRd_r", neg_cmap=None):
     if neg_cmap is not None:
         pos_ax = f.add_axes([.10, bottom, width, height])
         _add_cbar_to_ax(pos_ax, -max, -min, neg_cmap)
-        
+
     return f
