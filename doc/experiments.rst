@@ -50,6 +50,13 @@ Preprocessing Parameters
     (although you specify only one whole-brain file).  If you don't have such
     an image, just leave this out of the experiment file.
 
+   fieldmp_template
+    A template string, like the source template, that identifies images that
+    can be used to compute a map of distortions in the field. This isn't
+    actually meant to be a traditional "fieldmap" image, but rather multiple
+    images with the same slice prescription as the function runs but with
+    one or more images where the phase encoding direction is reversed.
+
    n_runs
     An integer with the number of functional runs in the experiment.
 
@@ -59,6 +66,12 @@ Preprocessing Parameters
    frames_to_toss
     An integer with the number of frames to trim from the beginning of the
     timeseries.
+
+   fieldmap_pe
+    Directions of phase encoding directions in the fieldmap images, if they
+    exist. For example, ``["y", "-y"]`` means that the fieldmap images have
+    two frames where the first has normal phase encoding on the y axis and
+    the second has reversed phase encoding also on the y axis.
 
    temporal_interp
     A boolean that specifies whether slice-time correction should be performed.

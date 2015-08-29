@@ -45,13 +45,20 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     in_fields = ["timeseries", "subject_id"]
 
     if exp_info["whole_brain_template"]:
-        in_fields.append("whole_brain_template")
+        in_fields.append("whole_brain")
+
+    if exp_info["fieldmap_template"]:
+        in_fields.append("fieldmap")
 
     inputnode = Node(IdentityInterface(in_fields), "inputs")
 
     # Remove equilibrium frames and convert to float
     prepare = MapNode(PrepTimeseries(), "in_file", "prep_timeseries")
     prepare.inputs.frames_to_toss = exp_info["frames_to_toss"]
+
+    # Unwarp using fieldmap images
+    if exp_info["fieldmap_template"]:
+        unwarp = create_unwarp_workflow(fieldmap_pe=exp_info["fieldmap_pe"])
 
     # Motion and slice time correct
     realign = create_realignment_workflow(
@@ -98,8 +105,6 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     preproc.connect([
         (inputnode, prepare,
             [("timeseries", "in_file")]),
-        (prepare, realign,
-            [("out_file", "inputs.timeseries")]),
         (realign, artifacts,
             [("outputs.motion_file", "motion_file")]),
         (realign, coregister,
@@ -131,6 +136,23 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("timeseries", "in_file")]),
         ])
 
+    # Optionally add a connection for unwarping
+    if bool(exp_info["fieldmap_template"]):
+        preproc.connect([
+            (inputnode, unwarp,
+                [("fieldmap", "inputs.fieldmap")]),
+            (prepare, unwarp,
+                [("out_file", "inputs.timeseries")]),
+            (unwarp, realign,
+                [("outputs.timeseries", "inputs.timeseries")])
+        ])
+    else:
+        preproc.connect([
+            (prepare, realign,
+                [("out_file", "inputs.timeseries")]),
+        ])
+
+    # Optionally connect the whole brain template
     if bool(exp_info["whole_brain_template"]):
         preproc.connect([
             (inputnode, coregister,
@@ -179,6 +201,49 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
 
 
 # =========================================================================== #
+
+
+def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "-y")):
+    """Unwarp functional timeseries using reverse phase-blipped images."""
+    inputnode = Node(IdentityInterface(["timeseries", "fieldmap"]), "inputs")
+
+    # Calculate the shift field
+    # Note that setting readout_times to 1 will give a fine
+    # map of the field, but the units will be off
+    # Since we don't write out the map of the field itself, it does
+    # not seem worth it to add another parameter for the readout times.
+    # (It does require that they are the same, but when wouldn't they be?)
+    topup = MapNode(fsl.TOPUP(encoding_direction=fieldmap_pe,
+                              readout_times=[1] * len(fieldmap_pe)),
+                    ["in_file"], "topup")
+
+    # Unwarp the timeseries
+    applytopup = MapNode(fsl.ApplyTOPUP(in_index=[1]),
+                         ["timeseries",
+                          "in_topup_fieldcoef",
+                          "in_topup_movpar",
+                          "encoding_file"],
+                         "applytopup")
+
+    # Define the outputs
+    outputnode = Node(IdentityInterface(["timeseries"], "outputs"))
+
+    # Define and connect the workflow
+    unwarp = Workflow(name)
+    unwarp.connect([
+        (inputnode, topup,
+            [("fieldmap", "in_file")]),
+        (inputnode, applytopup,
+            [("timeseries", "in_file")]),
+        (topup, applytopup,
+            [("out_fieldcoef", "in_topup_fieldcoef"),
+             ("out_movpar", "in_topup_movpar"),
+             ("out_enc_file", "encoding_file")]),
+        (applytopup, outputnode,
+            [("out_corrected", "timeseries")]),
+        ])
+
+    return unwarp
 
 
 def create_realignment_workflow(name="realignment", temporal_interp=True,
