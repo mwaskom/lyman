@@ -226,7 +226,7 @@ def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
                          "applytopup")
 
     # Define the outputs
-    outputnode = Node(IdentityInterface(["timeseries"], "outputs"))
+    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
 
     # Define and connect the workflow
     unwarp = Workflow(name)
