@@ -203,7 +203,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
 # =========================================================================== #
 
 
-def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "-y")):
+def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
     """Unwarp functional timeseries using reverse phase-blipped images."""
     inputnode = Node(IdentityInterface(["timeseries", "fieldmap"]), "inputs")
 

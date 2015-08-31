@@ -103,7 +103,7 @@ def default_experiment_parameters():
 
         TR=2,
         frames_to_toss=0,
-        fieldmap_pe=("y", "-y"),
+        fieldmap_pe=("y", "y-"),
         temporal_interp=False,
         interleaved=True,
         coreg_init="fsl",
