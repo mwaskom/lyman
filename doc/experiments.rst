@@ -50,7 +50,7 @@ Preprocessing Parameters
     (although you specify only one whole-brain file).  If you don't have such
     an image, just leave this out of the experiment file.
 
-   fieldmp_template
+   fieldmap_template
     A template string, like the source template, that identifies images that
     can be used to compute a map of distortions in the field. This isn't
     actually meant to be a traditional "fieldmap" image, but rather multiple
