@@ -218,7 +218,7 @@ def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
                     ["in_file"], "topup")
 
     # Unwarp the timeseries
-    applytopup = MapNode(fsl.ApplyTOPUP(in_index=[1]),
+    applytopup = MapNode(fsl.ApplyTOPUP(method="jac", in_index=[1]),
                          ["in_files",
                           "in_topup_fieldcoef",
                           "in_topup_movpar",
