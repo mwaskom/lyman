@@ -653,7 +653,7 @@ class UnwarpReport(BaseInterface):
 
         # Make an image showing overlap and divergence
         c = np.zeros_like(a, int)
-        c[a ^ b] = 2
+        c[a ^ b] = 1
         c[a & b] = 2
 
         return c
