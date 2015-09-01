@@ -204,7 +204,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     if bool(exp_info["fieldmap_template"]):
         preproc.connect([
             (unwarp, outputnode,
-                [("report", "unwarp_report")]),
+                [("outputs.report", "unwarp_report")]),
         ])
 
     return preproc, inputnode, outputnode
