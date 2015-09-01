@@ -4,6 +4,7 @@ import os.path as op
 import numpy as np
 import pandas as pd
 import nibabel as nib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from moss.mosaic import Mosaic
@@ -173,6 +174,9 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
                      "coreg_report",
                      "json_file"]
 
+    if bool(exp_info["fieldmap_template"]):
+        output_fields.append("unwarp_report")
+
     outputnode = Node(IdentityInterface(output_fields), "outputs")
 
     preproc.connect([
@@ -195,6 +199,12 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
              ("outputs.mean_file", "mean_func")]),
         (saveparams, outputnode,
             [("json_file", "json_file")]),
+        ])
+
+    if bool(exp_info["fieldmap_template"]):
+        preproc.connect([
+            (unwarp, outputnode,
+                [("report", "unwarp_report")]),
         ])
 
     return preproc, inputnode, outputnode
@@ -225,8 +235,12 @@ def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
                           "encoding_file"],
                          "applytopup")
 
+    # Make a figure summarize the unwarping
+    report = MapNode(UnwarpReport(),
+                     ["orig_file", "corrected_file"], "report")
+
     # Define the outputs
-    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
+    outputnode = Node(IdentityInterface(["timeseries", "report"]), "outputs")
 
     # Define and connect the workflow
     unwarp = Workflow(name)
@@ -239,8 +253,14 @@ def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
             [("out_fieldcoef", "in_topup_fieldcoef"),
              ("out_movpar", "in_topup_movpar"),
              ("out_enc_file", "encoding_file")]),
+        (inputnode, report,
+            [("fieldmap", "orig_file")]),
+        (topup, report,
+            [("out_corrected", "corrected_file")]),
         (applytopup, outputnode,
             [("out_corrected", "timeseries")]),
+        (report, outputnode,
+            [("out_file", "report")]),
         ])
 
     return unwarp
@@ -580,6 +600,63 @@ class PrepTimeseries(BaseInterface):
         return data[..., self.inputs.frames_to_toss:]
 
     _list_outputs = list_out_file("timeseries.nii.gz")
+
+
+class UnwarpReportInput(BaseInterfaceInputSpec):
+
+    orig_file = File(exists=True)
+    corrected_file = File(exists=True)
+
+
+class UnwarpReport(BaseInterface):
+
+    input_spec = UnwarpReportInput
+    output_spec = SingleOutFile
+
+    def _run_interface(self, runtime):
+
+        # Make a discrete colormap
+        cmap = mpl.colors.ListedColormap(["black", "#d65f5f", "white"])
+
+        # Initialize the figure
+        f, axes = plt.subplots(1, 2, figsize=(9, 4),
+                               facecolor="black", edgecolor="black")
+
+        for ax, fname in zip(axes, [self.inputs.orig_file,
+                                    self.inputs.corrected_file]):
+
+            # Combine the frames from this image and plot
+            img = nib.load(fname)
+            ax.imshow(self.combine_frames(img), cmap=cmap, vmin=0, vmax=2)
+            ax.set_axis_off()
+
+        # Save the figure and close
+        f.subplots_adjust(0, 0, 1, 1, 0, 0)
+        f.savefig("unwarping.png", facecolor="black", edgecolor="black")
+        plt.close(f)
+
+    def combine_frames(self, img):
+
+        # Find a value to loosely segment the brain
+        d = img.get_data()
+        counts, bins = np.histogram(d[d > 0], 50)
+        thresh = bins[np.diff(counts) > 0][0]
+
+        # Show the middle slice
+        middle = d.shape[0] // 2
+
+        # Combine a binary mask for each phase direction
+        a = np.rot90(d[middle, ..., 0] > thresh)
+        b = np.rot90(d[middle, ..., 1] > thresh)
+
+        # Make an image showing overlap and divergence
+        c = np.zeros_like(a, int)
+        c[a ^ b] = 2
+        c[a & b] = 2
+
+        return c
+
+    _list_outputs = list_out_file("unwarping.png")
 
 
 class ExtractRealignmentTarget(BaseInterface):
