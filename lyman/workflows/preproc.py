@@ -635,6 +635,8 @@ class UnwarpReport(BaseInterface):
         f.savefig("unwarping.png", facecolor="black", edgecolor="black")
         plt.close(f)
 
+        return runtime
+
     def combine_frames(self, img):
 
         # Find a value to loosely segment the brain
