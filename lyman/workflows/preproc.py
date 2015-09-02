@@ -619,7 +619,7 @@ class UnwarpReport(BaseInterface):
         cmap = mpl.colors.ListedColormap(["black", "#d65f5f", "white"])
 
         # Initialize the figure
-        f, axes = plt.subplots(1, 2, figsize=(9, 4),
+        f, axes = plt.subplots(1, 2, figsize=(9, 2.75),
                                facecolor="black", edgecolor="black")
 
         for ax, fname in zip(axes, [self.inputs.orig_file,
