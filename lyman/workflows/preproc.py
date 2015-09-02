@@ -670,10 +670,9 @@ class ExtractRealignmentTarget(BaseInterface):
 
         # Load the input timeseries
         img = nib.load(self.inputs.in_file)
-        data = img.get_data()
 
         # Extract the target volume
-        targ = self.extract_target(data)
+        targ = self.extract_target(img)
 
         # Save a new 3D image
         targ_img = nib.Nifti1Image(targ,
@@ -683,11 +682,11 @@ class ExtractRealignmentTarget(BaseInterface):
 
         return runtime
 
-    def extract_target(self, data):
+    def extract_target(self, img):
         """Return a 3D array with data from the middle TR."""
-        middle_vol = data.shape[-1] // 2
-        targ = np.empty(data.shape[:-1])
-        targ[:] = data[..., middle_vol]
+        middle_vol = img.shape[-1] // 2
+        targ = np.empty(img.shape[:-1])
+        targ[:] = img.dataobj[..., middle_vol]
 
         return targ
 
