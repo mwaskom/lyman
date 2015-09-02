@@ -4,6 +4,7 @@ import os.path as op
 import numpy as np
 import pandas as pd
 import nibabel as nib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from moss.mosaic import Mosaic
@@ -45,13 +46,20 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     in_fields = ["timeseries", "subject_id"]
 
     if exp_info["whole_brain_template"]:
-        in_fields.append("whole_brain_template")
+        in_fields.append("whole_brain")
+
+    if exp_info["fieldmap_template"]:
+        in_fields.append("fieldmap")
 
     inputnode = Node(IdentityInterface(in_fields), "inputs")
 
     # Remove equilibrium frames and convert to float
     prepare = MapNode(PrepTimeseries(), "in_file", "prep_timeseries")
     prepare.inputs.frames_to_toss = exp_info["frames_to_toss"]
+
+    # Unwarp using fieldmap images
+    if exp_info["fieldmap_template"]:
+        unwarp = create_unwarp_workflow(fieldmap_pe=exp_info["fieldmap_pe"])
 
     # Motion and slice time correct
     realign = create_realignment_workflow(
@@ -98,8 +106,6 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     preproc.connect([
         (inputnode, prepare,
             [("timeseries", "in_file")]),
-        (prepare, realign,
-            [("out_file", "inputs.timeseries")]),
         (realign, artifacts,
             [("outputs.motion_file", "motion_file")]),
         (realign, coregister,
@@ -131,6 +137,23 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("timeseries", "in_file")]),
         ])
 
+    # Optionally add a connection for unwarping
+    if bool(exp_info["fieldmap_template"]):
+        preproc.connect([
+            (inputnode, unwarp,
+                [("fieldmap", "inputs.fieldmap")]),
+            (prepare, unwarp,
+                [("out_file", "inputs.timeseries")]),
+            (unwarp, realign,
+                [("outputs.timeseries", "inputs.timeseries")])
+        ])
+    else:
+        preproc.connect([
+            (prepare, realign,
+                [("out_file", "inputs.timeseries")]),
+        ])
+
+    # Optionally connect the whole brain template
     if bool(exp_info["whole_brain_template"]):
         preproc.connect([
             (inputnode, coregister,
@@ -150,6 +173,9 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
                      "tkreg_affine",
                      "coreg_report",
                      "json_file"]
+
+    if bool(exp_info["fieldmap_template"]):
+        output_fields.append("unwarp_report")
 
     outputnode = Node(IdentityInterface(output_fields), "outputs")
 
@@ -175,10 +201,69 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("json_file", "json_file")]),
         ])
 
+    if bool(exp_info["fieldmap_template"]):
+        preproc.connect([
+            (unwarp, outputnode,
+                [("outputs.report", "unwarp_report")]),
+        ])
+
     return preproc, inputnode, outputnode
 
 
 # =========================================================================== #
+
+
+def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
+    """Unwarp functional timeseries using reverse phase-blipped images."""
+    inputnode = Node(IdentityInterface(["timeseries", "fieldmap"]), "inputs")
+
+    # Calculate the shift field
+    # Note that setting readout_times to 1 will give a fine
+    # map of the field, but the units will be off
+    # Since we don't write out the map of the field itself, it does
+    # not seem worth it to add another parameter for the readout times.
+    # (It does require that they are the same, but when wouldn't they be?)
+    topup = MapNode(fsl.TOPUP(encoding_direction=fieldmap_pe,
+                              readout_times=[1] * len(fieldmap_pe)),
+                    ["in_file"], "topup")
+
+    # Unwarp the timeseries
+    applytopup = MapNode(fsl.ApplyTOPUP(method="jac", in_index=[1]),
+                         ["in_files",
+                          "in_topup_fieldcoef",
+                          "in_topup_movpar",
+                          "encoding_file"],
+                         "applytopup")
+
+    # Make a figure summarize the unwarping
+    report = MapNode(UnwarpReport(),
+                     ["orig_file", "corrected_file"], "report")
+
+    # Define the outputs
+    outputnode = Node(IdentityInterface(["timeseries", "report"]), "outputs")
+
+    # Define and connect the workflow
+    unwarp = Workflow(name)
+    unwarp.connect([
+        (inputnode, topup,
+            [("fieldmap", "in_file")]),
+        (inputnode, applytopup,
+            [("timeseries", "in_files")]),
+        (topup, applytopup,
+            [("out_fieldcoef", "in_topup_fieldcoef"),
+             ("out_movpar", "in_topup_movpar"),
+             ("out_enc_file", "encoding_file")]),
+        (inputnode, report,
+            [("fieldmap", "orig_file")]),
+        (topup, report,
+            [("out_corrected", "corrected_file")]),
+        (applytopup, outputnode,
+            [("out_corrected", "timeseries")]),
+        (report, outputnode,
+            [("out_file", "report")]),
+        ])
+
+    return unwarp
 
 
 def create_realignment_workflow(name="realignment", temporal_interp=True,
@@ -517,6 +602,65 @@ class PrepTimeseries(BaseInterface):
     _list_outputs = list_out_file("timeseries.nii.gz")
 
 
+class UnwarpReportInput(BaseInterfaceInputSpec):
+
+    orig_file = File(exists=True)
+    corrected_file = File(exists=True)
+
+
+class UnwarpReport(BaseInterface):
+
+    input_spec = UnwarpReportInput
+    output_spec = SingleOutFile
+
+    def _run_interface(self, runtime):
+
+        # Make a discrete colormap
+        cmap = mpl.colors.ListedColormap(["black", "#d65f5f", "white"])
+
+        # Initialize the figure
+        f, axes = plt.subplots(1, 2, figsize=(9, 2.75),
+                               facecolor="black", edgecolor="black")
+
+        for ax, fname in zip(axes, [self.inputs.orig_file,
+                                    self.inputs.corrected_file]):
+
+            # Combine the frames from this image and plot
+            img = nib.load(fname)
+            ax.imshow(self.combine_frames(img), cmap=cmap, vmin=0, vmax=2)
+            ax.set_axis_off()
+
+        # Save the figure and close
+        f.subplots_adjust(0, 0, 1, 1, 0, 0)
+        f.savefig("unwarping.png", facecolor="black", edgecolor="black")
+        plt.close(f)
+
+        return runtime
+
+    def combine_frames(self, img):
+
+        # Find a value to loosely segment the brain
+        d = img.get_data()
+        counts, bins = np.histogram(d[d > 0], 50)
+        thresh = bins[np.diff(counts) > 0][0]
+
+        # Show the middle slice
+        middle = d.shape[0] // 2
+
+        # Combine a binary mask for each phase direction
+        a = np.rot90(d[middle, ..., 0] > thresh)
+        b = np.rot90(d[middle, ..., 1] > thresh)
+
+        # Make an image showing overlap and divergence
+        c = np.zeros_like(a, int)
+        c[a ^ b] = 1
+        c[a & b] = 2
+
+        return c
+
+    _list_outputs = list_out_file("unwarping.png")
+
+
 class ExtractRealignmentTarget(BaseInterface):
 
     input_spec = SingleInFile
@@ -526,10 +670,9 @@ class ExtractRealignmentTarget(BaseInterface):
 
         # Load the input timeseries
         img = nib.load(self.inputs.in_file)
-        data = img.get_data()
 
         # Extract the target volume
-        targ = self.extract_target(data)
+        targ = self.extract_target(img)
 
         # Save a new 3D image
         targ_img = nib.Nifti1Image(targ,
@@ -539,11 +682,11 @@ class ExtractRealignmentTarget(BaseInterface):
 
         return runtime
 
-    def extract_target(self, data):
+    def extract_target(self, img):
         """Return a 3D array with data from the middle TR."""
-        middle_vol = data.shape[-1] // 2
-        targ = np.empty(data.shape[:-1])
-        targ[:] = data[..., middle_vol]
+        middle_vol = img.shape[-1] // 2
+        targ = np.empty(img.shape[:-1])
+        targ[:] = img.dataobj[..., middle_vol]
 
         return targ
 

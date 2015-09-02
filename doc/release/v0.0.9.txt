@@ -1,0 +1,13 @@
+
+v 0.0.9 (Unreleased)
+--------------------
+
+Preproc workflow
+~~~~~~~~~~~~~~~~
+
+- Added the ability to supply fieldmap images that can be used to unwarp
+  distortions caused by dropout regions. This uses FSL's ``topup`` and
+  ``applytopup`` utilities. The images you should provide aren't actually
+  traditional "fieldmaps", but rather images with normal and reversed phase
+  encoding directions, from which a map of the distortions can be computed.
+

@@ -72,6 +72,7 @@ def gather_experiment_info(exp_name=None, altmodel=None):
     # Save the __doc__ attribute to the dict
     exp_dict["comments"] = "" if exp.__doc__ is None else exp.__doc__
     if altmodel is not None:
+        exp_dict["comments"] += "\n"
         exp_dict["comments"] += "" if alt.__doc__ is None else alt.__doc__
 
     # Check if it looks like this is a partial FOV acquisition
@@ -97,10 +98,12 @@ def default_experiment_parameters():
 
         source_template="",
         whole_brain_template="",
+        fieldmap_template="",
         n_runs=0,
 
         TR=2,
         frames_to_toss=0,
+        fieldmap_pe=("y", "y-"),
         temporal_interp=False,
         interleaved=True,
         coreg_init="fsl",

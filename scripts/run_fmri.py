@@ -83,7 +83,9 @@ def main(arglist):
     # Collect raw nifti data
     preproc_templates = dict(timeseries=exp["source_template"])
     if exp["partial_brain"]:
-        preproc_templates["whole_brain_template"] = exp["whole_brain_template"]
+        preproc_templates["whole_brain"] = exp["whole_brain_template"]
+    if exp["fieldmap_template"]:
+        preproc_templates["fieldmap"] = exp["fieldmap_template"]
 
     preproc_source = Node(SelectFiles(preproc_templates,
                                       base_directory=project["data_dir"]),

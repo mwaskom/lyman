@@ -1,6 +1,7 @@
 import numpy as np
 import nose.tools as nt
 import numpy.testing as npt
+import nibabel as nib
 from .. import preproc
 
 
@@ -24,8 +25,9 @@ def test_extract_realignment_target():
     for ntp in [20, 21]:
         index = np.arange(ntp)[None, None, None, :]
         data = np.ones((45, 45, 30, ntp)) * index
+        img = nib.Nifti1Image(data, np.eye(4))
 
-        targ = extractor.extract_target(data)
+        targ = extractor.extract_target(img)
         nt.assert_equal(np.asscalar(np.unique(targ)), ntp // 2)
 
 
