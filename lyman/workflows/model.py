@@ -372,17 +372,20 @@ class ModelSummary(BaseInterface):
         ss_full, r2_full = self.compute_r2(yhat_full)
         self.save_image(ss_full, "ssres_full")
         self.save_image(r2_full, "r2_full")
+        del yhat_full, r2_full
 
         # Compute the main model r squared
         yhat_main = self.dot_by_slice(X, pes, "main")
         ss_main, r2_main = self.compute_r2(yhat_main)
         self.save_image(ss_main, "ssres_main")
         self.save_image(r2_main, "r2_main")
+        del yhat_main, r2_main
 
         # Compute the confound model r squared
         yhat_confound = self.dot_by_slice(X, pes, "confound")
         _, r2_confound = self.compute_r2(yhat_confound)
         self.save_image(r2_confound, "r2_confound")
+        del yhat_confound, r2_confound
 
         # Compute and save the residual tSNR
         std = np.sqrt(ss_full / len(y))
@@ -416,8 +419,11 @@ class ModelSummary(BaseInterface):
         return out
 
     def compute_r2(self, yhat):
-
-        ssres = np.sum(np.square(yhat - self.y), axis=-1)
+        """Efficiently compute the coefficient of variation."""
+        ssres = np.zeros_like(self.sstot)
+        n_frames = yhat.shape[-1]
+        for tr in xrange(n_frames):
+            ssres += np.square(yhat[..., tr] - self.y[..., tr])
         r2 = 1 - ssres / self.sstot
         return ssres, r2
 
