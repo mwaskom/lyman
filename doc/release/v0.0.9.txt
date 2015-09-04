@@ -11,3 +11,10 @@ Preproc workflow
   traditional "fieldmaps", but rather images with normal and reversed phase
   encoding directions, from which a map of the distortions can be computed.
 
+
+Model workflow
+~~~~~~~~~~~~~~
+
+- Made some changes to the model summary node to use memory more efficiently.
+  The model summary code should now use a similar amount of memory as the
+  ``film_gls`` model fitting process.
