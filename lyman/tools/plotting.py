@@ -65,10 +65,10 @@ def _add_cbar_to_ax(ax, min, max, cmap):
     # Add labels to show the min and max points of the colorbar
     ax.annotate("{:.2g}".format(min),
                 ha="right", va="center", size=14, family="Arial",
-                xy=(-1.02, .5), xycoords="axes fraction")
+                xy=(-.05, .5), xycoords="axes fraction")
     ax.annotate("{:.2g}".format(max),
                 ha="left", va="center", size=14, family="Arial",
-                xy=(1.02, .5), xycoords="axes fraction")
+                xy=(1.05, .5), xycoords="axes fraction")
 
 
 def add_colorbars(f, min, max, pos_cmap="YlOrRd_r", neg_cmap=None):
