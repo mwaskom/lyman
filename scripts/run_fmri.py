@@ -4,8 +4,12 @@ Main execution script for fMRI analysis in the Lyman ecosystem.
 
 """
 import os
+
+# Needed currently to avoid crash in model code
+# Also nipype parallelism doesn't play well with this
+os.environ["MKL_NUM_THREADS"] = "1"
+
 import sys
-import time
 import shutil
 import os.path as op
 from textwrap import dedent
