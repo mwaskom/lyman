@@ -120,6 +120,7 @@ def default_experiment_parameters():
         regressor_file=None,
         regressor_names=None,
         confound_sources=["motion"],
+        remove_artifacts=True,
         hrf_model="GammaDifferenceHRF",
         temporal_deriv=False,
         confound_pca=False,

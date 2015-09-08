@@ -248,7 +248,10 @@ class ModelSetup(BaseInterface):
             confounds = None
 
         # Get the image artifacts
-        artifacts = pd.read_csv(self.inputs.artifact_file).max(axis=1)
+        if exp_info["remove_artifacts"]:
+            artifacts = pd.read_csv(self.inputs.artifact_file).max(axis=1)
+        else:
+            artifacts = None
 
         # Get the additional model regressors
         if isdefined(self.inputs.regressor_file):
