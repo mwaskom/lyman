@@ -126,6 +126,7 @@ def main(arglist):
     model_templates = dict(
         timeseries=op.join(model_base, smoothing + "_timeseries.nii.gz"),
         realign_file=op.join(model_base, "realignment_params.csv"),
+        nuisance_file=op.join(model_base, "nuisance_variables.csv"),
         artifact_file=op.join(model_base, "artifacts.csv"),
         )
 

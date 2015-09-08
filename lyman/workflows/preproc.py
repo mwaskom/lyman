@@ -1205,7 +1205,8 @@ class ExtractConfounds(BaseInterface):
         brain_mask = nib.load(self.inputs.brain_mask).get_data()
 
         # Set up the output dataframe
-        wm_cols = ["wm{:d}".format(i) for i in range(self.inputs.n_components)]
+        wm_cols = ["wm_{:d}".format(i)
+                   for i in range(self.inputs.n_components)]
         cols = wm_cols + ["brain"]
         index = np.arange(ts_data.shape[-1])
         out_df = pd.DataFrame(index=index, columns=cols, dtype=np.float)
