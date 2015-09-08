@@ -109,6 +109,12 @@ Preprocessing Parameters
     total displacement (in mm) relative to the previous frame exceeds this
     number will be excluded from the model.
 
+   wm_components
+    Number of principle components to use when extracting nuisance timeseries
+    data from deep white matter voxels. This provides additional confound
+    information that can be added during the model fitting (using the
+    ``confound_sources`` variable).
+
    smooth_fwhm
     A float with the smoothing kernel size for the volume-based SUSAN smoothing.
     Note that an unsmoothed version of the timeseries is always produced.
@@ -151,10 +157,24 @@ Model Parameters
     model for each explanatory variable (these are considered regressors of
     no interest).
 
+   confound_sources
+    A list of strings that can include ``"motion"``, ``"wm"``, and ``"brain"``.
+    This specifies what information should be added to the "confounds"
+    component of the design matrix. ``"motion"`` are the six motion parameters
+    obtained during realignment, ``"wm"`` are timeseries data from deep white
+    matter with dimensionality reduced using PCA (controlled by the
+    ``nuisance_components`` variable), and ``"brain"`` is the mean timecourse
+    over the whole brain mask.
+
+   remove_artifacts
+    Boolean specifying whether indicator vectors should be added to the
+    design matrix to identify (and thus remove) frames that are determined
+    during preprocessing to contain artifacts.
+
    confound_pca
     A boolean specifying whether the dimensionality of the confound matrix
-    (currently just the 6 motion parameters) should be reduced using PCA
-    to include dimensions explaining 99% of the variance.
+    should be reduced using PCA to include dimensions explaining 99% of the
+    variance.
 
    hrf_params
     A dictionary with keyword arguments for the HRF model class.
