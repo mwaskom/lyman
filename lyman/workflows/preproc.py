@@ -237,7 +237,7 @@ def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
 
     # Make a figure summarize the unwarping
     report = MapNode(UnwarpReport(),
-                     ["orig_file", "corrected_file"], "report")
+                     ["orig_file", "corrected_file"], "unwarp_report")
 
     # Define the outputs
     outputnode = Node(IdentityInterface(["timeseries", "report"]), "outputs")
