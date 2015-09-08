@@ -6,6 +6,8 @@ import pandas as pd
 import nibabel as nib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from sklearn import decomposition as decomp
+
 
 from moss.mosaic import Mosaic
 import seaborn as sns
@@ -99,6 +101,10 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     artifacts.inputs.motion_thresh = exp_info["motion_threshold"]
     artifacts.inputs.spike_thresh = exp_info["spike_threshold"]
 
+    # Extract nuisance variables from anatomical sources
+    confounds = create_confound_extraction_workflow("confounds",
+                                                    exp_info["wm_components"])
+
     # Save the experiment info for this run
     saveparams = MapNode(SaveParameters(exp_info=exp_info),
                          "in_file", "saveparams")
@@ -133,6 +139,12 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("outputs.mask_file", "inputs.mask_file")]),
         (filter_rough, artifacts,
             [("outputs.timeseries", "timeseries")]),
+        (filter_rough, confounds,
+            [("outputs.timeseries", "inputs.timeseries")]),
+        (inputnode, confounds,
+            [("subject_id", "inputs.subject_id")]),
+        (skullstrip, confounds,
+            [("outputs.mask_file", "inputs.brain_mask")]),
         (inputnode, saveparams,
             [("timeseries", "in_file")]),
         ])
@@ -169,6 +181,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
                      "realign_report",
                      "mask_report",
                      "artifact_report",
+                     "confound_file",
                      "flirt_affine",
                      "tkreg_affine",
                      "coreg_report",
@@ -197,6 +210,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
         (filter_rough, outputnode,
             [("outputs.timeseries", "unsmoothed_timeseries"),
              ("outputs.mean_file", "mean_func")]),
+        (confounds, outputnode,
+            [("outputs.confound_file", "confound_file")]),
         (saveparams, outputnode,
             [("json_file", "json_file")]),
         ])
@@ -563,6 +578,58 @@ def create_filtering_workflow(name="filter",
     return filtering
 
 
+def create_confound_extraction_workflow(name="confounds", wm_components=6):
+    """Extract nuisance variables from anatomical sources."""
+    inputnode = Node(IdentityInterface(["timeseries",
+                                        "brain_mask",
+                                        "reg_file",
+                                        "subject_id"]),
+                     "inputs")
+
+    # Find the subject's Freesurfer segmentation
+    # Grab the Freesurfer aparc+aseg file as an anatomical brain mask
+    getaseg = Node(io.SelectFiles({"aseg": "{subject_id}/mri/aseg.mgz"},
+                                  base_directory=os.environ["SUBJECTS_DIR"]),
+                   "getaseg")
+
+    # Select and erode the white matter to get deep voxels
+    selectwm = Node(fs.Binarize(erode=3, wm=True), "selectwm")
+
+    # Transform the mask into functional space
+    transform = MapNode(fs.ApplyVolTransform(inverse=True,
+                                             interp="nearest"),
+                        ["reg_file", "source_file"],
+                        "transform")
+
+    # Extract eigenvariates of the timeseries from WM and whole brain
+    extract = MapNode(ExtractConfounds(n_components=wm_components),
+                      ["timeseries", "brain_mask"],
+                      "extract")
+
+    outputnode = Node(IdentityInterface(["confound_file"]), "outputs")
+
+    confounds = Workflow(name)
+    confounds.connect([
+        (inputnode, getaseg,
+            [("subject_id", "subject_id")]),
+        (getaseg, selectwm,
+            [("aseg", "in_file")]),
+        (selectwm, transform,
+            [("binary_file", "target_file")]),
+        (inputnode, transform,
+            [("reg_file", "reg_file")]),
+        (transform, extract,
+            [("transformed_file", "wm_mask")]),
+        (inputnode, extract,
+            [("timeseries", "timeseries"),
+             ("brain_mask", "brain_mask")]),
+        (extract, outputnode,
+            [("out_file", "confound_file")]),
+        ])
+
+    return confounds
+
+
 # =========================================================================== #
 
 
@@ -751,22 +818,24 @@ class RealignmentReport(BaseInterface):
             fig, axes = plt.subplots(3, 1, figsize=(9, 5), sharex=True)
 
         # Trim off all but the axis name
-        f = lambda s: s[-1]
+        def axis(s):
+            return s[-1]
 
         # Plot rotations
         pal = sns.color_palette("Reds_d", 3)
-        rot_df = np.rad2deg(df.filter(like="rot")).rename(columns=f)
+        rot_df = np.rad2deg(df.filter(like="rot")).rename(columns=axis)
         rot_df.plot(ax=axes[0], color=pal, lw=1.5)
 
         # Plot translations
         pal = sns.color_palette("Blues_d", 3)
-        trans_df = df.filter(like="trans").rename(columns=f)
+        trans_df = df.filter(like="trans").rename(columns=axis)
         trans_df.plot(ax=axes[1], color=pal, lw=1.5)
 
         # Plot displacement
-        f = lambda s: s[-3:]
+        def ref(s):
+            return s[-3:]
         pal = sns.color_palette("Greens_d", 2)
-        disp_df = df.filter(like="displace").rename(columns=f)
+        disp_df = df.filter(like="displace").rename(columns=ref)
         disp_df.plot(ax=axes[2], color=pal, lw=1.5)
 
         # Label the graphs
@@ -1110,3 +1179,47 @@ class ReplaceMean(BaseInterface):
         out_fname = "{}.nii.gz".format(self.inputs.output_name)
         outputs["out_file"] = op.abspath(out_fname)
         return outputs
+
+
+class ExtractConfoundsInput(BaseInterfaceInputSpec):
+
+    timeseries = File(Exists=True)
+    wm_mask = File(Exists=True)
+    brain_mask = File(Exists=True)
+    n_components = traits.Int()
+
+
+class ExtractConfounds(BaseInterface):
+    """Extract nuisance variables from anatomical sources."""
+    input_spec = ExtractConfoundsInput
+    output_spec = SingleOutFile
+
+    def _run_interface(self, runtime):
+
+        # Load the brain images
+        ts_data = nib.load(self.inputs.timeseries).get_data()
+        wm_mask = nib.load(self.inputs.wm_mask).get_data()
+        brain_mask = nib.load(self.inputs.brain_mask).get_data()
+
+        # Set up the output dataframe
+        wm_cols = ["wm{:d}".format(i) for i in self.inputs.n_components]
+        cols = wm_cols + ["brain"]
+        index = np.arange(ts_data.shape[-1])
+        out_df = pd.DataFrame(index=index, cols=cols, dtype=np.float)
+
+        # Extract eigenvariates of the white matter timeseries
+        wm_ts = ts_data[wm_mask.astype(bool)].T
+        wm_pca = decomp.PCA(self.inputs.n_components)
+        wm_comp = wm_pca.fit_transform(wm_ts)
+        out_df[wm_cols] = wm_comp
+
+        # Extract the mean whole-brain timeseries
+        brain_ts = ts_data[brain_mask.astype(bool)].mean(axis=0)
+        out_df["brain"] = brain_ts
+
+        # Write out the resulting data to disk
+        out_df.to_csv("nuisance_variables.csv", index=False)
+
+        return runtime
+
+    _list_outputs = list_out_file("nuisance_variables.csv")
