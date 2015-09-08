@@ -605,7 +605,7 @@ def create_confound_extraction_workflow(name="confounds", wm_components=6):
 
     # Extract eigenvariates of the timeseries from WM and whole brain
     extract = MapNode(ExtractConfounds(n_components=wm_components),
-                      ["timeseries", "brain_mask"],
+                      ["timeseries", "brain_mask", "wm_mask"],
                       "extract")
 
     outputnode = Node(IdentityInterface(["confound_file"]), "outputs")
@@ -619,7 +619,8 @@ def create_confound_extraction_workflow(name="confounds", wm_components=6):
         (selectwm, transform,
             [("binary_file", "target_file")]),
         (inputnode, transform,
-            [("reg_file", "reg_file")]),
+            [("reg_file", "reg_file"),
+             ("timeseries", "source_file")]),
         (transform, extract,
             [("transformed_file", "wm_mask")]),
         (inputnode, extract,
@@ -1204,10 +1205,10 @@ class ExtractConfounds(BaseInterface):
         brain_mask = nib.load(self.inputs.brain_mask).get_data()
 
         # Set up the output dataframe
-        wm_cols = ["wm{:d}".format(i) for i in self.inputs.n_components]
+        wm_cols = ["wm{:d}".format(i) for i in range(self.inputs.n_components)]
         cols = wm_cols + ["brain"]
         index = np.arange(ts_data.shape[-1])
-        out_df = pd.DataFrame(index=index, cols=cols, dtype=np.float)
+        out_df = pd.DataFrame(index=index, columns=cols, dtype=np.float)
 
         # Extract eigenvariates of the white matter timeseries
         wm_ts = ts_data[wm_mask.astype(bool)].T
