@@ -114,6 +114,8 @@ def main(arglist):
     # Possibly execute the workflow, depending on the command line
     lyman.run_workflow(preproc, "preproc", args)
 
+    preproc.write_graph("what_the_fuck.dot")
+
     # ----------------------------------------------------------------------- #
     # Timeseries Model
     # ----------------------------------------------------------------------- #

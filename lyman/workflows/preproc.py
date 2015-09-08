@@ -145,6 +145,8 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("subject_id", "inputs.subject_id")]),
         (skullstrip, confounds,
             [("outputs.mask_file", "inputs.brain_mask")]),
+        (coregister, confounds,
+            [("outputs.tkreg_mat", "inputs.reg_file")]),
         (inputnode, saveparams,
             [("timeseries", "in_file")]),
         ])
