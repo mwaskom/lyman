@@ -19,7 +19,9 @@ Model workflow
 - Added the ability to include additional nuisance variables in the model.
   This can now include eigenvariates of deep white matter timeseries and the
   mean signal from across the whole brain. This involves the new experiment
-  options ``wm_components`` and ``confound_sources``.
+  options ``wm_components`` and ``confound_sources``. This change requires that
+  you rerun the preproc workflow before running the model workflow after updating
+  lyman.
 
 - Made the inclusion of artifact indicator vectors in the design matrix optional.
   See the new experiment option ``remove_artifacts``.
