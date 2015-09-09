@@ -28,7 +28,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
         exp_info = lyman.default_experiment_parameters()
 
     # Define constant inputs
-    inputs = ["realign_file", "artifact_file", "timeseries"]
+    inputs = ["realign_file", "nuisance_file", "artifact_file", "timeseries"]
 
     # Possibly add the design and regressor files to the inputs
     if exp_info["design_name"] is not None:
@@ -41,7 +41,8 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
 
     # Set up the experimental design
     modelsetup = MapNode(ModelSetup(exp_info=exp_info),
-                         ["timeseries", "realign_file", "artifact_file"],
+                         ["timeseries", "realign_file",
+                          "nuisance_file", "artifact_file"],
                          "modelsetup")
 
     # For some nodes, make it possible to request extra memory
@@ -96,6 +97,7 @@ def create_timeseries_model_workflow(name="model", exp_info=None):
     model.connect([
         (inputnode, modelsetup,
             [("realign_file", "realign_file"),
+             ("nuisance_file", "nuisance_file"),
              ("artifact_file", "artifact_file"),
              ("timeseries", "timeseries")]),
         (inputnode, modelestimate,
@@ -161,6 +163,7 @@ class ModelSetupInput(BaseInterfaceInputSpec):
     timeseries = File(exists=True)
     design_file = File(exists=True)
     realign_file = File(exists=True)
+    nuisance_file = File(exists=True)
     artifact_file = File(exists=True)
     regressor_file = File(exists=True)
 
@@ -214,12 +217,41 @@ class ModelSetup(BaseInterface):
         else:
             design = None
 
+        # Get confound information to add to the model
+        confounds = []
+        sources = exp_info["confound_sources"]
+        bad_sources = set(sources) - set(["motion", "wm", "brain"])
+        if bad_sources:
+            msg = ("Invalid confound source specification: {}"
+                   .format(list(bad_sources)))
+            raise ValueError(msg)
+
         # Get the motion correction parameters
-        realign = pd.read_csv(self.inputs.realign_file)
-        realign = realign.filter(regex="rot|trans").apply(stats.zscore)
+        if "motion" in sources:
+            realign = pd.read_csv(self.inputs.realign_file)
+            realign = realign.filter(regex="rot|trans").apply(stats.zscore)
+            confounds.append(realign)
+
+        # Get the anatomical nuisance sources
+        nuisance = pd.read_csv(self.inputs.nuisance_file).apply(stats.zscore)
+        if "wm" in sources:
+            wm = nuisance.filter(regex="wm")
+            confounds.append(wm)
+        if "brain" in sources:
+            brain = nuisance["brain"]
+            confounds.append(brain)
+
+        # Combine the different confound sources
+        if confounds:
+            confounds = pd.concat(confounds, axis=1)
+        else:
+            confounds = None
 
         # Get the image artifacts
-        artifacts = pd.read_csv(self.inputs.artifact_file).max(axis=1)
+        if exp_info["remove_artifacts"]:
+            artifacts = pd.read_csv(self.inputs.artifact_file).max(axis=1)
+        else:
+            artifacts = None
 
         # Get the additional model regressors
         if isdefined(self.inputs.regressor_file):
@@ -241,7 +273,7 @@ class ModelSetup(BaseInterface):
                              hrf_model=hrf,
                              ntp=ntp,
                              tr=tr,
-                             confounds=realign,
+                             confounds=confounds,
                              artifacts=artifacts,
                              regressors=regressors,
                              condition_names=exp_info["condition_names"],

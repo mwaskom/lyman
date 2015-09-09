@@ -4,8 +4,12 @@ Main execution script for fMRI analysis in the Lyman ecosystem.
 
 """
 import os
+
+# Needed currently to avoid crash in model code
+# Also nipype parallelism doesn't play well with this
+os.environ["MKL_NUM_THREADS"] = "1"
+
 import sys
-import time
 import shutil
 import os.path as op
 from textwrap import dedent
@@ -126,6 +130,7 @@ def main(arglist):
     model_templates = dict(
         timeseries=op.join(model_base, smoothing + "_timeseries.nii.gz"),
         realign_file=op.join(model_base, "realignment_params.csv"),
+        nuisance_file=op.join(model_base, "nuisance_variables.csv"),
         artifact_file=op.join(model_base, "artifacts.csv"),
         )
 

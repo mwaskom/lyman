@@ -111,6 +111,7 @@ def default_experiment_parameters():
         intensity_threshold=4.5,
         motion_threshold=1,
         spike_threshold=None,
+        wm_components=6,
         smooth_fwhm=6,
         hpf_cutoff=128,
 
@@ -118,6 +119,8 @@ def default_experiment_parameters():
         condition_names=None,
         regressor_file=None,
         regressor_names=None,
+        confound_sources=["motion"],
+        remove_artifacts=True,
         hrf_model="GammaDifferenceHRF",
         temporal_deriv=False,
         confound_pca=False,
