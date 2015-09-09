@@ -51,6 +51,7 @@ def create_ffx_workflow(name="mni_ffx", space="mni",
     outputnode = Node(IdentityInterface(["flame_results",
                                          "r2_files",
                                          "tsnr_file",
+                                         "mean_file",
                                          "summary_report",
                                          "json_file",
                                          "zstat_report"]),
@@ -82,7 +83,8 @@ def create_ffx_workflow(name="mni_ffx", space="mni",
             [("flame_results", "flame_results")]),
         (ffxsummary, outputnode,
             [("r2_files", "r2_files"),
-             ("tsnr_file", "tsnr_file")]),
+             ("tsnr_file", "tsnr_file"),
+             ("mean_file", "mean_file")]),
         (report, outputnode,
             [("summary_files", "summary_report"),
              ("zstat_files", "zstat_report")]),
@@ -312,6 +314,10 @@ class FFXSummary(BaseInterface):
         tsnr = np.nan_to_num(tsnr)
         self.save_image(tsnr, "tsnr")
 
+        # Save a mean file
+        self.save_image(mean_data, "mean_func")
+
+
     def save_image(self, data, fname):
         """Save data to the output structure."""
         img = nib.Nifti1Image(data, self.affine, self.header)
@@ -323,6 +329,7 @@ class FFXSummary(BaseInterface):
         outputs["r2_files"] = [op.abspath("r2_full.nii.gz"),
                                op.abspath("r2_main.nii.gz")]
         outputs["tsnr_file"] = op.abspath("tsnr.nii.gz")
+        outputs["mean_file"] = op.abspath("mean_func.nii.gz")
         return outputs
 
 
