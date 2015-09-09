@@ -29,3 +29,10 @@ Model workflow
 - Made some changes to the model summary node to use memory more efficiently.
   The model summary code should now use a similar amount of memory as the
   ``film_gls`` model fitting process.
+
+
+Fixed effects workflow
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Fixed effects workflow now saves out a mean functional image that is the
+  grand mean across runs.
