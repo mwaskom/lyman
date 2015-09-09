@@ -248,6 +248,7 @@ class FFXSummaryOutput(TraitedSpec):
 
     r2_files = OutputMultiPath(File(exists=True))
     tsnr_file = File(exists=True)
+    mean_file = File(exists=True)
 
 
 class FFXSummary(BaseInterface):
