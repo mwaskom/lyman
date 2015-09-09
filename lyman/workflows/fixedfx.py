@@ -317,7 +317,6 @@ class FFXSummary(BaseInterface):
         # Save a mean file
         self.save_image(mean_data, "mean_func")
 
-
     def save_image(self, data, fname):
         """Save data to the output structure."""
         img = nib.Nifti1Image(data, self.affine, self.header)
