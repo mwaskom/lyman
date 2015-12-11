@@ -1,6 +1,6 @@
 
-v 0.0.9 (Unreleased)
---------------------
+v 0.0.9 (December 11, 2015)
+---------------------------
 
 Preproc workflow
 ~~~~~~~~~~~~~~~~
@@ -20,11 +20,11 @@ Model workflow
   This can now include eigenvariates of deep white matter timeseries and the
   mean signal from across the whole brain. This involves the new experiment
   options ``wm_components`` and ``confound_sources``. This change requires that
-  you rerun the preproc workflow before running the model workflow after updating
-  lyman.
+  you rerun the preproc workflow before running the model workflow after
+  updating lyman.
 
-- Made the inclusion of artifact indicator vectors in the design matrix optional.
-  See the new experiment option ``remove_artifacts``.
+- Made the inclusion of artifact indicator vectors in the design matrix
+  optional.  See the new experiment option ``remove_artifacts``.
 
 - Made some changes to the model summary node to use memory more efficiently.
   The model summary code should now use a similar amount of memory as the
