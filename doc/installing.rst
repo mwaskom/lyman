@@ -11,7 +11,7 @@ To install lyman, you can run
 This will install the stable version. To get the development version, you
 should run
 
-   pip install git+git://github.com/mwaskom/lyman.git#egg=lyman
+   pip install git+git://github.com/mwaskom/lyman.git
 
 However, there are a number of dependencies that should be installed first.
 
@@ -20,8 +20,10 @@ Dependencies
 
 As a high-level package, lyman depends on a relatively large amount of external
 software. Getting set up to run an initial analysis can thus be somewhat of a
-hassle, which we apologize for. Below, we attempt to list the required packages
-and versions that are known to work with lyman.
+hassle, which I apologize for. Below, I attempt to list the required packages
+and versions that are known to work with lyman. This isn't updated that often,
+so later versions of these libraries will probably work. Older ones might too.
+It's a hard problem.
 
 Depending on what you are trying to do, it may not be necessary to install all
 of these packages. In the event that you don't want to exhaust this list, the
@@ -31,7 +33,8 @@ useful for finding missing dependencies.
 Lyman requires Python 2.7, and does not run on Python 3. We strongly recommend
 using the `Anaconda <https://store.continuum.io/cshop/anaconda/>`_
 distribution, which ships with the majority of the Python packages needed to
-run lyman. The rest can be easily installed with `pip`.
+run lyman. The rest can be easily installed with `conda`, or failing that,
+`pip`.
 
 
 Non-Python Software
@@ -80,6 +83,6 @@ Python Packages
 
 - statsmodels 0.5
 
-- PySurfer 0.4
+- moss 0.3.4
 
-- `moss <https://github.com/mwaskom/moss>`_
+- pysurfer 0.6
