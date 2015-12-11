@@ -100,7 +100,7 @@ html_theme = 'bootstrap'
 # documentation.
 html_theme_options = {
     'source_link_position': "footer",
-    'bootswatch_theme': "flatly",
+    'bootswatch_theme': "yeti",
     'navbar_sidebarrel': False,
     'bootstrap_version': "3",
     'navbar_links': [("Github", "https://github.com/mwaskom/lyman", True)],
