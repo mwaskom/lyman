@@ -1,6 +1,8 @@
 Release notes
 =============
 
+.. include:: release/v0.0.9.txt
+
 .. include:: release/v0.0.8.txt
 
 .. include:: release/v0.0.7.txt
