@@ -83,8 +83,9 @@ def main(arglist):
             dofs=op.join(mfx_base, "tdof_t1.nii.gz")))
     else:
         templates.update(dict(
-            reg_file=op.join(anal_dir_base, "{subject_id}/preproc/run_1",
-                             "func2anat_tkreg.dat")))
+            reg_file=op.join(anal_dir_base,
+                             "{subject_id}/reg/epi/", ffxsmooth,
+                             "run_1/func2anat_tkreg.dat")))
 
     # Workflow source node
     mfx_source = MapNode(SelectFiles(templates,

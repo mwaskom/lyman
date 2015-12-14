@@ -307,8 +307,9 @@ def main(arglist):
         reg = op.join(os.environ["FREESURFER_HOME"],
                       "average/mni152.register.dat")
     else:
-        bg = "{subject_id}/preproc/run_1/mean_func.nii.gz"
-        reg = "{subject_id}/preproc/run_1/func2anat_tkreg.dat"
+        reg_dir = "{subject_id}/reg/epi/{smoothing}/run_1"
+        bg = op.join(reg_dir, "mean_func_xfm.nii.gz")
+        reg = op.join(reg_dir, "func2anat_tkreg.dat")
     ffx_templates["anatomy"] = bg
     ffx_templates["reg_file"] = reg
 

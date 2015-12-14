@@ -368,6 +368,11 @@ class EPIModelRegistration(EPIRegistration,
                 runtime = self.apply_fsl_rigid(runtime, in_file,
                                                out_file, full_rigid)
 
+            # Save out the matrix to go from this space to the anatomy
+            if not i:
+                reg_fname = op.basename(first_rigid)
+                out_files.append(op.join(out_dir, reg_fname))
+
         self.out_files = out_files
         return runtime
 
@@ -470,6 +475,11 @@ class EPITimeseriesRegistration(EPIRegistration,
             out_mean = op.join(out_dir, out_mean_fname)
             runtime = self.apply_fsl_rigid(runtime, run_mean,
                                            out_mean, full_rigid)
+
+            # Save out the matrix to go from this space to the anatomy
+            if not i:
+                reg_fname = op.basename(first_rigid)
+                out_files.append(op.join(out_dir, reg_fname))
 
         self.out_files = out_files
         return runtime
