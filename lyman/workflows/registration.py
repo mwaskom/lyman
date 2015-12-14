@@ -377,8 +377,8 @@ class EPIModelRegistration(EPIRegistration,
             # Copy the matrix to go from this space to the anatomy
             if not i:
                 tkreg_fname = op.basename(self.inputs.tkreg_rigid)
-                out_first_rigid = op.join(out_dir, tkreg_fname)
-                shutil.copyfile(self.inputs.tkreg_rigid, out_first_rigid)
+                out_tkreg = op.join(out_dir, tkreg_fname)
+                shutil.copyfile(self.inputs.tkreg_rigid, out_tkreg)
 
         self.out_files = out_files
         return runtime
@@ -486,8 +486,8 @@ class EPITimeseriesRegistration(EPIRegistration,
             # Copy the matrix to go from this space to the anatomy
             if not i:
                 tkreg_fname = op.basename(self.inputs.tkreg_rigid)
-                out_first_rigid = op.join(out_dir, tkreg_fname)
-                shutil.copyfile(self.inputs.tkreg_rigid, out_first_rigid)
+                out_tkreg = op.join(out_dir, tkreg_fname)
+                shutil.copyfile(self.inputs.tkreg_rigid, out_tkreg)
 
         self.out_files = out_files
         return runtime
