@@ -33,7 +33,7 @@ def gather_project_info():
     return project_dict
 
 
-def gather_experiment_info(exp_name=None, altmodel=None):
+def gather_experiment_info(exp_name=None, altmodel=None, args=None):
     """Import an experiment module and add some formatted information."""
     lyman_dir = os.environ["LYMAN_DIR"]
 
@@ -88,6 +88,10 @@ def gather_experiment_info(exp_name=None, altmodel=None):
 
     # Build contrasts list if neccesary
     exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
+
+    # Add command line arguments for reproducibility
+    if args is not None:
+        exp_dict["command_line"] = vars(args)
 
     return exp_dict
 

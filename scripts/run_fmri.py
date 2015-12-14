@@ -32,7 +32,7 @@ def main(arglist):
 
     # Get and process specific information
     project = lyman.gather_project_info()
-    exp = lyman.gather_experiment_info(args.experiment, args.altmodel)
+    exp = lyman.gather_experiment_info(args.experiment, args.altmodel, args)
 
     # Set up the SUBJECTS_DIR for Freesurfer
     os.environ["SUBJECTS_DIR"] = project["data_dir"]

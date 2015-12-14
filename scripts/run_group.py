@@ -28,7 +28,7 @@ def main(arglist):
 
     # Get and process specific information
     project = lyman.gather_project_info()
-    exp = lyman.gather_experiment_info(args.experiment, args.altmodel)
+    exp = lyman.gather_experiment_info(args.experiment, args.altmodel, args)
 
     if args.experiment is None:
         args.experiment = project["default_exp"]
