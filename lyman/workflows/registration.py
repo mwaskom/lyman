@@ -115,7 +115,7 @@ class EPIRegInput(BaseInterfaceInputSpec):
 
     rigids = InputMultiPath(File(exists=True))
     first_rigid = File(exists=True)
-    tkreg_rgiid = File(exists=True)
+    tkreg_rigid = File(exists=True)
 
 
 class MNIModelRegInput(MNIRegInput,
