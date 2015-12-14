@@ -47,6 +47,8 @@ def create_reg_workflow(name="reg", space="mni",
 
     if space == "mni":
         fields.extend(["affine", "warpfield"])
+    else:
+        fields.extend(["tkreg_rigid"])
 
     inputnode = Node(IdentityInterface(fields), "inputnode")
 
@@ -113,6 +115,7 @@ class EPIRegInput(BaseInterfaceInputSpec):
 
     rigids = InputMultiPath(File(exists=True))
     first_rigid = File(exists=True)
+    tkreg_rgiid = File(exists=True)
 
 
 class MNIModelRegInput(MNIRegInput,
@@ -371,7 +374,8 @@ class EPIModelRegistration(EPIRegistration,
 
             # Copy the matrix to go from this space to the anatomy
             if not i:
-                out_first_rigid = op.join(out_dir, op.basename(first_rigid))
+                tkreg_fname = op.basename(self.inputs.tkreg_rigid)
+                out_first_rigid = op.join(out_dir, tkreg_fname)
                 shutil.copyfile(first_rigid, out_first_rigid)
 
         self.out_files = out_files
@@ -479,7 +483,8 @@ class EPITimeseriesRegistration(EPIRegistration,
 
             # Copy the matrix to go from this space to the anatomy
             if not i:
-                out_first_rigid = op.join(out_dir, op.basename(first_rigid))
+                tkreg_fname = op.basename(self.inputs.tkreg_rigid)
+                out_first_rigid = op.join(out_dir, tkreg_fname)
                 shutil.copyfile(first_rigid, out_first_rigid)
 
         self.out_files = out_files

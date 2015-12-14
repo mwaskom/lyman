@@ -224,6 +224,9 @@ def main(arglist):
                                              "normalization/warpfield.nii.gz")
         reg_templates["affine"] = op.join(data_dir, "{subject_id}",
                                           "normalization/affine." + aff_ext)
+    else:
+        reg_templates["tkreg_rigid"] = op.join("{subject_id}/preproc",
+                                               "run_1/func2anat_tkreg.dat")
 
     # Rigid (6dof) functional-to-anatomical matrices
     rigid_stem = "{subject_id}/preproc/run_*/func2anat_"
