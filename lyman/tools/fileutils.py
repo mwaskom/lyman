@@ -22,6 +22,7 @@ class SaveParameters(BaseInterface):
 
     input_spec = SaveParametersInput
     output_spec = SaveParametersOutput
+    overwrite = True
 
     def _run_interface(self, runtime):
 
