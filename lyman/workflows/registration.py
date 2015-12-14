@@ -15,6 +15,7 @@ For normalizations to mni space, two different warps can be used
 """
 import os
 import os.path as op
+import shutil
 import numpy as np
 
 from nipype import Workflow, Node, IdentityInterface
@@ -368,10 +369,10 @@ class EPIModelRegistration(EPIRegistration,
                 runtime = self.apply_fsl_rigid(runtime, in_file,
                                                out_file, full_rigid)
 
-            # Save out the matrix to go from this space to the anatomy
+            # Copy the matrix to go from this space to the anatomy
             if not i:
-                reg_fname = op.join(out_dir, op.basename(first_rigid))
-                out_files.append(op.realpath(reg_fname))
+                out_first_rigid = op.join(out_dir, op.basename(first_rigid))
+                shutil.copyfile(first_rigid, out_first_rigid)
 
         self.out_files = out_files
         return runtime
@@ -476,10 +477,10 @@ class EPITimeseriesRegistration(EPIRegistration,
             runtime = self.apply_fsl_rigid(runtime, run_mean,
                                            out_mean, full_rigid)
 
-            # Save out the matrix to go from this space to the anatomy
+            # Copy the matrix to go from this space to the anatomy
             if not i:
-                reg_fname = op.join(out_dir, op.basename(first_rigid))
-                out_files.append(op.realpath(reg_fname))
+                out_first_rigid = op.join(out_dir, op.basename(first_rigid))
+                shutil.copyfile(first_rigid, out_first_rigid)
 
         self.out_files = out_files
         return runtime
