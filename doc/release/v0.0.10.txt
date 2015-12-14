@@ -13,4 +13,4 @@ Registration workflow
 
 - The correct registration matrix to go from the epi space to the anatomy is
   now written out during the registration so that downstream results from
-  experiments that use the ``-regspace`` flag are correct.
+  experiments that use the ``-regexp`` flag are correct.
