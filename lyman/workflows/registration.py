@@ -41,8 +41,10 @@ def create_reg_workflow(name="reg", space="mni",
         fields = ["copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
+
     if cross_exp:
         fields.extend(["first_rigid"])
+
     fields.extend(["means", "masks", "rigids"])
 
     if space == "mni":
@@ -376,7 +378,7 @@ class EPIModelRegistration(EPIRegistration,
             if not i:
                 tkreg_fname = op.basename(self.inputs.tkreg_rigid)
                 out_first_rigid = op.join(out_dir, tkreg_fname)
-                shutil.copyfile(first_rigid, out_first_rigid)
+                shutil.copyfile(self.inputs.tkreg_rigid, out_first_rigid)
 
         self.out_files = out_files
         return runtime
@@ -485,7 +487,7 @@ class EPITimeseriesRegistration(EPIRegistration,
             if not i:
                 tkreg_fname = op.basename(self.inputs.tkreg_rigid)
                 out_first_rigid = op.join(out_dir, tkreg_fname)
-                shutil.copyfile(first_rigid, out_first_rigid)
+                shutil.copyfile(self.inputs.tkreg_rigid, out_first_rigid)
 
         self.out_files = out_files
         return runtime
