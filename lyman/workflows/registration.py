@@ -370,8 +370,8 @@ class EPIModelRegistration(EPIRegistration,
 
             # Save out the matrix to go from this space to the anatomy
             if not i:
-                reg_fname = op.basename(first_rigid)
-                out_files.append(op.join(out_dir, reg_fname))
+                reg_fname = op.join(out_dir, op.basename(first_rigid))
+                out_files.append(op.realpath(reg_fname))
 
         self.out_files = out_files
         return runtime
@@ -478,8 +478,8 @@ class EPITimeseriesRegistration(EPIRegistration,
 
             # Save out the matrix to go from this space to the anatomy
             if not i:
-                reg_fname = op.basename(first_rigid)
-                out_files.append(op.join(out_dir, reg_fname))
+                reg_fname = op.join(out_dir, op.basename(first_rigid))
+                out_files.append(op.realpath(reg_fname))
 
         self.out_files = out_files
         return runtime
