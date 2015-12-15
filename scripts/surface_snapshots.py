@@ -4,6 +4,7 @@ import os.path as op
 import sys
 import argparse
 from textwrap import dedent
+from time import sleep
 
 import numpy as np
 from scipy import stats
@@ -108,6 +109,7 @@ def contrast_loop(subj, contrasts, stat_temp, mask_temp, png_temp,
             # Take screenshots
             for view in ["lat", "med", "ven"]:
                 b.show_view(view, distance="auto")
+                sleep(.1)
                 panels.append(crop(b.screenshot()))
             b.close()
 
