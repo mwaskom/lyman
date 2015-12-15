@@ -32,7 +32,7 @@ def main(arglist):
 
     # Get and process specific information
     project = lyman.gather_project_info()
-    exp = lyman.gather_experiment_info(args.experiment, args.altmodel)
+    exp = lyman.gather_experiment_info(args.experiment, args.altmodel, args)
 
     # Set up the SUBJECTS_DIR for Freesurfer
     os.environ["SUBJECTS_DIR"] = project["data_dir"]
@@ -224,6 +224,14 @@ def main(arglist):
                                              "normalization/warpfield.nii.gz")
         reg_templates["affine"] = op.join(data_dir, "{subject_id}",
                                           "normalization/affine." + aff_ext)
+    else:
+        if args.regexp is None:
+            tkreg_base = analysis_dir
+        else:
+            tkreg_base = op.join(project["analysis_dir"], args.regexp)
+        reg_templates["tkreg_rigid"] = op.join(tkreg_base,
+                                               "{subject_id}", "preproc",
+                                               "run_1", "func2anat_tkreg.dat")
 
     # Rigid (6dof) functional-to-anatomical matrices
     rigid_stem = "{subject_id}/preproc/run_*/func2anat_"
@@ -286,7 +294,8 @@ def main(arglist):
     wf_name = space + "_ffx"
     ffx, ffx_input, ffx_output = wf.create_ffx_workflow(wf_name,
                                                         space,
-                                                        exp["contrast_names"])
+                                                        exp["contrast_names"],
+                                                        exp_info=exp)
 
     ext = "_warp.nii.gz" if space == "mni" else "_xfm.nii.gz"
     ffx_base = op.join("{subject_id}/reg", space, "{smoothing}/run_*")
@@ -307,8 +316,9 @@ def main(arglist):
         reg = op.join(os.environ["FREESURFER_HOME"],
                       "average/mni152.register.dat")
     else:
-        bg = "{subject_id}/preproc/run_1/mean_func.nii.gz"
-        reg = "{subject_id}/preproc/run_1/func2anat_tkreg.dat"
+        reg_dir = "{subject_id}/reg/epi/{smoothing}/run_1"
+        bg = op.join(reg_dir, "mean_func_xfm.nii.gz")
+        reg = op.join(reg_dir, "func2anat_tkreg.dat")
     ffx_templates["anatomy"] = bg
     ffx_templates["reg_file"] = reg
 

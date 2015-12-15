@@ -1,0 +1,16 @@
+
+v0.0.10 (Unreleased)
+--------------------
+
+Command line interface
+~~~~~~~~~~~~~~~~~~~~~~
+
+- The full command-line argument namespace is now saved out with the other
+  experiment parameters for better reproducibility.
+
+Registration workflow
+~~~~~~~~~~~~~~~~~~~~~
+
+- The correct registration matrix to go from the epi space to the anatomy is
+  now written out during the registration so that downstream results from
+  experiments that use the ``-regexp`` flag are correct.

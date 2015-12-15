@@ -28,7 +28,7 @@ def main(arglist):
 
     # Get and process specific information
     project = lyman.gather_project_info()
-    exp = lyman.gather_experiment_info(args.experiment, args.altmodel)
+    exp = lyman.gather_experiment_info(args.experiment, args.altmodel, args)
 
     if args.experiment is None:
         args.experiment = project["default_exp"]
@@ -83,8 +83,9 @@ def main(arglist):
             dofs=op.join(mfx_base, "tdof_t1.nii.gz")))
     else:
         templates.update(dict(
-            reg_file=op.join(anal_dir_base, "{subject_id}/preproc/run_1",
-                             "func2anat_tkreg.dat")))
+            reg_file=op.join(anal_dir_base,
+                             "{subject_id}/reg/epi/", ffxsmooth,
+                             "run_1/func2anat_tkreg.dat")))
 
     # Workflow source node
     mfx_source = MapNode(SelectFiles(templates,

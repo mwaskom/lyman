@@ -15,6 +15,7 @@ For normalizations to mni space, two different warps can be used
 """
 import os
 import os.path as op
+import shutil
 import numpy as np
 
 from nipype import Workflow, Node, IdentityInterface
@@ -40,12 +41,16 @@ def create_reg_workflow(name="reg", space="mni",
         fields = ["copes", "varcopes", "sumsquares"]
     elif regtype == "timeseries":
         fields = ["timeseries"]
+
     if cross_exp:
         fields.extend(["first_rigid"])
+
     fields.extend(["means", "masks", "rigids"])
 
     if space == "mni":
         fields.extend(["affine", "warpfield"])
+    else:
+        fields.extend(["tkreg_rigid"])
 
     inputnode = Node(IdentityInterface(fields), "inputnode")
 
@@ -112,6 +117,7 @@ class EPIRegInput(BaseInterfaceInputSpec):
 
     rigids = InputMultiPath(File(exists=True))
     first_rigid = File(exists=True)
+    tkreg_rigid = File(exists=True)
 
 
 class MNIModelRegInput(MNIRegInput,
@@ -368,6 +374,12 @@ class EPIModelRegistration(EPIRegistration,
                 runtime = self.apply_fsl_rigid(runtime, in_file,
                                                out_file, full_rigid)
 
+            # Copy the matrix to go from this space to the anatomy
+            if not i:
+                tkreg_fname = op.basename(self.inputs.tkreg_rigid)
+                out_tkreg = op.join(out_dir, tkreg_fname)
+                shutil.copyfile(self.inputs.tkreg_rigid, out_tkreg)
+
         self.out_files = out_files
         return runtime
 
@@ -470,6 +482,12 @@ class EPITimeseriesRegistration(EPIRegistration,
             out_mean = op.join(out_dir, out_mean_fname)
             runtime = self.apply_fsl_rigid(runtime, run_mean,
                                            out_mean, full_rigid)
+
+            # Copy the matrix to go from this space to the anatomy
+            if not i:
+                tkreg_fname = op.basename(self.inputs.tkreg_rigid)
+                out_tkreg = op.join(out_dir, tkreg_fname)
+                shutil.copyfile(self.inputs.tkreg_rigid, out_tkreg)
 
         self.out_files = out_files
         return runtime
