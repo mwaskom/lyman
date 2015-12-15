@@ -225,7 +225,12 @@ def main(arglist):
         reg_templates["affine"] = op.join(data_dir, "{subject_id}",
                                           "normalization/affine." + aff_ext)
     else:
-        reg_templates["tkreg_rigid"] = op.join("{subject_id}", "preproc",
+        if args.regexp is None:
+            tkreg_base = op.join(project["analysis_dir"], args.regexp)
+        else:
+            tkreg_base = analysis_dir
+        reg_templates["tkreg_rigid"] = op.join(tkreg_base,
+                                               "{subject_id}", "preproc",
                                                "run_1", "func2anat_tkreg.dat")
 
     # Rigid (6dof) functional-to-anatomical matrices
