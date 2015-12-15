@@ -294,7 +294,8 @@ def main(arglist):
     wf_name = space + "_ffx"
     ffx, ffx_input, ffx_output = wf.create_ffx_workflow(wf_name,
                                                         space,
-                                                        exp["contrast_names"])
+                                                        exp["contrast_names"],
+                                                        exp_info=exp)
 
     ext = "_warp.nii.gz" if space == "mni" else "_xfm.nii.gz"
     ffx_base = op.join("{subject_id}/reg", space, "{smoothing}/run_*")
