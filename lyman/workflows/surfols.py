@@ -132,7 +132,7 @@ class RemoveEmpty(BaseInterface):
     def _run_interface(self, runtime):
 
         good_images = [f for f in self.inputs.in_files
-                       if not np.allclose(nib.load(f).get_data(), 0).any()]
+                       if not np.allclose(nib.load(f).get_data(), 0)]
         self.good_images = good_images
         return runtime
 
