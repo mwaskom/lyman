@@ -226,9 +226,9 @@ def main(arglist):
                                           "normalization/affine." + aff_ext)
     else:
         if args.regexp is None:
-            tkreg_base = op.join(project["analysis_dir"], args.regexp)
-        else:
             tkreg_base = analysis_dir
+        else:
+            tkreg_base = op.join(project["analysis_dir"], args.regexp)
         reg_templates["tkreg_rigid"] = op.join(tkreg_base,
                                                "{subject_id}", "preproc",
                                                "run_1", "func2anat_tkreg.dat")
