@@ -79,10 +79,7 @@ processing using the ``-workflows`` argument. For just about anything you'll
 want to do with lyman, you have to preprocess the data. (``run_fmri.py -w
 preproc``). At that point, you may continue on with subject-level timeseries
 modeling (``run_fmri.py -w model reg ffx``), possibly on several different
-models (``run_fmri.py -w model -altmodel <altmodel>``). You may also turn to
-the ``lyman.mvpa`` library to perform decoding analyses, although you will have
-to coregister the timeseries data first (``run_fmri.py -w reg -timeseries
--unsmoothed``).
+models (``run_fmri.py -w model -altmodel <altmodel>``).
 
 For detailed information about these scripts, you can run them with the ``-h``
 flag to see what they do and how to use them. That information is also
