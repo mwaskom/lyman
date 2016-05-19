@@ -1,0 +1,5 @@
+
+v0.0.11 (Unreleased)
+--------------------
+
+The ``lyman.mvpa`` module has been removed.
