@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-# Copyright (C) 2012-2014 Michael Waskom <mwaskom@stanford.edu>
+# Copyright (C) 2012-2016 Michael Waskom <mwaskom@stanford.edu>
 
 descr = """Lyman: A reproducible ecosystem for analyzing neuroimaging data."""
 
@@ -14,7 +14,7 @@ MAINTAINER_EMAIL = 'mwaskom@stanford.edu'
 LICENSE = 'BSD (3-clause)'
 URL = 'http://stanford.edu/~mwaskom/software/lyman/'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
-VERSION = '0.0.10.dev'
+VERSION = '0.0.10'
 
 def check_dependencies():
 

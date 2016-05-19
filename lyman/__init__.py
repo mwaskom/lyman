@@ -1,4 +1,4 @@
 from frontend import *
 
-version = "0.0.10.dev"
+version = "0.0.10"
 __version__ = version
