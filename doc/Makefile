@@ -162,6 +162,6 @@ doctest:
 	      "results in $(BUILDDIR)/doctest/output.txt."
 
 upload:
-	rsync -azP $(BUILDDIR)/html/ mwaskom@cardinal.stanford.edu:WWW/software/lyman
-	@echo "Uploaded to Stanford webspace"
+	rsync -azP $(BUILDDIR)/html/ mwaskom@neural10.cns.nyu.edu:html_public/software/lyman
+	@echo "Uploaded to NYU webspace"
 
