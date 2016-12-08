@@ -4,9 +4,12 @@ import os.path as op
 import shutil
 from tempfile import mkdtemp
 from subprocess import check_output
-from IPython.parallel import Client
-from IPython.parallel.error import TimeoutError
-
+try:
+    from ipyparallel import Client
+    from ipyparallel import TimeoutError
+except ImportError:
+    from IPython.parallel import Client
+    from IPython.parallel.error import TimeoutError
 import numpy as np
 import nibabel as nib
 import matplotlib as mpl
