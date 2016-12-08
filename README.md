@@ -13,7 +13,7 @@ Documentation
 -------------
 
 Online documentation can be found
-[here](http://www.stanford.edu/~mwaskom/software/lyman)
+[here](http://www.cns.nyu.edu/~mwaskom/software/lyman)
 
 Dependencies
 ------------
