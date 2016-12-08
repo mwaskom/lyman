@@ -4,9 +4,7 @@ env:
   - PYTHON=2.7
 
 install:
-  - conda update conda --yes
-  - conda create -n testenv --yes pip python=$PYTHON
-  - conda update conda --yes
+  - conda create -n testenv pip python=$PYTHON
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
   - pip install -r testing/pip_requirements.txt
@@ -17,8 +15,12 @@ install:
 before_install:
   - wget http://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh
   - chmod +x miniconda.sh
-  - ./miniconda.sh -b
-  - export PATH=/home/travis/anaconda/bin:$PATH
+  - ./miniconda.sh -b -p $HOME/miniconda
+  - export PATH=$HOME/miniconda/bin:$PATH
+  - hash -r
+  - conda config --set always_yes yes --set changeps1 no
+  - conda update -q conda
+  - conda info -a
   - export FSLDIR=`pwd`/testing
   - export SUBJECTS_DIR=`pwd`/testing
 
