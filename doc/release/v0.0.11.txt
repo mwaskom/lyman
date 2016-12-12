@@ -2,4 +2,6 @@
 v0.0.11 (Unreleased)
 --------------------
 
-The ``lyman.mvpa`` module has been removed.
+- The ``lyman.mvpa`` module has been removed.
+
+- Added the ``view_ffx_results.py`` script, which is a wrapper around ``Freeview`` to boot up a useful visualization of fixed effects statistics on the high-resolution anatomical image (optionally with the surface mesh displayed).
