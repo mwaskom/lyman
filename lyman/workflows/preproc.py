@@ -63,12 +63,16 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     if exp_info["fieldmap_template"]:
         unwarp = create_unwarp_workflow(fieldmap_pe=exp_info["fieldmap_pe"])
 
-    # Motion and slice time correct
-    realign = create_realignment_workflow(
-        temporal_interp=exp_info["temporal_interp"],
-        TR=exp_info["TR"],
-        slice_order=exp_info["slice_order"],
-        interleaved=exp_info["interleaved"])
+    # Spatial realignment
+    realign = create_realignment_workflow()
+
+    # Temporal interpolation
+    if exp_info["temporal_interp"]:
+        slicetime = create_slicetime_workflow(
+            TR=exp_info["TR"],
+            slice_order=exp_info["slice_order"],
+            interleaved=exp_info["interleaved"],
+            )
 
     # Estimate a registration from funtional to anatomical space
     coregister = create_bbregister_workflow(
@@ -118,8 +122,6 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
             [("outputs.timeseries", "inputs.timeseries")]),
         (inputnode, coregister,
             [("subject_id", "inputs.subject_id")]),
-        (realign, skullstrip,
-            [("outputs.timeseries", "inputs.timeseries")]),
         (inputnode, skullstrip,
             [("subject_id", "inputs.subject_id")]),
         (coregister, skullstrip,
@@ -165,6 +167,20 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
         preproc.connect([
             (prepare, realign,
                 [("out_file", "inputs.timeseries")]),
+        ])
+
+    # Optionally add a connection for slice time correction
+    if exp_info["temporal_interp"]:
+        preproc.connect([
+            (realign, slicetime,
+                [("outputs.timeseries", "intputs.timeseries")]),
+            (slicetime, skullstrip,
+                [("outputs.timeseries", "inputs.timeseries")]),
+            ])
+    else:
+        preproc.connect([
+            (realign, skullstrip,
+                [("outputs.timeseries", "inputs.timeseries")]),
         ])
 
     # Optionally connect the whole brain template
@@ -283,8 +299,7 @@ def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
     return unwarp
 
 
-def create_realignment_workflow(name="realignment", temporal_interp=True,
-                                TR=2, slice_order="up", interleaved=True):
+def create_realignment_workflow(name="realignment"):
     """Motion and slice-time correct the timeseries and summarize."""
     inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
@@ -299,20 +314,6 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
                                   save_plots=True),
                       ["in_file", "ref_file"],
                       "mcflirt")
-
-    # Optionally emoporally interpolate to correct for slice time differences
-    if temporal_interp:
-        slicetime = MapNode(fsl.SliceTimer(time_repetition=TR),
-                            "in_file",
-                            "slicetime")
-
-        if slice_order == "down":
-            slicetime.inputs.index_dir = True
-        elif slice_order != "up":
-            raise ValueError("slice_order must be 'up' or 'down'")
-
-        if interleaved:
-            slicetime.inputs.interleaved = True
 
     # Generate a report on the motion correction
     mcreport = MapNode(RealignmentReport(),
@@ -342,6 +343,8 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
         (mcflirt, mcreport,
             [("par_file", "realign_params"),
              ("rms_files", "displace_params")]),
+        (mcflirt, outputnode,
+            [("out_file", "timeseries")]),
         (extractref, outputnode,
             [("out_file", "example_func")]),
         (mcreport, outputnode,
@@ -349,20 +352,52 @@ def create_realignment_workflow(name="realignment", temporal_interp=True,
              ("motion_file", "motion_file")]),
         ])
 
-    if temporal_interp:
-        realignment.connect([
-            (mcflirt, slicetime,
-                [("out_file", "in_file")]),
-            (slicetime, outputnode,
-                [("slice_time_corrected_file", "timeseries")])
-            ])
-    else:
-        realignment.connect([
-            (mcflirt, outputnode,
-                [("out_file", "timeseries")])
+    return realignment
+
+
+def create_slicetime_workflow(name="slicetime", TR=2,
+                              slice_order="up", interleaved=False):
+
+    inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
+
+    slicetimer = MapNode(fsl.SliceTimer(time_repetition=TR),
+                        "in_file",
+                        "slicetime")
+
+    if slice_order == "down":
+        slicetimer.inputs.index_dir = True
+    elif slice_order != "up":
+        raise ValueError("slice_order must be 'up' or 'down'")
+
+    if isinstance(interleaved, str) and interleaved.lower() == "siemens":
+        sliceorder = MapNode(SiemensSliceOrder(), "in_file", "sliceorder")
+
+    elif isinstance(interleaved, bool) and interleaved:
+        sliceorder = None
+        slicetimer.inputs.interleaved = True
+
+    elif not isinstance(interleaved, bool):
+        raise ValueError("interleaved must be True, False, or 'siemens'")
+
+    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
+
+    slicetime = Workflow(name)
+    slicetime.connect([
+        (inputnode, slicetimer,
+            [("timeseries", "in_file")]),
+        (slicetimer, outputnode,
+            [("slice_time_corrected_file", "timeseries")]),
+        ])
+
+    if sliceorder is not None:
+        slicetime.connect([
+            (inputnode, sliceorder,
+                [("timeseries", "in_file")]),
+            (sliceorder, slicetimer,
+                [("out_file", "custom_order")]),
             ])
 
-    return realignment
+    return slicetime
 
 
 def create_skullstrip_workflow(name="skullstrip"):
@@ -869,6 +904,28 @@ class RealignmentReport(BaseInterface):
                                      self.plot_file]
         outputs["motion_file"] = self.motion_file
         return outputs
+
+
+class SiemensSliceOrder(BaseInterface):
+
+    input_spec = SingleInFile
+    output_spec = SingleOutFile
+
+    def _run_interface(self, runtime):
+
+        fname = self.inputs.in_file
+        n_slices = nib.load(fname).shape[-1]
+        slices = np.arange(1, n_slices + 1)
+        if n_slices % 2:
+            # Odd slice number starts with odd slices
+            slice_order = np.r_[slices[::2], slices[1::2]]
+        else:
+            # Even slice number starts with even slices
+            slice_order = np.r_[slices[1::2], slices[::2]]
+
+        np.savetxt(slice_order, "slice_order.txt", fmt="%d")
+
+    _list_outputs = list_out_file("slice_order.txt")
 
 
 class CoregReportInput(BaseInterfaceInputSpec):
