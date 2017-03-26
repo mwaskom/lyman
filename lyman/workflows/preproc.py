@@ -173,7 +173,7 @@ def create_preprocessing_workflow(name="preproc", exp_info=None):
     if exp_info["temporal_interp"]:
         preproc.connect([
             (realign, slicetime,
-                [("outputs.timeseries", "intputs.timeseries")]),
+                [("outputs.timeseries", "inputs.timeseries")]),
             (slicetime, skullstrip,
                 [("outputs.timeseries", "inputs.timeseries")]),
             ])
