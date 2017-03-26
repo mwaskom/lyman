@@ -923,7 +923,7 @@ class SiemensSliceOrder(BaseInterface):
             # Even slice number starts with even slices
             slice_order = np.r_[slices[1::2], slices[::2]]
 
-        np.savetxt(slice_order, "slice_order.txt", fmt="%d")
+        np.savetxt("slice_order.txt", slice_order, fmt="%d")
 
     _list_outputs = list_out_file("slice_order.txt")
 
