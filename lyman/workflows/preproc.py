@@ -925,6 +925,8 @@ class SiemensSliceOrder(BaseInterface):
 
         np.savetxt("slice_order.txt", slice_order, fmt="%d")
 
+        return runtime
+
     _list_outputs = list_out_file("slice_order.txt")
 
 
