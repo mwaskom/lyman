@@ -361,8 +361,8 @@ def create_slicetime_workflow(name="slicetime", TR=2,
     inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
     slicetimer = MapNode(fsl.SliceTimer(time_repetition=TR),
-                        "in_file",
-                        "slicetime")
+                         "in_file",
+                         "slicetime")
 
     if slice_order == "down":
         slicetimer.inputs.index_dir = True
