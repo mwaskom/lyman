@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 import argparse
+import numpy as np
+import nibabel as nib
 import lyman
 
 
@@ -33,25 +35,46 @@ def main(arglist):
     anat_vol = data_dir / args.subject / "mri/brain.mgz"
     cmdline.extend(["-v", str(anat_vol)])
 
-    # Statistical overlay
+    # Load the statistic volume to compute the colormap parameters
     smoothing = "unsmoothed" if args.unsmoothed else "smoothed"
     stat_vol = (anal_dir / exp_name / args.subject / "ffx" / "epi" /
                 smoothing / args.contrast / "zstat1.nii.gz")
+    stat = np.abs(nib.load(str(stat_vol)).get_data())
+    cmap_max = max(4.2, np.percentile(np.abs(stat[stat > 2.3]), 98))
+    cmap_arg = "1.64,2.3,{:.1f}".format(cmap_max)
+
+    # Statistical overlay
     reg_file = (anal_dir / exp_name / args.subject / "reg" / "epi" /
                 smoothing / "run_1" / "func2anat_tkreg.dat")
-    stat_arg = (str(stat_vol) +
-                ":reg=" + str(reg_file) +
-                ":colormap=heat" +
-                ":heatscale=1.64,2.3,4.2" +
-                ":sample=trilinear")
+    stat_arg = (str(stat_vol)
+                + ":reg=" + str(reg_file)
+                + ":colormap=heat"
+                + ":heatscale=" + cmap_arg
+                + ":sample=trilinear")
     cmdline.extend(["-v", stat_arg])
 
     # Mesh overlay
-    if args.mesh is not None:
+    for mesh in ["smoothwm", "inflated"]:
         for hemi in ["lh", "rh"]:
-            surf = data_dir / args.subject/ "surf" / (hemi + "." + args.mesh)
-            surf_arg = str(surf) + ":edgecolor=limegreen"
+            surf = data_dir / args.subject / "surf" / (hemi + "." + mesh)
+            stat = (anal_dir / exp_name / args.subject / "ffx" / "epi" /
+                    smoothing / args.contrast / (hemi + ".zstat1.mgz"))
+            surf_arg = (str(surf)
+                        + ":edgecolor=limegreen"
+                        + ":overlay=" + str(stat)
+                        + ":overlay_color=heat"
+                        + ":overlay_method=piecewise"
+                        + ":overlay_threshold=" + cmap_arg
+                        )
+            if mesh == "smoothwm":
+                surf_arg += ":hide_in_3d=true"
             cmdline.extend(["-f", surf_arg])
+
+        cmdline.append("--hide-3d-slices")
+
+    # Freeview spews a lot of garbage to the terminal; typcially silence that
+    if not args.debug:
+        cmdline.append("> /dev/null 2>&1")
 
     # Call out to freeview
     os.system(" ".join(cmdline))
@@ -75,7 +98,8 @@ def parse_args(arglist):
     parser.add_argument("-contrast", help="contrast name")
     parser.add_argument("-unsmoothed", action="store_true",
                         help="show unsmoothed results")
-    parser.add_argument("-mesh", help="surface mesh to plot")
+    parser.add_argument("-debug", action="store_true",
+                        help="print freeview output in terminal")
 
     return parser.parse_args(arglist)
 
