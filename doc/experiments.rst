@@ -77,8 +77,11 @@ Preprocessing Parameters
     A boolean that specifies whether slice-time correction should be performed.
 
    interleaved
-    A boolean that specifies whether the data were acquired with an interleaved
-    protocol. Only relevant if ``temporal_interp`` is True.
+    A string or boolean that specifies whether the data were acquired with an
+    interleaved protocol. Only relevant if ``temporal_interp`` is True. The
+    only valid string is ``"siemens"``, which indicates a Siemens interleaved
+    sequence (slice order depends on number of slices). Set to ``True`` if you
+    are using an interleaved acquisition on a GE scanner.
 
    coreg_init
     A string that is either ``"fsl"`` or ``"header"``. This controls how the
