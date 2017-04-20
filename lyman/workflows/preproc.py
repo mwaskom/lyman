@@ -360,10 +360,6 @@ def create_slicetime_workflow(name="slicetime", TR=2,
 
     inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
-    slicetimer = MapNode(fsl.SliceTimer(time_repetition=TR),
-                         "in_file",
-                         "slicetime")
-
     if slice_order == "down":
         slicetimer.inputs.index_dir = True
     elif slice_order != "up":
@@ -371,13 +367,19 @@ def create_slicetime_workflow(name="slicetime", TR=2,
 
     if isinstance(interleaved, str) and interleaved.lower() == "siemens":
         sliceorder = MapNode(SiemensSliceOrder(), "in_file", "sliceorder")
+        slicetimer_iterfields = ["in_file", "custom_order"]
 
     elif isinstance(interleaved, bool) and interleaved:
         sliceorder = None
         slicetimer.inputs.interleaved = True
+        slicetimer_iterfields = ["in_file"]
 
     elif not isinstance(interleaved, bool):
         raise ValueError("interleaved must be True, False, or 'siemens'")
+
+    slicetimer = MapNode(fsl.SliceTimer(time_repetition=TR),
+                         slicetimer_iterfields,
+                         "slicetime")
 
     outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
 
@@ -914,7 +916,10 @@ class SiemensSliceOrder(BaseInterface):
     def _run_interface(self, runtime):
 
         fname = self.inputs.in_file
-        n_slices = nib.load(fname).shape[-1]
+
+        # Determine number of slices
+        # Assumes slice selection is on z axis. Usually true -- but always?
+        n_slices = nib.load(fname).shape[2]
         slices = np.arange(1, n_slices + 1)
         if n_slices % 2:
             # Odd slice number starts with odd slices
