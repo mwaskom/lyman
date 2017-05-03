@@ -361,23 +361,26 @@ def create_slicetime_workflow(name="slicetime", TR=2,
     inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
 
     if isinstance(interleaved, str) and interleaved.lower() == "siemens":
+
         sliceorder = MapNode(SiemensSliceOrder(), "in_file", "sliceorder")
-        slicetimer_interleaved = False
+        slicetimer_set_interleaved = False
         slicetimer_iterfields = ["in_file", "custom_order"]
 
-    elif isinstance(interleaved, bool) and interleaved:
+    elif isinstance(interleaved, bool):
+
         sliceorder = None
-        slicetimer_interleaved = True
+        slicetimer_set_interleaved = interleaved
         slicetimer_iterfields = ["in_file"]
 
-    elif not isinstance(interleaved, bool):
+    else:
+
         raise ValueError("interleaved must be True, False, or 'siemens'")
 
     slicetimer = MapNode(fsl.SliceTimer(time_repetition=TR),
                          slicetimer_iterfields,
                          "slicetime")
 
-    if slicetimer_interleaved:
+    if slicetimer_set_interleaved:
         slicetimer.inputs.interleaved = True
 
     if slice_order == "down":
