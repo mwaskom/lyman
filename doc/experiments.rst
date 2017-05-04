@@ -124,13 +124,13 @@ Preprocessing Parameters
 
    hpf_cutoff
     A float with the cutoff time (in seconds) for the highpass filter. This
-    value is used in both preprocessing and in the model.
+    value is used in both preprocessing and in the model. It can also be
+    ``None`` to skip the highpass filter
 
 Model Parameters
 ~~~~~~~~~~~~~~~~
 
 .. glossary::
-
 
    design_name
     A string used to build the name of the file with paradigm information (see

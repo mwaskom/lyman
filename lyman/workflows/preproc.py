@@ -579,7 +579,10 @@ def create_filtering_workflow(name="filter",
                     "scale")
 
     # Gaussian running-line filter
-    hpf_sigma = (hpf_cutoff / 2.0) / TR
+    if hpf_cutoff is None:
+        hpf_sigma = -1
+    else:
+        hpf_sigma = (hpf_cutoff / 2.0) / TR
     filter = MapNode(fsl.TemporalFilter(highpass_sigma=hpf_sigma),
                      "in_file",
                      "filter")
