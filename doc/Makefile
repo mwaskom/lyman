@@ -49,6 +49,7 @@ cmdline:
 	python ../scripts/make_masks.py -h > commandline/make_masks.txt
 	python ../scripts/anatomy_snapshots.py -h > commandline/anatomy_snapshots.txt
 	python ../scripts/surface_snapshots.py -h > commandline/surface_snapshots.txt
+	python ../scripts/view_ffx_results.py -h > commandline/view_ffx_results.txt
 
 html:
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html

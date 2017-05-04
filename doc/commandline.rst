@@ -36,3 +36,8 @@ surface_snapshots.py
 --------------------
 
 .. literalinclude:: commandline/surface_snapshots.txt
+
+view_ffx_results.py
+-------------------
+`
+.. literalinclude:: commandline/view_ffx_results.txt
