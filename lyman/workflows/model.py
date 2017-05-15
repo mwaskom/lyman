@@ -19,6 +19,7 @@ from nipype.interfaces.base import (BaseInterface,
                                     isdefined)
 import lyman
 from lyman.tools import ManyOutFiles, SaveParameters, nii_to_png
+import inspect
 
 
 def create_timeseries_model_workflow(name="model", exp_info=None):
@@ -266,7 +267,13 @@ class ModelSetup(BaseInterface):
 
         # Set up the HRF model
         hrf = getattr(glm, exp_info["hrf_model"])
-        hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
+        hrf_args = inspect.getargspec(hrf.__init__).args
+        hrf_params = dict(tr=tr)
+        if 'temporal_deriv' in hrf_args:
+            hrf_params["temporal_deriv"] = exp_info["temporal_deriv"]
+
+        exp_info["hrf_params"].update(hrf_params)
+        hrf = hrf(**exp_info["hrf_params"])
 
         # Build a dict of keyword arguments for the design matrix
         design_kwargs = dict(design=design,
@@ -279,6 +286,9 @@ class ModelSetup(BaseInterface):
                              condition_names=exp_info["condition_names"],
                              confound_pca=exp_info["confound_pca"],
                              hpf_cutoff=exp_info["hpf_cutoff"])
+
+        if exp_info["hrf_model"] == "FIR":
+            design_kwargs["oversampling"] = 1
 
         return design_kwargs
 
