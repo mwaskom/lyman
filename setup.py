@@ -71,6 +71,7 @@ if __name__ == "__main__":
                  'scripts/make_masks.py',
                  'scripts/anatomy_snapshots.py',
                  'scripts/surface_snapshots.py',
+                 'scripts/view_reg.py',
                  'scripts/view_ffx_results.py'],
         classifiers=[
                      'Intended Audience :: Science/Research',
