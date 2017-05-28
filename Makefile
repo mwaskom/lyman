@@ -2,7 +2,7 @@ export SHELL := /bin/bash
 
 test:
 
-	nosetests -v
+	py.test
 
 coverage:
 
