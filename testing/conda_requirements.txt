@@ -8,3 +8,5 @@ scikit-learn
 scikit-image
 traits
 networkx
+pytest
+nose
