@@ -7,6 +7,5 @@ scikit-learn
 scikit-image
 traits
 networkx
-jupyter
 pytest
 nose
