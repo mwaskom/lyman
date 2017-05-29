@@ -1,4 +1,3 @@
-ipython-notebook
 numpy
 scipy
 matplotlib
@@ -8,5 +7,6 @@ scikit-learn
 scikit-image
 traits
 networkx
+jupyter
 pytest
 nose
