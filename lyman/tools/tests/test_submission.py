@@ -34,7 +34,7 @@ class TestSubmitCmdLine(object):
         runtime = Bunch(stdout="hello test\n",
                         cwd=os.getcwd(), environ=os.environ)
         out = submission.submit_cmdline(runtime, cmdline)
-        assert out.stdout ==  "hello test\noh why hello\n"
+        assert out.stdout == "hello test\noh why hello\n"
 
     def test_runtime_error(self):
 
