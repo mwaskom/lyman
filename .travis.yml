@@ -25,7 +25,7 @@ install:
   - pip install .
 
 before_script:
-  -  make lint
+  - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then make lint; fi
 
 script:
     - make test
