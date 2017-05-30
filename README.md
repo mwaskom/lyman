@@ -43,8 +43,6 @@ Python 2.7
 
 - [nibabel](https://github.com/nipy/nibabel)
 
-- [statsmodels](https://github.com/statsmodels/statsmodels)
-
 - [seaborn](https://github.com/mwaskom/seaborn)
 
 - [moss](https://github.com/mwaskom/moss)
