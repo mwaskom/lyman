@@ -4,6 +4,7 @@ matplotlib
 pandas
 scikit-learn
 scikit-image
+statsmodels
 traits
 networkx
 pytest
