@@ -359,7 +359,7 @@ def main(arglist):
     # -------- #
 
     if project["rm_working_dir"]:
-        shutil.rmtree(project["working_dir"])
+        shutil.rmtree(working_dir)
 
 
 def parse_args(arglist):

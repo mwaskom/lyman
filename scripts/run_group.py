@@ -148,7 +148,7 @@ def main(arglist):
 
     # Clean up
     if project["rm_working_dir"]:
-        shutil.rmtree(project["working_dir"])
+        shutil.rmtree(work_dir_base)
 
 
 def parse_args(arglist):
