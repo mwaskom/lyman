@@ -40,8 +40,11 @@ def main(arglist):
     stat_vol = (anal_dir / exp_name / args.subject / "ffx" / "epi" /
                 smoothing / args.contrast / "zstat1.nii.gz")
     stat = np.abs(nib.load(str(stat_vol)).get_data())
-    cmap_max = max(4.2, np.percentile(np.abs(stat[stat > 2.3]), 98))
-    cmap_arg = "1.64,2.3,{:.1f}".format(cmap_max)
+    if args.vlims is None:
+        cmap_max = max(4.2, np.percentile(np.abs(stat[stat > 2.3]), 98))
+        cmap_arg = "1.64,2.3,{:.1f}".format(cmap_max)
+    else:
+        cmap_arg= "{},{},{}".format(*args.vlims)
 
     # Statistical overlay
     reg_file = (anal_dir / exp_name / args.subject / "reg" / "epi" /
@@ -98,6 +101,8 @@ def parse_args(arglist):
     parser.add_argument("-contrast", help="contrast name")
     parser.add_argument("-unsmoothed", action="store_true",
                         help="show unsmoothed results")
+    parser.add_argument("-vlims", nargs=3, type=float,
+                        help="custom colormap limits")
     parser.add_argument("-debug", action="store_true",
                         help="print freeview output in terminal")
 
