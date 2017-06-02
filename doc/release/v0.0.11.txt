@@ -11,3 +11,5 @@ v0.0.11 (Unreleased)
 - Added the ``view_ffx_results.py`` script, which is a wrapper around ``Freeview`` to boot up a useful visualization of fixed effects statistics on the high-resolution anatomical image and surface mesh.
 
 - Added the ``view_reg.py`` script, which is a wrapper around ``Freeview`` to boot up a useful visualization of the functional-to-anatomical registration quality.
+
+- The top-level cache directory is no longer removed at the end of workflow execution. This means that it is possible to be running multiple workflows (provided that they correspond to different experiments/models) simultaneously without interference from the first one to finish.
