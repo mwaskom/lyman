@@ -18,11 +18,12 @@ def main(arglist):
     data_dir = Path(project["data_dir"])
     anal_dir = Path(project["analysis_dir"])
 
-    # Get the full correct name for the experiment
+    # Work out elements of the path to the data
     if args.experiment is None:
         exp_name = project["default_exp"]
     else:
         exp_name = args.experiment
+    smoothing = "unsmoothed" if args.unsmoothed else "smoothed"
 
     exp_base = exp_name
     if args.altmodel is not None:
@@ -35,10 +36,27 @@ def main(arglist):
     anat_vol = data_dir / args.subject / "mri/brain.mgz"
     cmdline.extend(["-v", str(anat_vol)])
 
-    # Load the statistic volume to compute the colormap parameters
-    smoothing = "unsmoothed" if args.unsmoothed else "smoothed"
+    # Get a reference to the functional-to-anatomical registration
+    reg_file = (anal_dir / exp_name / args.subject / "reg" / "epi" /
+                smoothing / "run_1" / "func2anat_tkreg.dat")
+
+    # Load the mean functional volume in the background
+    mean_vol = (anal_dir / exp_name / args.subject / "ffx" / "epi" /
+                smoothing / "mean_func.nii.gz")
+
+    mean_arg = (str(mean_vol)
+                + ":reg=" + str(reg_file)
+                + ":colormap=gecolor"
+                + ":colorscale=0,30000"
+                + ":visible=0"
+                + ":sample=trilinear")
+    cmdline.extend(["-v", mean_arg])
+
+    # Find the statistic volume to compute the colormap parameters
     stat_vol = (anal_dir / exp_name / args.subject / "ffx" / "epi" /
                 smoothing / args.contrast / "zstat1.nii.gz")
+
+    # Determine limits for the statistical colormap
     stat = np.abs(nib.load(str(stat_vol)).get_data())
     if args.vlims is None:
         cmap_max = max(4.2, np.percentile(np.abs(stat[stat > 2.3]), 98))
@@ -46,9 +64,7 @@ def main(arglist):
     else:
         cmap_arg= "{},{},{}".format(*args.vlims)
 
-    # Statistical overlay
-    reg_file = (anal_dir / exp_name / args.subject / "reg" / "epi" /
-                smoothing / "run_1" / "func2anat_tkreg.dat")
+    # Load the statistical overlay
     stat_arg = (str(stat_vol)
                 + ":reg=" + str(reg_file)
                 + ":colormap=heat"
