@@ -57,7 +57,7 @@ def main(arglist):
     method = project["normalization"]
     wf_func = getattr(anatwarp, "create_{}_workflow".format(method))
     normalize = wf_func(project["data_dir"], subject_list)
-    normalize.base_dir = op.join(project["working_dir"], "warp")
+    normalize.base_dir = os.path.join(project["working_dir"], "warp")
     
     # Put crashdumps somewhere out of the way
     nipype.config.set("execution", "crashdump_dir", project["crash_dir"])
