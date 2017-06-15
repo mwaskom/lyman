@@ -4,12 +4,12 @@ Nipype Processing Workflows
 Functional Preprocessing
 ------------------------
 
-.. image:: ../graphs/preproc.dot.png
+.. image:: ../graphs/preproc.dot.svg
 
 Timeseries Model
 ----------------
 
-.. image:: ../graphs/model.dot.png
+.. image:: ../graphs/model.dot.svg
 
 Anatomical Normalization
 ------------------------
@@ -17,31 +17,31 @@ Anatomical Normalization
 Using ANTS
 ~~~~~~~~~~
 
-.. image:: ../graphs/antswarp.dot.png
+.. image:: ../graphs/antswarp.dot.svg
 
 Using FSL
 ~~~~~~~~~
 
-.. image:: ../graphs/fslwarp.dot.png
+.. image:: ../graphs/fslwarp.dot.svg
 
 
 Coregistration
 --------------
 
-.. image:: ../graphs/reg.dot.png
+.. image:: ../graphs/reg.dot.svg
 
 Fixed Effects Model
 -------------------
 
-.. image:: ../graphs/mni_ffx.dot.png
+.. image:: ../graphs/mni_ffx.dot.svg
 
 Mixed Effects Model
 -------------------
 
-.. image:: ../graphs/volume_group.dot.png
+.. image:: ../graphs/volume_group.dot.svg
 
 Surface OLS Model
 -----------------
 
-.. image:: ../graphs/surface_group.dot.png
+.. image:: ../graphs/surface_group.dot.svg
 

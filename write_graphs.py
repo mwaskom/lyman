@@ -30,9 +30,9 @@ def main(arglist):
         name = flow.name
         if arglist:
             if name in arglist:
-                flow.write_graph("graphs/%s.dot" % name, "orig")
+                flow.write_graph("graphs/%s.dot" % name, "orig", format="svg")
         else:
-            flow.write_graph("graphs/%s.dot" % name, "orig")
+            flow.write_graph("graphs/%s.dot" % name, "orig", format="svg")
 
     # Remove the .dot files as they are not of use to us
     files = glob("graphs/*")
