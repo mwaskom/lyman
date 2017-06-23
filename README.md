@@ -18,7 +18,7 @@ Online documentation can be found
 Dependencies
 ------------
 
-Python 2.7
+Python 2.7 or 3.6
 
 ### External
 
@@ -56,7 +56,7 @@ To install the released version, just do
 
 You may instead want to use the development version from Github, by running
 
-    pip install git+git://github.com/mwaskom/lyman.git#egg=lyman
+    pip install git+https://github.com/mwaskom/lyman.git
 
 Basic Workflow
 --------------
