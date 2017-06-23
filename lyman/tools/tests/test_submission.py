@@ -26,7 +26,7 @@ class TestSubmitCmdLine(object):
         cmdline = ["echo", "hello test"]
         runtime = Bunch(cwd=os.getcwd(), environ=os.environ)
         out = submission.submit_cmdline(runtime, cmdline)
-        nt.assert_equal(out.stdout, "hello test\n")
+        assert out.stdout == "hello test\n"
 
     def test_stdout_addition(self):
 
@@ -34,7 +34,7 @@ class TestSubmitCmdLine(object):
         runtime = Bunch(stdout="hello test\n",
                         cwd=os.getcwd(), environ=os.environ)
         out = submission.submit_cmdline(runtime, cmdline)
-        nt.assert_equal(out.stdout, "hello test\noh why hello\n")
+        assert out.stdout == "hello test\noh why hello\n"
 
     def test_runtime_error(self):
 
@@ -45,7 +45,7 @@ class TestSubmitCmdLine(object):
         with nt.assert_raises(RuntimeError):
             out = submission.submit_cmdline(runtime, cmdline)
             error = "cat: {}: No such file or directory\n".format(tmp_file)
-            nt.assert_equal(out.stderr, error)
+            assert out.stderr == error
 
     def test_cwd(self):
 
@@ -53,4 +53,4 @@ class TestSubmitCmdLine(object):
         home_dir = op.expanduser("~")
         runtime = Bunch(cwd=home_dir, environ=os.environ)
         out = submission.submit_cmdline(runtime, cmdline)
-        nt.assert_equal(out.stdout, home_dir + "\n")
+        assert out.stdout == home_dir + "\n"

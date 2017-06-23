@@ -456,7 +456,7 @@ class ModelSummary(BaseInterface):
         """Efficiently compute the coefficient of variation."""
         ssres = np.zeros_like(self.sstot)
         n_frames = yhat.shape[-1]
-        for tr in xrange(n_frames):
+        for tr in range(n_frames):
             ssres += np.square(yhat[..., tr] - self.y[..., tr])
         r2 = 1 - ssres / self.sstot
         return ssres, r2

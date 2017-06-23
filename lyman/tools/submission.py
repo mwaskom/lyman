@@ -20,7 +20,8 @@ def submit_cmdline(runtime, cmdline):
                     stderr=sp.PIPE,
                     shell=True,
                     cwd=runtime.cwd,
-                    env=runtime.environ)
+                    env=runtime.environ,
+                    universal_newlines=True)
 
     stdout, stderr = proc.communicate()
 
