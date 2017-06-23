@@ -30,11 +30,11 @@ of these packages. In the event that you don't want to exhaust this list, the
 unit tests and the ``-dontrun`` switch for the command line interfaces can be
 useful for finding missing dependencies.
 
-Lyman requires Python 2.7, and does not run on Python 3. We strongly recommend
-using the `Anaconda <https://store.continuum.io/cshop/anaconda/>`_
-distribution, which ships with the majority of the Python packages needed to
-run lyman. The rest can be easily installed with `conda`, or failing that,
-`pip`.
+Lyman requires Python 2.7 or 3.6, although support for the latter is relatively
+new and may be incomplete. We strongly recommend using the `Anaconda
+<https://store.continuum.io/cshop/anaconda/>`_ distribution, which ships with
+the majority of the Python packages needed to run lyman. The rest can be easily
+installed with `conda`, or failing that, `pip`.
 
 
 Non-Python Software
@@ -59,28 +59,24 @@ Non-Python Software
 Python Packages
 ~~~~~~~~~~~~~~~
 
-- Python 2.7
+- numpy
 
-- IPython 2.0
+- scipy
 
-- numpy 1.7
+- matplotlib
 
-- scipy 0.12
+- seaborn
 
-- matplotlib 1.3
+- nipype
 
-- seaborn 0.6
+- nibabel
 
-- nipype 0.10
+- pandas
 
-- nibabel 2.0
+- scikit-learn
 
-- pandas 0.12
+- scikit-image
 
-- scikit-learn 0.14
+- moss
 
-- scikit-image 0.9
-
-- moss 0.3.4
-
-- pysurfer 0.6
+- pysurfer

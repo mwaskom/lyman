@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-# Copyright (C) 2012-2016 Michael Waskom <mwaskom@nyu.edu>
+# Copyright (C) 2012-2017 Michael Waskom <mwaskom@nyu.edu>
 
 descr = """Lyman: A reproducible ecosystem for analyzing neuroimaging data."""
 
@@ -76,6 +76,7 @@ if __name__ == "__main__":
         classifiers=[
                      'Intended Audience :: Science/Research',
                      'Programming Language :: Python :: 2.7',
+                     'Programming Language :: Python :: 3.6',
                      'License :: OSI Approved :: BSD License',
                      'Operating System :: POSIX',
                      'Operating System :: Unix',
