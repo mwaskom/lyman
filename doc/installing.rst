@@ -81,8 +81,6 @@ Python Packages
 
 - scikit-image 0.9
 
-- statsmodels 0.5
-
 - moss 0.3.4
 
 - pysurfer 0.6

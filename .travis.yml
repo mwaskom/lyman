@@ -2,6 +2,7 @@ language: python
 
 python:
   - "2.7"
+  - "3.6"
 
 before_install:
   - wget http://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh
@@ -19,12 +20,17 @@ install:
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
   - pip install -r testing/pip_requirements.txt
-  - pip install pep8==1.5
-  - pip install https://github.com/dcramer/pyflakes/tarball/master  
+  - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then
+      conda install --yes configparser;
+    fi
   - pip install .
 
 before_script:
-  -  make lint
+  - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then
+      pip install pep8==1.5;
+      pip install https://github.com/dcramer/pyflakes/tarball/master;
+      make lint;
+    fi
 
 script:
     - make test

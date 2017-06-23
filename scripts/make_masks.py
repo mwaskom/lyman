@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 """Create masks in native functional space from a variety of sources."""
+from __future__ import print_function
 import sys
 import json
 import time
@@ -31,7 +32,7 @@ def main(arglist):
     else:
         raise ValueError("Could not determine orig type from arguments.")
     if args.debug:
-        print "Processing type: %s" % orig_type
+        print("Processing type: %s" % orig_type)
 
     # Initialise a factory object
     factory = MaskFactory(args.subjects, args.exp, args.roi, orig_type,

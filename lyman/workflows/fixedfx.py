@@ -375,7 +375,7 @@ class FFXReport(BaseInterface):
         self.every_mask = each_mask.min(axis=-1)
 
         m = Mosaic(self.inputs.anatomy, each_mask, any_mask,
-                   stat_interp="nearest", step=self.step, show_mask=False)
+                   step=self.step, show_mask=False)
         m.plot_mask_edges()
         out_fname = op.abspath("mask_overlap.png")
         self.summary_files.append(out_fname)

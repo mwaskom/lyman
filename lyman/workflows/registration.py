@@ -264,7 +264,7 @@ class ModelRegistration(object):
         """
         files = getattr(self.inputs, field)
         files = map(list, np.split(np.array(files), n_runs))
-        return files
+        return list(files)
 
 
 class TimeseriesRegistration(object):

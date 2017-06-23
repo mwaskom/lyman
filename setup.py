@@ -20,9 +20,9 @@ def check_dependencies():
 
     # Just make sure dependencies exist, I haven't rigorously
     # tested what the minimal versions that will work are
-    needed_deps = ["IPython", "numpy", "scipy", "matplotlib",
-                   "sklearn", "skimage", "pandas", "statsmodels", 
-                   "nibabel", "nipype", "seaborn"]
+    needed_deps = ["numpy", "pandas", "matplotlib", "seaborn",
+                   "scipy", "sklearn", "skimage", "pandas",
+                   "nibabel", "nipype"]
     missing_deps = []
     for dep in needed_deps:
         try:

@@ -215,7 +215,7 @@ def main(arglist):
             ts_file = op.join("{subject_id}/preproc/run_*/",
                               "{smoothing}_timeseries.nii.gz")
         reg_templates.update(dict(timeseries=ts_file))
-    reg_lists = reg_templates.keys()
+    reg_lists = list(reg_templates.keys())
 
     # Native anatomy to group anatomy affine matrix and warpfield
     if space == "mni":
@@ -308,7 +308,7 @@ def main(arglist):
         ss_files=op.join(ffx_base, "ss*" + ext),
         timeseries="{subject_id}/preproc/run_*/{smoothing}_timeseries.nii.gz",
                          )
-    ffx_lists = ffx_templates.keys()
+    ffx_lists = list(ffx_templates.keys())
 
     # Space-conditional inputs
     if space == "mni":

@@ -2,6 +2,8 @@
 v0.0.11 (Unreleased)
 --------------------
 
+- Internal code changes to bring provisional support for Python 3 and later versions of numpy.
+
 - Fixed slice time correction for data collected on a Siemens scanner. The Siemens interleaved pulse sequence changes the order of slices depending on whether there is an odd or even number of slices (for some insane reason). It is now possible to set ``interleaved="siemens"`` in your experiment file to handle this issue properly. See `this blog post <https://practicalfmri.blogspot.com/2012/07/siemens-slice-ordering.html>`_ for more information.
 
 - Made it possible to turn off the FSL highpass filter by setting the ``hpf_cutoff` variable in the experiment file to ``None``.
