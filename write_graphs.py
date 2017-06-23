@@ -1,4 +1,5 @@
 """Save graphical representations of all the lyman workflows."""
+from __future__ import print_function
 import os
 import re
 import sys
@@ -18,7 +19,7 @@ def main(arglist):
         try:
             out = getattr(wf, func)()
         except:
-            print "ERROR: call to %s failed" % func
+            print("ERROR: call to %s failed" % func)
 
         # Some of the workflow functions return (flow, inputs, outputs)
         try:

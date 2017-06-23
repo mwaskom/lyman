@@ -22,7 +22,7 @@ this file; to see these defaults, run the following code::
 
     In [1]: import lyman
 
-    In [2]: print lyman.default_experiment_parameters()
+    In [2]: print(lyman.default_experiment_parameters())
 
 The namespace of the imported experiment file is used to update these values.
 

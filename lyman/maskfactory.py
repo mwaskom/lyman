@@ -1,4 +1,5 @@
 """Defines a class for flexible functional mask generation."""
+from __future__ import print_function
 import os
 import os.path as op
 import shutil
@@ -38,9 +39,9 @@ class MaskFactory(object):
         self.orig_type = orig_type
         self.debug = debug
         if debug:
-            print "Setting up for %d subjects" % len(subject_list)
-            print "Experiment name:", experiment
-            print "ROI name:", roi_name
+            print("Setting up for {:d} subjects".format(len(subject_list)))
+            print("Experiment name: {}".format(experiment))
+            print("ROI name: {}".format(roi_name))
 
         # Set up directories
         if project["default_exp"] is not None and experiment is None:
@@ -73,8 +74,8 @@ class MaskFactory(object):
             except (TimeoutError, IOError):
                 self.map = map
         if debug:
-            print "Set to run in %s" % (
-                "parallel" if self.parallel else "serial")
+            print("Set to run in {}".format(
+                "parallel" if self.parallel else "serial"))
 
         # Set up some persistent templates
         self.epi_template = op.join(self.anal_dir, self.experiment,
@@ -90,9 +91,9 @@ class MaskFactory(object):
                                     "%(subj)s",
                                     "masks/%s.nii.gz" % self.roi_name)
         if debug:
-            print "EPI template: %s" % self.epi_template
-            print "Reg template: %s" % self.reg_template
-            print "Output template: %s" % self.out_template
+            print("EPI template: {}".format(self.epi_template))
+            print("Reg template: {}".format(self.reg_template))
+            print("Output template: {}".format(self.out_template))
 
         # Ensure the output directory will exist
         for subj in self.subject_list:
@@ -103,8 +104,8 @@ class MaskFactory(object):
     def __del__(self):
 
         if self.debug:
-            print "Debug mode: not removing output directory:"
-            print self.temp_dir
+            print("Debug mode: not removing output directory:")
+            print(self.temp_dir)
         else:
             shutil.rmtree(self.temp_dir)
 
@@ -254,7 +255,7 @@ class MaskFactory(object):
             new_img.to_filename(mask_file)
 
             if self.debug:
-                print "Mask file %s sum: %d" % (mask_file, mask.sum())
+                print("Mask file {} sum: {}".format(mask_file, mask.sum()))
 
     def write_png(self):
         """Write a mosiac png showing the masked voxels."""
