@@ -14,7 +14,7 @@ MAINTAINER_EMAIL = 'mwaskom@nyu.edu'
 LICENSE = 'BSD (3-clause)'
 URL = 'http://www.cns.nyu.edu/~mwaskom/software/lyman/'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
-VERSION = '0.0.11.dev'
+VERSION = '1.0'
 
 def check_dependencies():
 
@@ -57,7 +57,7 @@ if __name__ == "__main__":
         version=VERSION,
         url=URL,
         download_url=DOWNLOAD_URL,
-        install_requires=["moss>=0.3.3"],
+        install_requires=["moss>=0.5"],
         packages=['lyman',
                   'lyman.tests',
                   'lyman.workflows',
