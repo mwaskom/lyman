@@ -2,7 +2,7 @@ import numpy as np
 import nose.tools as nt
 import numpy.testing as npt
 import nibabel as nib
-from .. import preproc
+from .. import oldpreproc as preproc
 
 
 def test_prep_timeseries():
