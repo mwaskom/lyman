@@ -4,13 +4,22 @@ import re
 import sys
 import imp
 import os.path as op
+import yaml
 
 import numpy as np
 
+from moss import Bunch
 
-def gather_project_info():
+from .workflows.preproc import define_preproc_workflow
+
+
+__all__ = []
+
+
+def gather_project_info(lyman_dir=None):
     """Import project information based on environment settings."""
-    lyman_dir = os.environ["LYMAN_DIR"]
+    if lyman_dir is None:
+        lyman_dir = os.environ["LYMAN_DIR"]
     proj_file = op.join(lyman_dir, "project.py")
     try:
         project = sys.modules["project"]
@@ -18,19 +27,16 @@ def gather_project_info():
         project = imp.load_source("project", proj_file)
 
     project_dict = dict()
-    for dir in ["data", "analysis", "working", "crash"]:
+    for dir in ["data", "analysis", "cache", "crash"]:
         path = op.abspath(op.join(lyman_dir, getattr(project, dir + "_dir")))
         project_dict[dir + "_dir"] = path
-    project_dict["default_exp"] = project.default_exp
-    project_dict["rm_working_dir"] = project.rm_working_dir
 
-    if hasattr(project, "ants_normalization"):
-        use_ants = project.ants_normalization
-        project_dict["normalization"] = "ants" if use_ants else "fsl"
-    else:
-        project_dict["normalization"] = "fsl"
+    sess_fname = op.join(lyman_dir, "session_info.yaml")
+    with open(sess_fname) as fid:
+        sess_info = yaml.load(fid)
+    project_dict["session_info"] = sess_info
 
-    return project_dict
+    return Bunch(project_dict)
 
 
 def gather_experiment_info(exp_name=None, altmodel=None, args=None):
@@ -93,7 +99,7 @@ def gather_experiment_info(exp_name=None, altmodel=None, args=None):
     if args is not None:
         exp_dict["command_line"] = vars(args)
 
-    return exp_dict
+    return Bunch(exp_dict)
 
 
 def default_experiment_parameters():
@@ -174,23 +180,50 @@ def determine_engine(args):
     plugin = plugin_dict[args.plugin]
 
     plugin_args = dict()
-    qsub_args = ""
 
     if plugin == "MultiProc":
         plugin_args['n_procs'] = args.nprocs
+
     elif plugin in ["SGE", "PBS"]:
-        qsub_args += "-V -e /dev/null -o /dev/null "
 
-    if args.queue is not None:
-        qsub_args += "-q %s " % args.queue
+        qsub_args = "-V -e /dev/null -o /dev/null "
 
-    plugin_args["qsub_args"] = qsub_args
+        if args.queue is not None:
+            qsub_args += "-q %s " % args.queue
+
+        plugin_args["qsub_args"] = qsub_args
 
     return plugin, plugin_args
 
 
-def run_workflow(wf, name=None, args=None):
+def run_workflow(wf, args=None):
     """Run a workflow, if we asked to do so on the command line."""
     plugin, plugin_args = determine_engine(args)
-    if (name is None or name in args.workflows) and not args.dontrun:
-        wf.run(plugin, plugin_args)
+    wf.run(plugin, plugin_args)
+
+
+def gather_session_info(project, experiment, subjects):
+
+    sess_info = project["session_info"][experiment]
+    sess_info = {subj: subj_info
+                 for subj, subj_info in sess_info.items()
+                 if subj in subjects}
+    return sess_info
+
+
+def execute_workflow(args):
+
+    stage = args.stage
+
+    proj_info = gather_project_info()
+
+    subjects = determine_subjects(args.subject)
+    sess_info = gather_session_info(proj_info, args.experiment, subjects)
+    exp_info = gather_experiment_info(args.experiment)
+
+    if stage == "preproc":
+        wf = define_preproc_workflow(proj_info, sess_info, exp_info)
+
+    wf.config["crashdump_dir"] = os.path.abspath(proj_info["crash_dir"])
+
+    run_workflow(wf, args)

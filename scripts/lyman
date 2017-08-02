@@ -1,6 +1,8 @@
 #! /usr/bin/env python
 import argparse
 
+from lyman.frontend import execute_workflow
+
 
 def add_subject(parser):
     parser.add_argument("-s", "--subject",
@@ -15,6 +17,14 @@ def add_experiment(parser):
                         help="experiment name")
 
 
+def add_execution(parser):
+    parser.add_argument("-p", "--plugin",
+                        help="nipype execution plugin")
+    parser.add_argument("-n", "--nprocs",
+                        type=int,
+                        help="size of multiprocessing pool")
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog="lyman")
@@ -27,6 +37,7 @@ if __name__ == "__main__":
                                     help="functional preprocessing")
     add_subject(preproc)
     add_experiment(preproc)
+    add_execution(preproc)
 
     # ---
 
@@ -37,8 +48,10 @@ if __name__ == "__main__":
     model.add_argument("-m", "--model",
                        metavar="name",
                        help="model name")
+    add_execution(model)
 
     # ---
 
     args = parser.parse_args()
-    print(args)
+
+    execute_workflow(args)

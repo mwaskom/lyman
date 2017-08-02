@@ -12,6 +12,15 @@ from ..tools.submission import submit_cmdline
 
 def define_preproc_workflow(proj_info, sess_info, exp_info):
 
+    # proj_info will be a bunch or other object with data_dir, etc. fields
+
+    # sess info is a nested dictionary:
+    # outer keys are subjects
+    # inner keys are sessions
+    # inner values are lists of runs
+
+    # exp_info is a bunch or dict or other obj with experiment parameters
+
     # --- Workflow parameterization
 
     subject_iterables = list(sess_info.keys())
@@ -30,7 +39,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     run_iterables = {
         (subj, sess): [(subj, sess, run) for run in sess_info[subj][sess]]
-        for subj, sess in sess_info.items()
+        for subj, subj_info in sess_info.items()
+        for sess in subj_info
     }
     run_source = Node(IdentityInterface(["subject", "session", "run"]),
                       name="run_source",
@@ -180,14 +190,14 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Workflow ouptut
 
-    output_dir = os.path.realpath("python_script_outputs")
+    output_dir = proj_info.analysis_dir
     file_output = Node(DataSink(base_directory=output_dir),
                        "file_output")
 
     # === Assemble pipeline
 
-    workflow = Workflow(name="prisma_preproc_multirun",
-                        base_dir="nipype_cache")
+    workflow = Workflow(name="preproc",
+                        base_dir=proj_info.cache_dir)
 
     workflow.connect([
         (subject_source, session_source,
@@ -295,6 +305,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (se2native, file_output,
             [("out_tkreg_file", "@tkreg_file")]),
     ])
+
+    return workflow
 
 
 class NativeTransformInput(BaseInterfaceInputSpec):
