@@ -99,6 +99,8 @@ def gather_experiment_info(exp_name=None, altmodel=None, args=None):
     if args is not None:
         exp_dict["command_line"] = vars(args)
 
+    exp_dict["name"] = exp_name
+
     return Bunch(exp_dict)
 
 

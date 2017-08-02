@@ -190,13 +190,38 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Workflow ouptut
 
-    output_dir = proj_info.analysis_dir
+    def generate_run_substitutions(subject, session, run):
+
+        kws = dict(subject=subject, session=session, run=run)
+
+        runwise_input_path = ("_subject_{subject}/"
+                              "_session_{subject}.{session}/"
+                              "_run_{subject}.{session}.{run}"
+                              ).format(**kws)
+        runwise_output_path = "{subject}/preproc/{session}_{run}".format(**kws)
+
+        subjwise_input_path = "_subject_{subject}".format(**kws)
+        subjwise_output_path = "{subject}/preproc/template".format(**kws)
+
+        substitutions = [
+            (runwise_input_path, runwise_output_path),
+            (subjwise_input_path, subjwise_output_path),
+        ]
+
+        return substitutions
+
+    path_substitue = Node(Function(["subject", "session", "run"],
+                                   ["substitutions"],
+                                   generate_run_substitutions),
+                          "path_substitue")
+
+    output_dir = os.path.join(proj_info.analysis_dir, exp_info.name)
     file_output = Node(DataSink(base_directory=output_dir),
                        "file_output")
 
     # === Assemble pipeline
 
-    workflow = Workflow(name="preproc",
+    workflow = Workflow(name="prisma_preproc_multirun",
                         base_dir=proj_info.cache_dir)
 
     workflow.connect([
@@ -294,6 +319,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_files")]),
         (merge_ts, average_ts,
             [("merged_file", "in_file")]),
+        (runwise_info, path_substitue,
+            [("subject", "subject"),
+             ("session", "session"),
+             ("run", "run")]),
+        (path_substitue, file_output,
+            [("substitutions", "substitutions")]),
         (merge_ts, file_output,
             [("merged_file", "@restored_timeseries")]),
         (average_ts, file_output,
