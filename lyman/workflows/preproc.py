@@ -228,8 +228,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # === Assemble pipeline
 
-    workflow = Workflow(name="preproc",
-                        base_dir=proj_info.cache_dir)
+    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    workflow = Workflow(name="preproc", base_dir=cache_base)
 
     workflow.connect([
         (subject_source, session_source,
