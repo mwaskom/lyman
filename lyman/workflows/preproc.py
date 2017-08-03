@@ -1,12 +1,13 @@
 import os
+import os.path as op
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     Function, IdentityInterface, SelectFiles, DataSink)
-from nipype.interfaces.base import (traits, BaseInterface,
-                                    BaseInterfaceInputSpec, TraitedSpec,
-                                    File, InputMultiPath, OutputMultiPath)
+from nipype.interfaces.base import (traits, File,
+                                    InputMultiPath, OutputMultiPath)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
+from .graphutils import SimpleInterface
 from ..tools.submission import submit_cmdline
 
 
@@ -222,7 +223,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                    generate_run_substitutions),
                           "path_substitue")
 
-    output_dir = os.path.join(proj_info.analysis_dir, exp_info.name)
+    output_dir = op.join(proj_info.analysis_dir, exp_info.name)
     file_output = Node(DataSink(base_directory=output_dir),
                        "file_output")
 
@@ -354,68 +355,54 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     return workflow
 
 
-class TemplateTransformInput(BaseInterfaceInputSpec):
+class TemplateTransform(SimpleInterface):
 
-    session_info = traits.List(traits.Tuple())
-    in_matrices = InputMultiPath(File(exists=True))
-    in_volumes = InputMultiPath(File(exists=True))
+    input_spec = dict(
+        session_info=traits.List(traits.Tuple()),
+        in_matrices=InputMultiPath(File(exists=True)),
+        in_volumes=InputMultiPath(File(exists=True)),
+    )
 
-
-class TemplateTransformOutput(TraitedSpec):
-
-    session_info = traits.List(traits.Tuple())
-    out_template = File(exists=True)
-    out_matrices = OutputMultiPath(File(exists=True))
-    out_flirt_file = File(exists=True)
-    out_tkreg_file = File(exists=True)
-
-
-class TemplateTransform(BaseInterface):
-
-    input_spec = TemplateTransformInput
-    output_spec = TemplateTransformOutput
-
-    def _list_outputs(self):
-
-        outputs = self._outputs().get()
-
-        outputs["session_info"] = self.inputs.session_info
-
-        out_matrices = [
-            os.path.abspath("se2template_{:04d}.mat".format(i))
-            for i, _ in enumerate(self.inputs.in_matrices, 1)
-        ]
-
-        outputs["out_matrices"] = out_matrices
-
-        outputs["out_template"] = os.path.abspath("template_space.nii.gz")
-        outputs["out_flirt_file"] = os.path.abspath("func2anat_flirt.mat")
-        outputs["out_tkreg_file"] = os.path.abspath("func2anat_tkreg.dat")
-
-        return outputs
+    output_spec = dict(
+        session_info=traits.List(traits.Tuple()),
+        out_template=File(exists=True),
+        out_flirt_file=File(exists=True),
+        out_tkreg_file=File(exists=True),
+        out_matrices=OutputMultiPath(File(exists=True)),
+    )
 
     def _run_interface(self, runtime):
+
+        self._results["session_info"] = self.inputs.session_info
 
         subjects_dir = os.environ["SUBJECTS_DIR"]
         subj = set([s for s, _ in self.inputs.session_info]).pop()
 
-        # Convert the anatomical image to nifti
+        # -- Convert the anatomical image to nifti
         cmdline = ["mri_convert",
-                   os.path.join(subjects_dir, subj, "mri/orig.mgz"),
+                   op.join(subjects_dir, subj, "mri/orig.mgz"),
                    "orig.nii.gz"]
 
         runtime = submit_cmdline(runtime, cmdline)
 
-        # Compute the intermediate transform
+        # -- Compute the intermediate transform
+
         cmdline = ["midtrans",
                    "--template=orig.nii.gz",
                    "--separate=se2template_",
                    "--out=anat2func_flirt.mat"]
         cmdline.extend(self.inputs.in_matrices)
 
+        out_matrices = [
+            op.abspath("se2template_{:04d}.mat".format(i))
+            for i, _ in enumerate(self.inputs.in_matrices, 1)
+        ]
+
+        self._results["out_matrices"] = out_matrices
+
         runtime = submit_cmdline(runtime, cmdline)
 
-        # Invert the anat2temp transformation
+        # -- Invert the anat2temp transformation
         cmdline = ["convert_xfm",
                    "-omat", "func2anat_flirt.mat",
                    "-inverse",
@@ -423,7 +410,9 @@ class TemplateTransform(BaseInterface):
 
         runtime = submit_cmdline(runtime, cmdline)
 
-        # Transform the first volume into template space to get the geometry
+        self._results["out_tkreg_file"] = op.abspath("func2anat_tkreg.dat")
+
+        # -- Transform first volume into template space to get the geometry
         cmdline = ["flirt",
                    "-in", self.inputs.in_volumes[0],
                    "-ref", self.inputs.in_volumes[0],
@@ -433,7 +422,9 @@ class TemplateTransform(BaseInterface):
 
         runtime = submit_cmdline(runtime, cmdline)
 
-        # Convert the FSL matrices to tkreg matrix format
+        self._results["out_template"] = op.abspath("template_space.nii.gz")
+
+        # -- Convert the FSL matrices to tkreg matrix format
         cmdline = ["tkregister2",
                    "--s", subj,
                    "--mov", "template_space.nii.gz",
@@ -442,5 +433,7 @@ class TemplateTransform(BaseInterface):
                    "--noedit"]
 
         runtime = submit_cmdline(runtime, cmdline)
+
+        self._results["out_flirt_file"] = op.abspath("func2anat_flirt.mat")
 
         return runtime
