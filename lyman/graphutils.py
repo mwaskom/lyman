@@ -1,8 +1,9 @@
 import os.path as op
 import networkx as nx
 from nipype import Workflow, MapNode, Node, IdentityInterface
-from nipype.interfaces.base import (BaseInterfaceInputSpec, TraitedSpec,
-                                    File, OutputMultiPath, isdefined)
+from nipype.interfaces.base import (BaseInterface, BaseInterfaceInputSpec,
+                                    TraitedSpec, File, OutputMultiPath,
+                                    isdefined)
 
 
 class InputWrapper(object):
@@ -152,3 +153,26 @@ def list_out_file(fname):
         return outputs
 
     return _list_outputs
+
+
+class SimpleInterface(BaseInterface):
+
+    def __init__(self, **inputs):
+
+        if isinstance(self.input_spec, dict):
+            self.input_spec = type("AnonymousInputSpec",
+                                   (BaseInterfaceInputSpec,),
+                                   self.input_spec)
+
+        if isinstance(self.output_spec, dict):
+            self.input_spec = type("AnonymousOutputSpec",
+                                   (TraitedSpec,),
+                                   self.output_spec)
+
+        super(SimpleInterface, self).__init__(**inputs)
+
+        self._results = {}
+
+    def _list_outputs(self):
+
+        return self._results
