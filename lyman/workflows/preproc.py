@@ -7,8 +7,7 @@ from nipype.interfaces.base import (traits, File,
                                     InputMultiPath, OutputMultiPath)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
-from .graphutils import SimpleInterface
-from ..tools.submission import submit_cmdline
+from ..graphutils import SimpleInterface
 
 
 def define_preproc_workflow(proj_info, sess_info, exp_info):
@@ -376,64 +375,61 @@ class TemplateTransform(SimpleInterface):
         self._results["session_info"] = self.inputs.session_info
 
         subjects_dir = os.environ["SUBJECTS_DIR"]
-        subj = set([s for s, _ in self.inputs.session_info]).pop()
+        subject_ids = set([s for s, _ in self.inputs.session_info])
+        assert len(subject_ids) == 1
+        subj = subject_ids.pop()
 
         # -- Convert the anatomical image to nifti
+        anat_file = "orig.nii.gz"
         cmdline = ["mri_convert",
                    op.join(subjects_dir, subj, "mri/orig.mgz"),
-                   "orig.nii.gz"]
+                   anat_file]
 
-        runtime = submit_cmdline(runtime, cmdline)
+        self.submit_cmdline(runtime, cmdline)
 
         # -- Compute the intermediate transform
 
         cmdline = ["midtrans",
-                   "--template=orig.nii.gz",
+                   "--template=" + anat_file,
                    "--separate=se2template_",
                    "--out=anat2func_flirt.mat"]
         cmdline.extend(self.inputs.in_matrices)
-
         out_matrices = [
-            op.abspath("se2template_{:04d}.mat".format(i))
+            "se2template_{:04d}.mat".format(i)
             for i, _ in enumerate(self.inputs.in_matrices, 1)
         ]
 
-        self._results["out_matrices"] = out_matrices
-
-        runtime = submit_cmdline(runtime, cmdline)
+        self.submit_cmdline(runtime, cmdline, out_matrices=out_matrices)
 
         # -- Invert the anat2temp transformation
+        out_tkreg_file = "func2anat_flirt.mat"
         cmdline = ["convert_xfm",
-                   "-omat", "func2anat_flirt.mat",
+                   "-omat", out_tkreg_file,
                    "-inverse",
                    "anat2temp_flirt.mat"]
 
-        runtime = submit_cmdline(runtime, cmdline)
-
-        self._results["out_tkreg_file"] = op.abspath("func2anat_tkreg.dat")
+        self.submit_cmdline(runtime, cmdline, out_tkreg_file=out_tkreg_file)
 
         # -- Transform first volume into template space to get the geometry
+        out_template = "template_space.nii.gz"
         cmdline = ["flirt",
                    "-in", self.inputs.in_volumes[0],
                    "-ref", self.inputs.in_volumes[0],
-                   "-init", "se2temp_0001.mat",
-                   "-out", "template_space.nii.gz",
+                   "-init", out_matrices[0],
+                   "-out", out_template,
                    "-applyxfm"]
 
-        runtime = submit_cmdline(runtime, cmdline)
-
-        self._results["out_template"] = op.abspath("template_space.nii.gz")
+        self.submit_cmdline(runtime, cmdline, out_template=out_template)
 
         # -- Convert the FSL matrices to tkreg matrix format
+        out_flirt_file = "func2anat_flirt.mat"
         cmdline = ["tkregister2",
                    "--s", subj,
                    "--mov", "template_space.nii.gz",
-                   "--fsl", "func2anat_flirt.mat",
-                   "--reg", "func2anat_tkreg.dat",
+                   "--fsl", out_flirt_file,
+                   "--reg", out_tkreg_file,
                    "--noedit"]
 
-        runtime = submit_cmdline(runtime, cmdline)
-
-        self._results["out_flirt_file"] = op.abspath("func2anat_flirt.mat")
+        self.submit_cmdline(runtime, cmdline, out_flirt_file=out_flirt_file)
 
         return runtime
