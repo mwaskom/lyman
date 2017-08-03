@@ -1,12 +1,18 @@
 import os
 import os.path as op
 
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     Function, IdentityInterface, SelectFiles, DataSink)
 from nipype.interfaces.base import (traits, File,
                                     InputMultiPath, OutputMultiPath)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
+from moss.mosaic import Mosaic  # TODO move into lyman
 from ..graphutils import SimpleInterface
 
 
@@ -173,6 +179,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     ts2sb = Node(fsl.MCFLIRT(save_mats=True, save_plots=True),
                  "ts2sb")
 
+    realign_qc = Node(RealignmentReport(), "realign_qc")
+
     # --- Combined motion correction and unwarping of timeseries
 
     # Split the timeseries into each frame
@@ -311,6 +319,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "ref_weight")]),
         (ts2sb, combine_rigids,
             [("mat_file", "in_file")]),
+        (reorient_sb, realign_qc,
+            [("out_file", "target_file")]),
+        (ts2sb, realign_qc,
+            [("par_file", "realign_params")]),
         (sb2se, combine_rigids,
             [("out_matrix_file", "in_file2")]),
         (split_ts, restore_ts_frames,
@@ -343,8 +355,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("merged_file", "@restored_timeseries")]),
         (average_ts, file_output,
             [("out_file", "@mean_func")]),
-        (ts2sb, file_output,
-            [("par_file", "@realign_params")]),
+        (realign_qc, file_output,
+            [("params_file", "@realign_params"),
+             ("params_plot", "qc.@params_plot"),
+             ("target_plot", "qc.@target_plot")]),
         (average_template, file_output,
             [("out_file", "@template")]),
         (se2template, file_output,
@@ -352,6 +366,86 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     ])
 
     return workflow
+
+
+class RealignmentReport(SimpleInterface):
+
+    input_spec = dict(
+        target_file=File(exists=True),
+        realign_params=File(exists=True),
+    )
+    output_spec = dict(
+        params_file=File(exists=True),
+        params_plot=File(exists=True),
+        target_plot=File(exists=True),
+    )
+
+    def _run_interface(self, runtime):
+
+        self.out_files = []
+
+        # Load the realignment parameters
+        params = np.loadtxt(self.inputs.realign_params)
+        cols = ["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"]
+        df = pd.DataFrame(params, columns=cols)
+
+        # Write the motion file to csv
+        params_file = op.abspath("realign_params.csv")
+        df.to_csv(self.motion_file, index=False)
+        self._results["params_file"] = params_file
+
+        # Plot the motion timeseries
+        params_plot = op.abspath("realign_params.png")
+        self._results["params_plot"] = params_plot
+        f = self.plot_motion(df)
+        f.savefig(params_plot, dpi=100)
+        plt.close(f)
+
+        # Plot the target image
+        target_plot = op.abspath("realign_target.png")
+        self._results["target_plot"] = target_plot
+        m = self.plot_target()
+        m.savefig(self.target_file)
+        m.close()
+
+        return runtime
+
+    def plot_motion(self, df):
+        """Plot the timecourses of realignment parameters."""
+        with sns.axes_style("whitegrid"):
+            fig, axes = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
+
+        # Trim off all but the axis name
+        def axis(s):
+            return s[-1]
+
+        # Plot rotations
+        pal = sns.color_palette("Reds_d", 3)
+        rot_df = df.filter(like="rot").apply(np.rad2deg).rename(columns=axis)
+        rot_df.plot(ax=axes[0], color=pal, lw=1.5)
+
+        # Plot translations
+        pal = sns.color_palette("Blues_d", 3)
+        trans_df = df.filter(like="trans").rename(columns=axis)
+        trans_df.plot(ax=axes[1], color=pal, lw=1.5)
+
+        # Label the graphs
+        axes[0].set_xlim(0, len(df) - 1)
+        axes[0].axhline(0, c=".4", ls="--", zorder=1)
+        axes[1].axhline(0, c=".4", ls="--", zorder=1)
+
+        for ax in axes:
+            ax.legend(frameon=True, ncol=3, loc="best")
+            ax.legend_.get_frame().set_color("white")
+
+        axes[0].set_ylabel("Rotations (degrees)")
+        axes[1].set_ylabel("Translations (mm)")
+        fig.tight_layout()
+        return fig
+
+    def plot_target(self):
+        """Plot a mosaic of the motion correction target image."""
+        return Mosaic(self.inputs.target_file, step=1)
 
 
 class TemplateTransform(SimpleInterface):
