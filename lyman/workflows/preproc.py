@@ -119,15 +119,15 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                  out_reg_file="se2anat_tkreg.dat"),
                    "se2anat")
 
-    # --- Definition of common cross-session space
+    # --- Definition of common cross-session space (template space)
 
-    se2native = JoinNode(NativeTransform(),
-                         name="se2native",
-                         joinsource="session_source",
-                         joinfield=["session_info",
-                                    "in_matrices", "in_volumes"])
+    se2template = JoinNode(TemplateTransform(),
+                           name="se2template",
+                           joinsource="session_source",
+                           joinfield=["session_info",
+                                      "in_matrices", "in_volumes"])
 
-    # --- Associate native-space transforms with data from correct session
+    # --- Associate template-space transforms with data from correct session
 
     def select_transform_func(session_info, subject, session, in_matrices):
 
@@ -145,7 +145,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     select_runwise = select_sesswise.clone("select_runwise")
 
-    # --- Restore each sessions SE image in native space then average
+    # --- Restore each sessions SE image in template space then average
 
     split_se = Node(fsl.Split(dimension="t"), "split_se")
 
@@ -157,15 +157,16 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         out_files = [item for sublist in in_files for item in sublist]
         return out_files
 
-    combine_se = JoinNode(Function("in_files", "out_files", flatten_file_list),
-                          name="combine_se",
-                          joinsource="session_source",
-                          joinfield=["in_files"])
+    combine_template = JoinNode(Function("in_files", "out_files",
+                                         flatten_file_list),
+                                name="combine_template",
+                                joinsource="session_source",
+                                joinfield=["in_files"])
 
-    merge_se = Node(fsl.Merge(dimension="t"), name="merge_se")
+    merge_template = Node(fsl.Merge(dimension="t"), name="merge_template")
 
-    average_native = Node(fsl.MeanImage(out_file="se_native.nii.gz"),
-                          "average_native")
+    average_template = Node(fsl.MeanImage(out_file="template.nii.gz"),
+                            "average_template")
 
     # --- Motion correction of timeseries to SBRef (with distortions)
 
@@ -262,13 +263,13 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("subject", "subject_id")]),
         (average_se, se2anat,
             [("out_file", "source_file")]),
-        (session_source, se2native,
+        (session_source, se2template,
             [("session", "session_info")]),
-        (reorient_se, se2native,
+        (reorient_se, se2template,
             [("out_file", "in_volumes")]),
-        (se2anat, se2native,
+        (se2anat, se2template,
             [("out_fsl_file", "in_matrices")]),
-        (se2native, select_sesswise,
+        (se2template, select_sesswise,
             [("out_matrices", "in_matrices"),
              ("out_template", "in_templates"),
              ("session_info", "session_info")]),
@@ -282,15 +283,15 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (estimate_distortions, restore_se,
             [("out_mats", "premat"),
              ("out_warps", "field_file")]),
-        (se2native, restore_se,
+        (se2template, restore_se,
             [("out_template", "ref_file")]),
         (select_sesswise, restore_se,
             [("out_matrix", "postmat")]),
-        (restore_se, combine_se,
+        (restore_se, combine_template,
             [("out_file", "in_files")]),
-        (combine_se, merge_se,
+        (combine_template, merge_template,
             [("out_files", "in_files")]),
-        (merge_se, average_native,
+        (merge_template, average_template,
             [("merged_file", "in_file")]),
         (runwise_input, reorient_ts,
             [("ts", "in_file")]),
@@ -318,13 +319,13 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "premat")]),
         (select_warp, restore_ts_frames,
             [("out", "field_file")]),
-        (se2native, select_runwise,
+        (se2template, select_runwise,
             [("out_matrices", "in_matrices"),
              ("session_info", "session_info")]),
         (runwise_info, select_runwise,
             [("subject", "subject"),
              ("session", "session")]),
-        (se2native, restore_ts_frames,
+        (se2template, restore_ts_frames,
             [("out_template", "ref_file")]),
         (select_runwise, restore_ts_frames,
             [("out_matrix", "postmat")]),
@@ -344,23 +345,23 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "@mean_func")]),
         (ts2sb, file_output,
             [("par_file", "@realign_params")]),
-        (average_native, file_output,
-            [("out_file", "@se_native")]),
-        (se2native, file_output,
+        (average_template, file_output,
+            [("out_file", "@template")]),
+        (se2template, file_output,
             [("out_tkreg_file", "@tkreg_file")]),
     ])
 
     return workflow
 
 
-class NativeTransformInput(BaseInterfaceInputSpec):
+class TemplateTransformInput(BaseInterfaceInputSpec):
 
     session_info = traits.List(traits.Tuple())
     in_matrices = InputMultiPath(File(exists=True))
     in_volumes = InputMultiPath(File(exists=True))
 
 
-class NativeTransformOutput(TraitedSpec):
+class TemplateTransformOutput(TraitedSpec):
 
     session_info = traits.List(traits.Tuple())
     out_template = File(exists=True)
@@ -369,10 +370,10 @@ class NativeTransformOutput(TraitedSpec):
     out_tkreg_file = File(exists=True)
 
 
-class NativeTransform(BaseInterface):
+class TemplateTransform(BaseInterface):
 
-    input_spec = NativeTransformInput
-    output_spec = NativeTransformOutput
+    input_spec = TemplateTransformInput
+    output_spec = TemplateTransformOutput
 
     def _list_outputs(self):
 
@@ -381,15 +382,15 @@ class NativeTransform(BaseInterface):
         outputs["session_info"] = self.inputs.session_info
 
         out_matrices = [
-            os.path.abspath("se2native_{:04d}.mat".format(i))
+            os.path.abspath("se2template_{:04d}.mat".format(i))
             for i, _ in enumerate(self.inputs.in_matrices, 1)
-            ]
+        ]
 
         outputs["out_matrices"] = out_matrices
 
-        outputs["out_template"] = os.path.abspath("native_template.nii.gz")
-        outputs["out_flirt_file"] = os.path.abspath("native2anat_flirt.mat")
-        outputs["out_tkreg_file"] = os.path.abspath("native2anat_tkreg.dat")
+        outputs["out_template"] = os.path.abspath("template_space.nii.gz")
+        outputs["out_flirt_file"] = os.path.abspath("func2anat_flirt.mat")
+        outputs["out_tkreg_file"] = os.path.abspath("func2anat_tkreg.dat")
 
         return outputs
 
@@ -408,26 +409,26 @@ class NativeTransform(BaseInterface):
         # Compute the intermediate transform
         cmdline = ["midtrans",
                    "--template=orig.nii.gz",
-                   "--separate=se2native_",
-                   "--out=anat2native_flirt.mat"]
+                   "--separate=se2template_",
+                   "--out=anat2func_flirt.mat"]
         cmdline.extend(self.inputs.in_matrices)
 
         runtime = submit_cmdline(runtime, cmdline)
 
-        # Invert the anat2native transformation
+        # Invert the anat2temp transformation
         cmdline = ["convert_xfm",
-                   "-omat", "native2anat_flirt.mat",
+                   "-omat", "func2anat_flirt.mat",
                    "-inverse",
-                   "anat2native_flirt.mat"]
+                   "anat2temp_flirt.mat"]
 
         runtime = submit_cmdline(runtime, cmdline)
 
-        # Transform the first volume into the native space to get the geometry
+        # Transform the first volume into template space to get the geometry
         cmdline = ["flirt",
                    "-in", self.inputs.in_volumes[0],
                    "-ref", self.inputs.in_volumes[0],
-                   "-init", "se2native_0001.mat",
-                   "-out", "native_template.nii.gz",
+                   "-init", "se2temp_0001.mat",
+                   "-out", "template_space.nii.gz",
                    "-applyxfm"]
 
         runtime = submit_cmdline(runtime, cmdline)
@@ -435,9 +436,9 @@ class NativeTransform(BaseInterface):
         # Convert the FSL matrices to tkreg matrix format
         cmdline = ["tkregister2",
                    "--s", subj,
-                   "--mov", "native_template.nii.gz",
-                   "--fsl", "native2anat_flirt.mat",
-                   "--reg", "native2anat_tkreg.dat",
+                   "--mov", "template_space.nii.gz",
+                   "--fsl", "func2anat_flirt.mat",
+                   "--reg", "func2anat_tkreg.dat",
                    "--noedit"]
 
         runtime = submit_cmdline(runtime, cmdline)
