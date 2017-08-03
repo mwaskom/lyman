@@ -79,6 +79,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                      base_directory=proj_info.data_dir),
                          "runwise_input")
 
+    # --- Reorientation of functional data
+
+    reorient_ts = Node(fsl.Reorient2Std(), "reorient_ts")
+    reorient_se = reorient_ts.clone("reorient_se")
+    reorient_sb = reorient_ts.clone("reorient_sb")
+
     # --- Warpfield estimation using topup
 
     # Distortion warpfield estimation
@@ -221,7 +227,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # === Assemble pipeline
 
-    workflow = Workflow(name="prisma_preproc_multirun",
+    workflow = Workflow(name="preproc",
                         base_dir=proj_info.cache_dir)
 
     workflow.connect([
@@ -242,8 +248,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("subject", "subject"),
              ("session", "session"),
              ("run", "run")]),
-        (sesswise_input, estimate_distortions,
+        (sesswise_input, reorient_se,
             [("se", "in_file")]),
+        (reorient_se, estimate_distortions,
+            [("out_file", "in_file")]),
         (estimate_distortions, select_warp,
             [("out_warps", "inlist")]),
         (select_warp, mask_distortions,
@@ -256,8 +264,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "source_file")]),
         (session_source, se2native,
             [("session", "session_info")]),
-        (sesswise_input, se2native,
-            [("se", "in_volumes")]),
+        (reorient_se, se2native,
+            [("out_file", "in_volumes")]),
         (se2anat, se2native,
             [("out_fsl_file", "in_matrices")]),
         (se2native, select_sesswise,
@@ -267,8 +275,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (sesswise_info, select_sesswise,
             [("subject", "subject"),
              ("session", "session")]),
-        (sesswise_input, split_se,
-            [("se", "in_file")]),
+        (reorient_se, split_se,
+            [("out_file", "in_file")]),
         (split_se, restore_se,
             [("out_files", "in_file")]),
         (estimate_distortions, restore_se,
@@ -284,15 +292,20 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_files", "in_files")]),
         (merge_se, average_native,
             [("merged_file", "in_file")]),
-        (runwise_input, ts2sb,
-            [("ts", "in_file"),
-             ("sb", "ref_file")]),
-        (runwise_input, split_ts,
+        (runwise_input, reorient_ts,
             [("ts", "in_file")]),
-        (runwise_input, sb2se,
+        (runwise_input, reorient_sb,
             [("sb", "in_file")]),
-        (sesswise_input, sb2se,
-            [("se", "reference")]),
+        (reorient_ts, ts2sb,
+            [("out_file", "in_file")]),
+        (reorient_se, ts2sb,
+            [("out_file", "ref_file")]),
+        (reorient_ts, split_ts,
+            [("out_file", "in_file")]),
+        (reorient_sb, sb2se,
+            [("out_file", "in_file")]),
+        (reorient_se, sb2se,
+            [("out_file", "reference")]),
         (mask_distortions, sb2se,
             [("out_file", "ref_weight")]),
         (ts2sb, combine_rigids,
