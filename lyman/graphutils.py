@@ -166,9 +166,9 @@ class SimpleInterface(BaseInterface):
                                    self.input_spec)
 
         if isinstance(self.output_spec, dict):
-            self.input_spec = type("AnonymousOutputSpec",
-                                   (TraitedSpec,),
-                                   self.output_spec)
+            self.output_spec = type("AnonymousOutputSpec",
+                                    (TraitedSpec,),
+                                    self.output_spec)
 
         super(SimpleInterface, self).__init__(**inputs)
 
@@ -208,13 +208,19 @@ class SimpleInterface(BaseInterface):
         runtime.returncode += proc.returncode
 
         if proc.returncode is None or proc.returncode != 0:
-            message = "Command:\n" + runtime.cmdline + "\n"
+            message = "\n\nCommand:\n" + runtime.cmdline + "\n"
             message += "Standard output:\n" + runtime.stdout + "\n"
             message += "Standard error:\n" + runtime.stderr + "\n"
             message += "Return code: " + str(runtime.returncode)
             raise RuntimeError(message)
 
         for field, fname in results.items():
+
+            if op.isfile(fname):
+                fname = op.abspath(fname)
+            elif all(map(op.isfile, fname)):
+                fname = [op.abspath(f) for f in fname]
+
             self._results[field] = fname
 
         return runtime
