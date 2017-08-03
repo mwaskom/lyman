@@ -23,6 +23,9 @@ def add_execution(parser):
     parser.add_argument("-n", "--nprocs",
                         type=int,
                         help="size of multiprocessing pool")
+    parser.add_argument("-g", "--graph",
+                        action="store_true",  # TODO make this take a filename
+                        help="write graph instead of executing")
 
 
 if __name__ == "__main__":

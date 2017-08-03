@@ -200,8 +200,11 @@ def determine_engine(args):
 
 def run_workflow(wf, args=None):
     """Run a workflow, if we asked to do so on the command line."""
-    plugin, plugin_args = determine_engine(args)
-    wf.run(plugin, plugin_args)
+    if args.graph:
+        wf.write_graph(args.stage, "orig", "svg")
+    else:
+        plugin, plugin_args = determine_engine(args)
+        wf.run(plugin, plugin_args)
 
 
 def gather_session_info(project, experiment, subjects):
