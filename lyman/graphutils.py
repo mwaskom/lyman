@@ -170,7 +170,9 @@ class SimpleInterface(BaseInterface):
                                     (TraitedSpec,),
                                     self.output_spec)
 
-        super(SimpleInterface, self).__init__(**inputs)
+        self.inputs = self.input_spec(**inputs)
+        self.estimated_memory_gb = 1
+        self.num_threads = 1
 
         self._results = {}
 
