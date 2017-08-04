@@ -202,9 +202,9 @@ class SimpleInterface(BaseInterface):
 
         stdout, stderr = proc.communicate()
 
-        runtime.stdout += stdout
-        runtime.stderr += stderr
-        runtime.cmdline += cmdline
+        runtime.stdout += "\n" + stdout + "\n"
+        runtime.stderr += "\n" + stderr + "\n"
+        runtime.cmdline += "\n" + cmdline + "\n"
         runtime.returncode += proc.returncode
 
         if proc.returncode is None or proc.returncode != 0:
