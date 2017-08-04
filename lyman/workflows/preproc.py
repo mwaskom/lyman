@@ -207,29 +207,27 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     output_dir = op.join(proj_info.analysis_dir, exp_info.name)
 
-    runwise_substitutions = []
-    subjwise_substitutions = []
-    for subject, subj_info in sess_info.items():
-        subjwise_substitutions.append(
-          ("_subject_{}".format(subject), "{}/preproc".format(subject))
-        )
-        for session, session_runs in subj_info.items():
-            for run in session_runs:
-                kws = dict(subject=subject, session=session, run=run)
-                runwise_substitutions.append(
-                    (("_subject_{subject}/"
-                      "_session_{subject}.{session}/"
-                      "_run_{subject}.{session}.{run}").format(**kws),
-                     "{subject}/preproc/{session}_{run}".format(**kws))
-                )
+    def define_timeseries_container(subject, session, run):
+        return "{}/preproc/{}_{}".format(subject, session, run)
 
-    runwise_output = Node(DataSink(base_directory=output_dir,
-                                   substitutions=runwise_substitutions),
-                          "runwise_output")
+    timeseries_container = Node(Function(["subject", "session", "run"],
+                                         "path", define_timeseries_container),
+                                "runwise_container")
 
-    subjwise_output = Node(DataSink(base_directory=output_dir,
-                                    substitutions=subjwise_substitutions),
-                           "subjwise_output")
+    timeseries_output = Node(DataSink(base_directory=output_dir,
+                                      parameterization=False),
+                             "timeseries_output")
+
+    def define_template_container(subject):
+        return "{}/preproc/template".format(subject)
+
+    template_container = Node(Function("subject",
+                                       "path", define_template_container),
+                              "template_container")
+
+    template_output = Node(DataSink(base_directory=output_dir,
+                                    parameterization=False),
+                           "template_output")
 
     # === Assemble pipeline
 
@@ -342,18 +340,31 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_files")]),
         (merge_ts, average_ts,
             [("merged_file", "in_file")]),
-        (merge_ts, runwise_output,
+
+        # --- Persistent data storage
+
+        (sesswise_info, template_container,
+            [("subject", "subject")]),
+        (template_container, template_output,
+            [("path", "container")]),
+        (average_template, template_output,
+            [("out_file", "@template")]),
+        (se2template, template_output,
+            [("out_tkreg_file", "@tkreg_file")]),
+        (runwise_info, timeseries_container,
+            [("subject", "subject"),
+             ("session", "session"),
+             ("run", "run")]),
+        (timeseries_container, timeseries_output,
+            [("path", "container")]),
+        (merge_ts, timeseries_output,
             [("merged_file", "@restored_timeseries")]),
-        (average_ts, runwise_output,
+        (average_ts, timeseries_output,
             [("out_file", "@mean_func")]),
-        (realign_qc, runwise_output,
+        (realign_qc, timeseries_output,
             [("params_file", "@realign_params"),
              ("params_plot", "qc.@params_plot"),
              ("target_plot", "qc.@target_plot")]),
-        (average_template, subjwise_output,
-            [("out_file", "@template")]),
-        (se2template, subjwise_output,
-            [("out_tkreg_file", "@tkreg_file")]),
     ])
 
     return workflow
