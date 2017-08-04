@@ -389,19 +389,19 @@ class RealignmentReport(SimpleInterface):
         df = pd.DataFrame(params, columns=cols)
 
         # Write the motion file to csv
-        params_file = op.abspath("realign_params.csv")
+        params_file = op.abspath("mc_params.csv")
         self._results["params_file"] = params_file
         df.to_csv(params_file, index=False)
 
         # Plot the motion timeseries
-        params_plot = op.abspath("realign_params.png")
+        params_plot = op.abspath("mc_params.png")
         self._results["params_plot"] = params_plot
         f = self.plot_motion(df)
         f.savefig(params_plot, dpi=100)
         plt.close(f)
 
         # Plot the target image
-        target_plot = op.abspath("realign_target.png")
+        target_plot = op.abspath("mc_target.png")
         self._results["target_plot"] = target_plot
         m = self.plot_target()
         m.savefig(target_plot)
