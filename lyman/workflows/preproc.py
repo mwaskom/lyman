@@ -171,7 +171,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     merge_template = Node(fsl.Merge(dimension="t"), name="merge_template")
 
-    average_template = Node(fsl.MeanImage(out_file="template.nii.gz"),
+    average_template = Node(fsl.MeanImage(out_file="func.nii.gz"),
                             "average_template")
 
     # --- Motion correction of timeseries to SBRef (with distortions)
@@ -205,34 +205,31 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Workflow ouptut
 
-    def generate_run_substitutions(subject, session, run):
-
-        kws = dict(subject=subject, session=session, run=run)
-
-        runwise_input_path = ("_subject_{subject}/"
-                              "_session_{subject}.{session}/"
-                              "_run_{subject}.{session}.{run}"
-                              ).format(**kws)
-        runwise_output_path = "{subject}/preproc/{session}_{run}".format(**kws)
-
-        subjwise_input_path = "_subject_{subject}".format(**kws)
-        subjwise_output_path = "{subject}/preproc/template".format(**kws)
-
-        substitutions = [
-            (runwise_input_path, runwise_output_path),
-            (subjwise_input_path, subjwise_output_path),
-        ]
-
-        return substitutions
-
-    path_substitue = Node(Function(["subject", "session", "run"],
-                                   ["substitutions"],
-                                   generate_run_substitutions),
-                          "path_substitue")
-
     output_dir = op.join(proj_info.analysis_dir, exp_info.name)
-    file_output = Node(DataSink(base_directory=output_dir),
-                       "file_output")
+
+    runwise_substitutions = []
+    subjwise_substitutions = []
+    for subject, subj_info in sess_info.items():
+        subjwise_substitutions.append(
+          ("_subject_{}".format(subject), "{}/preproc".format(subject))
+        )
+        for session, session_runs in subj_info.items():
+            for run in session_runs:
+                kws = dict(subject=subject, session=session, run=run)
+                runwise_substitutions.append(
+                    (("_subject_{subject}/"
+                      "_session_{subject}.{session}/"
+                      "_run_{subject}.{session}.{run}").format(**kws),
+                     "{subject}/preproc/{session}_{run}".format(**kws))
+                )
+
+    runwise_output = Node(DataSink(base_directory=output_dir,
+                                   substitutions=runwise_substitutions),
+                          "runwise_output")
+
+    subjwise_output = Node(DataSink(base_directory=output_dir,
+                                    substitutions=subjwise_substitutions),
+                           "subjwise_output")
 
     # === Assemble pipeline
 
@@ -345,23 +342,17 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_files")]),
         (merge_ts, average_ts,
             [("merged_file", "in_file")]),
-        (runwise_info, path_substitue,
-            [("subject", "subject"),
-             ("session", "session"),
-             ("run", "run")]),
-        (path_substitue, file_output,
-            [("substitutions", "substitutions")]),
-        (merge_ts, file_output,
+        (merge_ts, runwise_output,
             [("merged_file", "@restored_timeseries")]),
-        (average_ts, file_output,
+        (average_ts, runwise_output,
             [("out_file", "@mean_func")]),
-        (realign_qc, file_output,
+        (realign_qc, runwise_output,
             [("params_file", "@realign_params"),
-             ("params_plot", "params_plot.qc"),
-             ("target_plot", "target_plot.qc")]),
-        (average_template, file_output,
+             ("params_plot", "qc.@params_plot"),
+             ("target_plot", "qc.@target_plot")]),
+        (average_template, subjwise_output,
             [("out_file", "@template")]),
-        (se2template, file_output,
+        (se2template, subjwise_output,
             [("out_tkreg_file", "@tkreg_file")]),
     ])
 
