@@ -383,11 +383,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
 class RealignmentReport(SimpleInterface):
 
-    class input_spec(TraitedSpec):
+    class InputSpec(TraitedSpec):
         target_file = File(exists=True)
         realign_params = File(exists=True)
 
-    class output_spec(TraitedSpec):
+    class OutputSpec(TraitedSpec):
         params_file = File(exists=True)
         params_plot = File(exists=True)
         target_plot = File(exists=True)
@@ -460,12 +460,12 @@ class RealignmentReport(SimpleInterface):
 
 class TemplateTransform(SimpleInterface):
 
-    class input_spec(TraitedSpec):
+    class InputSpec(TraitedSpec):
         session_info = traits.List(traits.Tuple())
         in_matrices = InputMultiPath(File(exists=True))
         in_volumes = InputMultiPath(File(exists=True))
 
-    class output_spec(TraitedSpec):
+    class OutputSpec(TraitedSpec):
         session_info = traits.List(traits.Tuple())
         out_template = File(exists=True)
         out_flirt_file = File(exists=True)
@@ -490,7 +490,6 @@ class TemplateTransform(SimpleInterface):
         self.submit_cmdline(runtime, cmdline)
 
         # -- Compute the intermediate transform
-
         cmdline = ["midtrans",
                    "--template=" + anat_file,
                    "--separate=se2template_",
