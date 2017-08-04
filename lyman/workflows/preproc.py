@@ -27,6 +27,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # exp_info is a bunch or dict or other obj with experiment parameters
 
+    # TODO change se to fm, it will be less confusing
+
     # --- Workflow parameterization
 
     subject_iterables = list(sess_info.keys())
@@ -88,7 +90,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     # --- Reorientation of functional data
 
     reorient_ts = Node(fsl.Reorient2Std(), "reorient_ts")
-    reorient_se = reorient_ts.clone("reorient_se")
+    reorient_fm = reorient_ts.clone("reorient_fm")
     reorient_sb = reorient_ts.clone("reorient_sb")
 
     # --- Warpfield estimation using topup
@@ -102,8 +104,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                 "estimate_distortions")
 
     # Average distortion-corrected spin-echo images
-    average_se = Node(fsl.MeanImage(out_file="se_restored.nii.gz"),
-                      "average_se")
+    average_fm = Node(fsl.MeanImage(out_file="fm_restored.nii.gz"),
+                      "average_fm")
 
     # Select first warpfield image from output list
     select_warp = Node(pipeutil.Select(index=[0]), "select_warp")
@@ -115,20 +117,20 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Registration of SBRef to SE-EPI (with distortions)
 
-    sb2se = Node(fsl.FLIRT(dof=6), "sb2se")
+    sb2fm = Node(fsl.FLIRT(dof=6), "sb2fm")
 
     # --- Registration of SE-EPI (without distortions) to Freesurfer anatomy
 
-    se2anat = Node(fs.BBRegister(init="fsl",
+    fm2anat = Node(fs.BBRegister(init="fsl",
                                  contrast_type="t2",
-                                 out_fsl_file="se2anat_flirt.mat",
-                                 out_reg_file="se2anat_tkreg.dat"),
-                   "se2anat")
+                                 out_fsl_file="fm2anat_flirt.mat",
+                                 out_reg_file="fm2anat_tkreg.dat"),
+                   "fm2anat")
 
     # --- Definition of common cross-session space (template space)
 
-    se2template = JoinNode(TemplateTransform(),
-                           name="se2template",
+    fm2template = JoinNode(TemplateTransform(),
+                           name="fm2template",
                            joinsource="session_source",
                            joinfield=["session_info",
                                       "in_matrices", "in_volumes"])
@@ -153,11 +155,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Restore each sessions SE image in template space then average
 
-    split_se = Node(fsl.Split(dimension="t"), "split_se")
+    split_fm = Node(fsl.Split(dimension="t"), "split_fm")
 
-    restore_se = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
+    restore_fm = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
                          ["in_file", "premat", "field_file"],
-                         "restore_se")
+                         "restore_fm")
 
     def flatten_file_list(in_files):
         out_files = [item for sublist in in_files for item in sublist]
@@ -174,19 +176,19 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     average_template = Node(fsl.MeanImage(out_file="func.nii.gz"),
                             "average_template")
 
-    # --- Motion correction of timeseries to SBRef (with distortions)
+    # --- Motion correction of time series to SBRef (with distortions)
 
     ts2sb = Node(fsl.MCFLIRT(save_mats=True, save_plots=True),
                  "ts2sb")
 
     realign_qc = Node(RealignmentReport(), "realign_qc")
 
-    # --- Combined motion correction and unwarping of timeseries
+    # --- Combined motion correction and unwarping of time series
 
     # Split the timeseries into each frame
     split_ts = Node(fsl.Split(dimension="t"), "split_ts")
 
-    # Concatenation ts2sb and sb2se rigid transform
+    # Concatenation ts2sb and sb2sfmrigid transform
     combine_rigids = MapNode(fsl.ConvertXFM(concat_xfm=True),
                              "in_file", "combine_rigids")
 
@@ -195,11 +197,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                 ["in_file", "premat"],
                                 "restore_ts")
 
-    # Recombine the timeseries frames into a 4D image
+    # Recombine the time series frames into a 4D image
     merge_ts = Node(fsl.Merge(merged_file="timeseries.nii.gz",
                               dimension="t"), "merge_ts")
 
-    # Take a temporal average of the timeseries
+    # Take a temporal average of the time series
     average_ts = Node(fsl.MeanImage(out_file="mean.nii.gz"),
                       "average_ts")
 
@@ -235,6 +237,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     workflow = Workflow(name="preproc", base_dir=cache_base)
 
     workflow.connect([
+
+        # --- Workflow setup and data ingest
+
         (subject_source, session_source,
             [("subject", "subject")]),
         (subject_source, run_source,
@@ -252,65 +257,71 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("subject", "subject"),
              ("session", "session"),
              ("run", "run")]),
-        (sesswise_input, reorient_se,
+
+        # --- Distortion correction and template definition
+
+        (sesswise_input, reorient_fm,
             [("se", "in_file")]),
-        (reorient_se, estimate_distortions,
+        (reorient_fm, estimate_distortions,
             [("out_file", "in_file")]),
         (estimate_distortions, select_warp,
             [("out_warps", "inlist")]),
         (select_warp, mask_distortions,
             [("out", "in_file")]),
-        (estimate_distortions, average_se,
+        (estimate_distortions, average_fm,
             [("out_corrected", "in_file")]),
-        (sesswise_info, se2anat,
+        (sesswise_info, fm2anat,
             [("subject", "subject_id")]),
-        (average_se, se2anat,
+        (average_fm, fm2anat,
             [("out_file", "source_file")]),
-        (session_source, se2template,
+        (session_source, fm2template,
             [("session", "session_info")]),
-        (reorient_se, se2template,
+        (reorient_fm, fm2template,
             [("out_file", "in_volumes")]),
-        (se2anat, se2template,
+        (fm2anat, fm2template,
             [("out_fsl_file", "in_matrices")]),
-        (se2template, select_sesswise,
+        (fm2template, select_sesswise,
             [("out_matrices", "in_matrices"),
              ("out_template", "in_templates"),
              ("session_info", "session_info")]),
         (sesswise_info, select_sesswise,
             [("subject", "subject"),
              ("session", "session")]),
-        (reorient_se, split_se,
+        (reorient_fm, split_fm,
             [("out_file", "in_file")]),
-        (split_se, restore_se,
+        (split_fm, restore_fm,
             [("out_files", "in_file")]),
-        (estimate_distortions, restore_se,
+        (estimate_distortions, restore_fm,
             [("out_mats", "premat"),
              ("out_warps", "field_file")]),
-        (se2template, restore_se,
+        (fm2template, restore_fm,
             [("out_template", "ref_file")]),
-        (select_sesswise, restore_se,
+        (select_sesswise, restore_fm,
             [("out_matrix", "postmat")]),
-        (restore_se, combine_template,
+        (restore_fm, combine_template,
             [("out_file", "in_files")]),
         (combine_template, merge_template,
             [("out_files", "in_files")]),
         (merge_template, average_template,
             [("merged_file", "in_file")]),
+
+        # --- Time series realignment
+
         (runwise_input, reorient_ts,
             [("ts", "in_file")]),
         (runwise_input, reorient_sb,
             [("sb", "in_file")]),
         (reorient_ts, ts2sb,
             [("out_file", "in_file")]),
-        (reorient_se, ts2sb,
+        (reorient_sb, ts2sb,
             [("out_file", "ref_file")]),
         (reorient_ts, split_ts,
             [("out_file", "in_file")]),
-        (reorient_sb, sb2se,
+        (reorient_sb, sb2fm,
             [("out_file", "in_file")]),
-        (reorient_se, sb2se,
+        (reorient_fm, sb2fm,
             [("out_file", "reference")]),
-        (mask_distortions, sb2se,
+        (mask_distortions, sb2fm,
             [("out_file", "ref_weight")]),
         (ts2sb, combine_rigids,
             [("mat_file", "in_file")]),
@@ -318,7 +329,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "target_file")]),
         (ts2sb, realign_qc,
             [("par_file", "realign_params")]),
-        (sb2se, combine_rigids,
+        (sb2fm, combine_rigids,
             [("out_matrix_file", "in_file2")]),
         (split_ts, restore_ts_frames,
             [("out_files", "in_file")]),
@@ -326,13 +337,13 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "premat")]),
         (select_warp, restore_ts_frames,
             [("out", "field_file")]),
-        (se2template, select_runwise,
+        (fm2template, select_runwise,
             [("out_matrices", "in_matrices"),
              ("session_info", "session_info")]),
         (runwise_info, select_runwise,
             [("subject", "subject"),
              ("session", "session")]),
-        (se2template, restore_ts_frames,
+        (fm2template, restore_ts_frames,
             [("out_template", "ref_file")]),
         (select_runwise, restore_ts_frames,
             [("out_matrix", "postmat")]),
@@ -349,7 +360,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("path", "container")]),
         (average_template, template_output,
             [("out_file", "@template")]),
-        (se2template, template_output,
+        (fm2template, template_output,
             [("out_tkreg_file", "@tkreg_file")]),
         (runwise_info, timeseries_container,
             [("subject", "subject"),
