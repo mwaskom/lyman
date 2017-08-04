@@ -170,9 +170,7 @@ class SimpleInterface(BaseInterface):
                                     (TraitedSpec,),
                                     self.output_spec)
 
-        self.inputs = self.input_spec(**inputs)
-        self.estimated_memory_gb = 1
-        self.num_threads = 1
+        super(SimpleInterface, self).__init__(**inputs)
 
         self._results = {}
 
@@ -217,12 +215,6 @@ class SimpleInterface(BaseInterface):
             raise RuntimeError(message)
 
         for field, fname in results.items():
-
-            if op.isfile(fname):
-                fname = op.abspath(fname)
-            elif all(map(op.isfile, fname)):
-                fname = [op.abspath(f) for f in fname]
-
             self._results[field] = fname
 
         return runtime

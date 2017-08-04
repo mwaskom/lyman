@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     Function, IdentityInterface, SelectFiles, DataSink)
-from nipype.interfaces.base import (traits, File,
+from nipype.interfaces.base import (traits, File, TraitedSpec,
                                     InputMultiPath, OutputMultiPath)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
@@ -370,19 +370,16 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
 class RealignmentReport(SimpleInterface):
 
-    input_spec = dict(
-        target_file=File(exists=True),
-        realign_params=File(exists=True),
-    )
-    output_spec = dict(
-        params_file=File(exists=True),
-        params_plot=File(exists=True),
-        target_plot=File(exists=True),
-    )
+    class input_spec(TraitedSpec):
+        target_file = File(exists=True)
+        realign_params = File(exists=True)
+
+    class output_spec(TraitedSpec):
+        params_file = File(exists=True)
+        params_plot = File(exists=True)
+        target_plot = File(exists=True)
 
     def _run_interface(self, runtime):
-
-        self.out_files = []
 
         # Load the realignment parameters
         params = np.loadtxt(self.inputs.realign_params)
@@ -391,8 +388,8 @@ class RealignmentReport(SimpleInterface):
 
         # Write the motion file to csv
         params_file = op.abspath("realign_params.csv")
-        df.to_csv(self.motion_file, index=False)
         self._results["params_file"] = params_file
+        df.to_csv(params_file, index=False)
 
         # Plot the motion timeseries
         params_plot = op.abspath("realign_params.png")
@@ -405,7 +402,7 @@ class RealignmentReport(SimpleInterface):
         target_plot = op.abspath("realign_target.png")
         self._results["target_plot"] = target_plot
         m = self.plot_target()
-        m.savefig(self.target_file)
+        m.savefig(target_plot)
         m.close()
 
         return runtime
@@ -450,19 +447,17 @@ class RealignmentReport(SimpleInterface):
 
 class TemplateTransform(SimpleInterface):
 
-    input_spec = dict(
-        session_info=traits.List(traits.Tuple()),
-        in_matrices=InputMultiPath(File(exists=True)),
-        in_volumes=InputMultiPath(File(exists=True)),
-    )
+    class input_spec(TraitedSpec):
+        session_info = traits.List(traits.Tuple())
+        in_matrices = InputMultiPath(File(exists=True))
+        in_volumes = InputMultiPath(File(exists=True))
 
-    output_spec = dict(
-        session_info=traits.List(traits.Tuple()),
-        out_template=File(exists=True),
-        out_flirt_file=File(exists=True),
-        out_tkreg_file=File(exists=True),
-        out_matrices=OutputMultiPath(File(exists=True)),
-    )
+    class output_spec(TraitedSpec):
+        session_info = traits.List(traits.Tuple())
+        out_template = File(exists=True)
+        out_flirt_file = File(exists=True)
+        out_tkreg_file = File(exists=True)
+        out_matrices = OutputMultiPath(File(exists=True))
 
     def _run_interface(self, runtime):
 
@@ -489,23 +484,23 @@ class TemplateTransform(SimpleInterface):
                    "--out=anat2func_flirt.mat"]
         cmdline.extend(self.inputs.in_matrices)
         out_matrices = [
-            "se2template_{:04d}.mat".format(i)
+            op.abspath("se2template_{:04d}.mat".format(i))
             for i, _ in enumerate(self.inputs.in_matrices, 1)
         ]
 
         self.submit_cmdline(runtime, cmdline, out_matrices=out_matrices)
 
         # -- Invert the anat2temp transformation
-        out_tkreg_file = "func2anat_flirt.mat"
+        out_tkreg_file = op.abspath("func2anat_flirt.mat")
         cmdline = ["convert_xfm",
                    "-omat", out_tkreg_file,
                    "-inverse",
-                   "anat2temp_flirt.mat"]
+                   "anat2func_flirt.mat"]
 
         self.submit_cmdline(runtime, cmdline, out_tkreg_file=out_tkreg_file)
 
         # -- Transform first volume into template space to get the geometry
-        out_template = "template_space.nii.gz"
+        out_template = op.abspath("template_space.nii.gz")
         cmdline = ["flirt",
                    "-in", self.inputs.in_volumes[0],
                    "-ref", self.inputs.in_volumes[0],
@@ -516,7 +511,7 @@ class TemplateTransform(SimpleInterface):
         self.submit_cmdline(runtime, cmdline, out_template=out_template)
 
         # -- Convert the FSL matrices to tkreg matrix format
-        out_flirt_file = "func2anat_flirt.mat"
+        out_flirt_file = op.abspath("func2anat_flirt.mat")
         cmdline = ["tkregister2",
                    "--s", subj,
                    "--mov", "template_space.nii.gz",
