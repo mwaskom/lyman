@@ -196,11 +196,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                 "restore_ts")
 
     # Recombine the timeseries frames into a 4D image
-    merge_ts = Node(fsl.Merge(merged_file="ts_restored.nii.gz",
+    merge_ts = Node(fsl.Merge(merged_file="timeseries.nii.gz",
                               dimension="t"), "merge_ts")
 
     # Take a temporal average of the timeseries
-    average_ts = Node(fsl.MeanImage(out_file="mean_restored.nii.gz"),
+    average_ts = Node(fsl.MeanImage(out_file="mean.nii.gz"),
                       "average_ts")
 
     # --- Workflow ouptut
@@ -357,8 +357,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "@mean_func")]),
         (realign_qc, file_output,
             [("params_file", "@realign_params"),
-             ("params_plot", "qc.@params_plot"),
-             ("target_plot", "qc.@target_plot")]),
+             ("params_plot", "params_plot.qc"),
+             ("target_plot", "target_plot.qc")]),
         (average_template, file_output,
             [("out_file", "@template")]),
         (se2template, file_output,
