@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import nibabel as nib
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     Function, IdentityInterface, SelectFiles, DataSink)
@@ -89,6 +90,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Reorientation of functional data
 
+    # TODO we all need to impelement removal of first n frames
+    # (not relevant for Prisma data but necessary elsewhere)
+    # Also the FSL workflow converts input data to float32.
+    # All of these steps can be done in pure Python, so perhaps a
+    # custom interface should be defined and replace these FSL calls
+
     reorient_ts = Node(fsl.Reorient2Std(), "reorient_ts")
     reorient_fm = reorient_ts.clone("reorient_fm")
     reorient_sb = reorient_ts.clone("reorient_sb")
@@ -96,12 +103,21 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     # --- Warpfield estimation using topup
 
     # Distortion warpfield estimation
+    # TODO this needs to be in the experiment file!
     phase_encoding = ["y", "y", "y", "y-", "y-", "y-"]
     readout_times = [1, 1, 1, 1, 1, 1]
     estimate_distortions = Node(fsl.TOPUP(encoding_direction=phase_encoding,
                                           readout_times=readout_times,
                                           config="b02b0.cnf"),
                                 "estimate_distortions")
+
+    fieldmap_qc = Node(DistortionGIF(phase_encoding=phase_encoding,
+                                     out_file="fieldmap.gif"),
+                       "fieldmap_qc")
+
+    unwarp_qc = Node(DistortionGIF(phase_encoding=phase_encoding,
+                                   out_file="unwarp.gif"),
+                     "unwarp_qc")
 
     # Average distortion-corrected spin-echo images
     average_fm = Node(fsl.MeanImage(out_file="fm_restored.nii.gz"),
@@ -117,7 +133,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Registration of SBRef to SE-EPI (with distortions)
 
-    sb2fm = Node(fsl.FLIRT(dof=6), "sb2fm")
+    sb2fm = Node(fsl.FLIRT(dof=6, interp="spline"), "sb2fm")
+
+    sb2fm_qc = Node(CoregGIF(out_file="coreg.gif"), "sb2fm_qc")
 
     # --- Registration of SE-EPI (without distortions) to Freesurfer anatomy
 
@@ -127,6 +145,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                  out_reg_file="fm2anat_tkreg.dat"),
                    "fm2anat")
 
+    # TODO anatomy registration QC
+
     # --- Definition of common cross-session space (template space)
 
     fm2template = JoinNode(TemplateTransform(),
@@ -134,6 +154,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                            joinsource="session_source",
                            joinfield=["session_info",
                                       "in_matrices", "in_volumes"])
+
+    # TODO template creation QC
 
     # --- Associate template-space transforms with data from correct session
 
@@ -264,8 +286,16 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("se", "in_file")]),
         (reorient_fm, estimate_distortions,
             [("out_file", "in_file")]),
+        (reorient_fm, fieldmap_qc,
+            [("out_file", "in_file")]),
+        (sesswise_info, fieldmap_qc,
+            [("session", "session")]),
         (estimate_distortions, select_warp,
             [("out_warps", "inlist")]),
+        (sesswise_info, unwarp_qc,
+            [("session", "session")]),
+        (estimate_distortions, unwarp_qc,
+            [("out_corrected", "in_file")]),
         (select_warp, mask_distortions,
             [("out", "in_file")]),
         (estimate_distortions, average_fm,
@@ -323,6 +353,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "reference")]),
         (mask_distortions, sb2fm,
             [("out_file", "ref_weight")]),
+        (sb2fm, sb2fm_qc,
+            [("out_file", "in_file")]),
+        (reorient_fm, sb2fm_qc,
+            [("out_file", "ref_file")]),
         (ts2sb, combine_rigids,
             [("mat_file", "in_file")]),
         (reorient_sb, realign_qc,
@@ -362,6 +396,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "@template")]),
         (fm2template, template_output,
             [("out_tkreg_file", "@tkreg_file")]),
+        (fieldmap_qc, template_output,
+            [("out_file", "qc.@fieldmap_gif")]),
+        (unwarp_qc, template_output,
+            [("out_file", "qc.@unwarp_gif")]),
+
         (runwise_info, timeseries_container,
             [("subject", "subject"),
              ("session", "session"),
@@ -372,6 +411,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("merged_file", "@restored_timeseries")]),
         (average_ts, timeseries_output,
             [("out_file", "@mean_func")]),
+        (sb2fm_qc, timeseries_output,
+            [("out_file", "qc.@sb2fm_gif")]),
         (realign_qc, timeseries_output,
             [("params_file", "@realign_params"),
              ("params_plot", "qc.@params_plot"),
@@ -383,11 +424,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
 class RealignmentReport(SimpleInterface):
 
-    class InputSpec(TraitedSpec):
+    class input_spec(TraitedSpec):
         target_file = File(exists=True)
         realign_params = File(exists=True)
 
-    class OutputSpec(TraitedSpec):
+    class output_spec(TraitedSpec):
         params_file = File(exists=True)
         params_plot = File(exists=True)
         target_plot = File(exists=True)
@@ -455,17 +496,96 @@ class RealignmentReport(SimpleInterface):
 
     def plot_target(self):
         """Plot a mosaic of the motion correction target image."""
-        return Mosaic(self.inputs.target_file, step=1)
+        return Mosaic(self.inputs.target_file, step=2)
+
+
+class CoregGIF(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        ref_file = traits.File(exists=True)
+        out_file = traits.File()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        in_img = nib.load(self.inputs.in_file)
+        ref_img = nib.load(self.inputs.ref_file)
+        out_fname = self.inputs.out_file
+
+        if len(ref_img.shape) > 3:
+            ref_data = ref_img.get_data()[..., 0]
+            ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
+
+        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname)
+
+        self._results["out_file"] = op.abspath(out_fname)
+
+        return runtime
+
+    def write_mosaic_gif(self, runtime, img1, img2, fname, **kws):
+
+        m1 = Mosaic(img1, **kws)
+        m1.savefig("img1.png")
+        m1.close()
+
+        m2 = Mosaic(img2, **kws)
+        m2.savefig("img2.png")
+        m2.close()
+
+        cmdline = ["convert", "-loop", "0", "-delay", "100",
+                   "img1.png", "img2.png", fname]
+
+        self.submit_cmdline(runtime, cmdline)
+
+
+class DistortionGIF(CoregGIF):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        out_file = traits.File()
+        phase_encoding = traits.List(traits.Str)
+        session = traits.Str()
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+        data = img.get_data()
+
+        imgs = []
+
+        pe = np.array(self.inputs.phase_encoding)
+        for enc in np.unique(pe):
+
+            enc_trs = pe == enc
+            enc_data = data[..., enc_trs].mean(axis=-1)
+
+            imgs.append(nib.Nifti1Image(enc_data, img.affine, img.header))
+
+        if self.inputs.session is None:
+            fname = self.inputs.out_file
+        else:
+            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
+        img1, img2 = imgs
+
+        self.write_mosaic_gif(runtime, img1, img2, fname,
+                              slice_dir="sag", tight=False)
+
+        self._results["out_file"] = op.abspath(fname)
+
+        return runtime
 
 
 class TemplateTransform(SimpleInterface):
 
-    class InputSpec(TraitedSpec):
+    class input_spec(TraitedSpec):
         session_info = traits.List(traits.Tuple())
         in_matrices = InputMultiPath(File(exists=True))
         in_volumes = InputMultiPath(File(exists=True))
 
-    class OutputSpec(TraitedSpec):
+    class output_spec(TraitedSpec):
         session_info = traits.List(traits.Tuple())
         out_template = File(exists=True)
         out_flirt_file = File(exists=True)
