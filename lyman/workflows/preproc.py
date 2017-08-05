@@ -202,6 +202,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     average_template = Node(fsl.MeanImage(out_file="func.nii.gz"),
                             "average_template")
 
+    template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
+                       "template_qc")
+
     # --- Motion correction of time series to SBRef (with distortions)
 
     ts2sb = Node(fsl.MCFLIRT(save_mats=True, save_plots=True),
@@ -352,6 +355,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("merged_file", "in_file")]),
         (average_template, func2anat_qc,
             [("out_file", "in_file")]),
+        (merge_template, template_qc,
+            [("merged_file", "in_file")]),
 
         # --- Time series realignment
 
@@ -422,6 +427,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "qc.@fm2anat_plot")]),
         (func2anat_qc, template_output,
             [("out_file", "qc.@func2anat_plot")]),
+        (template_qc, template_output,
+            [("out_file", "qc.@template_gif")]),
 
         (runwise_info, timeseries_container,
             [("subject", "subject"),
@@ -578,6 +585,48 @@ class AnatRegReport(SimpleInterface):
                            size=10, color="white")
         m.savefig(fname)
         m.close()
+
+        return runtime
+
+
+class FrameGIF(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        out_file = traits.File()
+        delay = traits.Int(100, usedefault=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+
+        assert len(img.shape) == 4
+        n_frames = img.shape[-1]
+
+        frame_pngs = []
+
+        for i in range(n_frames):
+
+            png_fname = "frame{:02d}.png".format(i)
+            frame_pngs.append(png_fname)
+
+            vol_data = img.get_data()[..., i]
+            vol = nib.Nifti1Image(vol_data, img.affine, img.header)
+            m = Mosaic(vol, tight=False, step=2)
+            m.savefig(png_fname)
+            m.close()
+
+        cmdline = ["convert",
+                   "-loop", "0",
+                   "-delay", str(self.inputs.delay)]
+        cmdline += frame_pngs
+        cmdline.append(self.inputs.out_file)
+
+        self.submit_cmdline(runtime, cmdline,
+                            out_file=op.abspath(self.inputs.out_file))
 
         return runtime
 
