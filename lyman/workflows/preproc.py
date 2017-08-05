@@ -10,7 +10,8 @@ import nibabel as nib
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     Function, IdentityInterface, SelectFiles, DataSink)
 from nipype.interfaces.base import (traits, File, TraitedSpec,
-                                    InputMultiPath, OutputMultiPath)
+                                    InputMultiPath, OutputMultiPath,
+                                    isdefined)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
 from moss.mosaic import Mosaic  # TODO move into lyman
@@ -146,6 +147,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                    "fm2anat")
 
     # TODO anatomy registration QC
+    fm2anat_qc = Node(AnatRegReport(out_file="func2anat.png"), "fm2anat_qc")
 
     # --- Definition of common cross-session space (template space)
 
@@ -156,6 +158,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                       "in_matrices", "in_volumes"])
 
     # TODO template creation QC
+    func2anat_qc = Node(AnatRegReport(out_file="func2anat.png"),
+                        "func2anat_qc")
 
     # --- Associate template-space transforms with data from correct session
 
@@ -304,6 +308,14 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("subject", "subject_id")]),
         (average_fm, fm2anat,
             [("out_file", "source_file")]),
+        (sesswise_info, fm2anat_qc,
+            [("subject", "subject_id"),
+             ("session", "session")]),
+        (average_fm, fm2anat_qc,
+            [("out_file", "in_file")]),
+        (fm2anat, fm2anat_qc,
+            [("out_reg_file", "reg_file"),
+             ("min_cost_file", "cost_file")]),
         (session_source, fm2template,
             [("session", "session_info")]),
         (reorient_fm, fm2template,
@@ -314,6 +326,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_matrices", "in_matrices"),
              ("out_template", "in_templates"),
              ("session_info", "session_info")]),
+        (sesswise_info, func2anat_qc,
+            [("subject", "subject_id")]),
+        (fm2template, func2anat_qc,
+            [("out_tkreg_file", "reg_file")]),
         (sesswise_info, select_sesswise,
             [("subject", "subject"),
              ("session", "session")]),
@@ -334,6 +350,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_files", "in_files")]),
         (merge_template, average_template,
             [("merged_file", "in_file")]),
+        (average_template, func2anat_qc,
+            [("out_file", "in_file")]),
 
         # --- Time series realignment
 
@@ -400,6 +418,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "qc.@fieldmap_gif")]),
         (unwarp_qc, template_output,
             [("out_file", "qc.@unwarp_gif")]),
+        (fm2anat_qc, template_output,
+            [("out_file", "qc.@fm2anat_plot")]),
+        (func2anat_qc, template_output,
+            [("out_file", "qc.@func2anat_plot")]),
 
         (runwise_info, timeseries_container,
             [("subject", "subject"),
@@ -499,6 +521,67 @@ class RealignmentReport(SimpleInterface):
         return Mosaic(self.inputs.target_file, step=2)
 
 
+class AnatRegReport(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        subject_id = traits.Str()
+        session = traits.Str()
+        in_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        cost_file = traits.File(exists=True)
+        out_file = traits.File()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Use the registration to transform the input file
+        registered_file = "func_in_anat.nii.gz"
+        cmdline = ["mri_vol2vol",
+                   "--mov", self.inputs.in_file,
+                   "--reg", self.inputs.reg_file,
+                   "--o", registered_file,
+                   "--fstarg",
+                   "--cubic"]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # Load the WM segmentation and a brain mask
+        mri_dir = op.join(os.environ["SUBJECTS_DIR"],
+                          self.inputs.subject_id, "mri")
+
+        wm_file = op.join(mri_dir, "wm.mgz")
+        wm_data = (nib.load(wm_file).get_data() > 0).astype(int)
+
+        aseg_file = op.join(mri_dir, "aseg.mgz")
+        mask = (nib.load(aseg_file).get_data() > 0).astype(int)
+
+        # Read the final registration cost
+        if isdefined(self.inputs.cost_file):
+            cost = np.loadtxt(self.inputs.cost_file)[0]
+        else:
+            cost = None
+
+        # Make a mosaic of the registration from func to wm seg
+        # TODO this should be an OrthoMosaic when that is implemented
+        if isdefined(self.inputs.session):
+            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
+        else:
+            fname = self.inputs.out_file
+        self._results["out_file"] = op.abspath(fname)
+
+        m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
+        m.plot_mask_edges("#DD2222")
+        if cost is not None:
+            m.fig.suptitle("Final cost: {:.2f}".format(cost),
+                           size=10, color="white")
+        m.savefig(fname)
+        m.close()
+
+        return runtime
+
+
 class CoregGIF(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -564,10 +647,10 @@ class DistortionGIF(CoregGIF):
 
             imgs.append(nib.Nifti1Image(enc_data, img.affine, img.header))
 
-        if self.inputs.session is None:
-            fname = self.inputs.out_file
-        else:
+        if isdefined(self.inputs.session):
             fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
+        else:
+            fname = self.inputs.out_file
         img1, img2 = imgs
 
         self.write_mosaic_gif(runtime, img1, img2, fname,
