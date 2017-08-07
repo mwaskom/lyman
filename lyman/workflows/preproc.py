@@ -157,11 +157,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Definition of common cross-session space (template space)
 
-    fm2template = JoinNode(TemplateTransform(),
-                           name="fm2template",
-                           joinsource="session_source",
-                           joinfield=["session_info",
-                                      "in_matrices", "in_volumes"])
+    define_template = JoinNode(DefineTemplateSpace(),
+                               name="define_template",
+                               joinsource="session_source",
+                               joinfield=["session_info",
+                                          "in_matrices", "in_volumes"])
 
     func2anat_qc = Node(AnatRegReport(out_file="func2anat.png"),
                         "func2anat_qc")
@@ -337,19 +337,19 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Creation of cross-session subject-specific template
 
-        (session_source, fm2template,
+        (session_source, define_template,
             [("session", "session_info")]),
-        (reorient_fm, fm2template,
+        (reorient_fm, define_template,
             [("out_file", "in_volumes")]),
-        (fm2anat, fm2template,
+        (fm2anat, define_template,
             [("out_fsl_file", "in_matrices")]),
         (sesswise_info, func2anat_qc,
             [("subject", "subject_id")]),
-        (fm2template, func2anat_qc,
+        (define_template, func2anat_qc,
             [("out_tkreg_file", "reg_file")]),
         (average_template, func2anat_qc,
             [("out_file", "in_file")]),
-        (fm2template, select_sesswise,
+        (define_template, select_sesswise,
             [("out_matrices", "in_matrices"),
              ("out_template", "in_templates"),
              ("session_info", "session_info")]),
@@ -363,7 +363,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (estimate_distortions, restore_fm,
             [("out_mats", "premat"),
              ("out_warps", "field_file")]),
-        (fm2template, restore_fm,
+        (define_template, restore_fm,
             [("out_template", "ref_file")]),
         (select_sesswise, restore_fm,
             [("out_matrix", "postmat")]),
@@ -420,13 +420,13 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "premat")]),
         (select_warp, restore_ts_frames,
             [("out", "field_file")]),
-        (fm2template, select_runwise,
+        (define_template, select_runwise,
             [("out_matrices", "in_matrices"),
              ("session_info", "session_info")]),
         (runwise_info, select_runwise,
             [("subject", "subject"),
              ("session", "session")]),
-        (fm2template, restore_ts_frames,
+        (define_template, restore_ts_frames,
             [("out_template", "ref_file")]),
         (select_runwise, restore_ts_frames,
             [("out_matrix", "postmat")]),
@@ -452,8 +452,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("path", "container")]),
         (average_template, template_output,
             [("out_file", "@template")]),
-        (fm2template, template_output,
-            [("out_tkreg_file", "@tkreg_file")]),
+        (define_template, template_output,
+            [("out_tkreg_file", "@tkr_file"),
+             ("out_flirt_file", "@fsl_file")]),
         (fieldmap_qc, template_output,
             [("out_file", "qc.@fieldmap_gif")]),
         (unwarp_qc, template_output,
@@ -790,13 +791,13 @@ class TemplateTransform(SimpleInterface):
         self.submit_cmdline(runtime, cmdline, out_matrices=out_matrices)
 
         # -- Invert the anat2temp transformation
-        out_tkreg_file = op.abspath("func2anat_flirt.mat")
+        out_flirt_file = op.abspath("func2anat_fsl.mat")
         cmdline = ["convert_xfm",
-                   "-omat", out_tkreg_file,
+                   "-omat", out_flirt_file,
                    "-inverse",
                    "anat2func_flirt.mat"]
 
-        self.submit_cmdline(runtime, cmdline, out_tkreg_file=out_tkreg_file)
+        self.submit_cmdline(runtime, cmdline, out_flirt_file=out_flirt_file)
 
         # -- Transform first volume into template space to get the geometry
         out_template = op.abspath("template_space.nii.gz")
@@ -810,7 +811,7 @@ class TemplateTransform(SimpleInterface):
         self.submit_cmdline(runtime, cmdline, out_template=out_template)
 
         # -- Convert the FSL matrices to tkreg matrix format
-        out_flirt_file = op.abspath("func2anat_flirt.mat")
+        out_tkreg_file = op.abspath("func2anat_tkr.dat")
         cmdline = ["tkregister2",
                    "--s", subj,
                    "--mov", "template_space.nii.gz",
@@ -818,6 +819,6 @@ class TemplateTransform(SimpleInterface):
                    "--reg", out_tkreg_file,
                    "--noedit"]
 
-        self.submit_cmdline(runtime, cmdline, out_flirt_file=out_flirt_file)
+        self.submit_cmdline(runtime, cmdline, out_tkreg_file=out_tkreg_file)
 
         return runtime
