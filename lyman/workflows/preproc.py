@@ -2,7 +2,9 @@ import os
 import os.path as op
 
 import numpy as np
+from scipy import ndimage
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import nibabel as nib
 
@@ -466,7 +468,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "@template")]),
         (define_template, template_output,
             [("out_tkreg_file", "@tkr_file"),
-             ("out_flirt_file", "@fsl_file")]),
+             ("out_flirt_file", "@fsl_file")]),  # TODO do we need this?
+        (anat_segment, template_output,
+            [("seg_file", "@seg_file"),
+             ("mask_file", "@mask_file"),
+             ("seg_plot", "qc.@seg_plot"),
+             ("mask_plot", "qc.@mask_plot")]),
         (fieldmap_qc, template_output,
             [("out_file", "qc.@fieldmap_gif")]),
         (unwarp_qc, template_output,
@@ -629,7 +636,7 @@ class AnatRegReport(SimpleInterface):
         self._results["out_file"] = op.abspath(fname)
 
         m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
-        m.plot_mask_edges("#DD2222")
+        m.plot_mask_edges()
         if cost is not None:
             m.fig.suptitle("Final cost: {:.2f}".format(cost),
                            size=10, color="white")
@@ -864,6 +871,8 @@ class AnatomicalSegmentation(SimpleInterface):
 
         self.submit_cmdline(runtime, cmdline)
 
+        # --- Coarse segmentation into anatomical components
+
         # Load the template-space wmparc and reclassify voxels
 
         fs_img = nib.load(fs_fname)
@@ -873,8 +882,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         seg_ids = [
             np.arange(1000, 3000),  # Cortical gray matter
-            [10, 11, 12, 13, 17, 18,  # Subcortical gray matter
-             49, 50, 51, 52, 53, 54],
+            [10, 11, 12, 13, 17, 18, 49, 50, 51, 52, 53, 54],  # Subcortical
             [16, 28, 60],  # Brain stem and ventral diencephalon
             [8, 47],  # Cerebellar gray matter
             np.arange(3000, 5000),  # Superficial ("cortical") white matter
@@ -887,10 +895,54 @@ class AnatomicalSegmentation(SimpleInterface):
             mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
             seg_data[mask] = seg_val
 
-        out_seg = op.abspath("seg.nii.gz")
+        seg_file = op.abspath("seg.nii.gz")
         seg_img = nib.Nifti1Image(seg_data, fs_img.affine, fs_img.header)
-        seg_img.to_filename(out_seg)
-        self._results["seg_file"] = out_seg
+        seg_img.to_filename(seg_file)
+        self._results["seg_file"] = seg_file
+
+        # --- Whole brain mask
+
+        # Binarize the segmentation and dilate to generate a brain mask
+
+        brainmask = seg_data > 0
+        vox_mm = np.mean(fs_img.header.get_zooms()[:3])
+        iterations = int(np.ceil(4 / vox_mm))
+        brainmask = ndimage.binary_dilation(brainmask, iterations=iterations)
+        brainmask = ndimage.binary_closing(brainmask)
+        brainmask = ndimage.binary_fill_holes(brainmask)
+
+        mask_file = op.abspath("brainmask.nii.gz")
+        mask_img = nib.Nifti1Image(brainmask, fs_img.affine, fs_img.header)
+        mask_img.to_filename(mask_file)
+        self._results["mask_file"] = mask_file
+
+        # --- Surface vertex mapping
+
+        # --- Generate QC mosaics
+
+        # Anatomical segmentation
+
+        seg_plot = op.abspath("seg.png")
+        self._results["seg_plot"] = seg_plot
+        seg_cmap = mpl.colors.ListedColormap(
+            ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
+             '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
+         )
+        m_seg = Mosaic(self.inputs.template_file, seg_img, mask_img,
+                       step=2, tight=True, show_mask=False)
+        m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
+        m_seg.savefig(seg_plot)
+        m_seg.close()
+
+        # Brain mask
+
+        mask_plot = op.abspath("brainmask.png")
+        self._results["mask_plot"] = mask_plot
+        m_mask = Mosaic(self.inputs.template_file, mask_img, mask_img,
+                        step=2, tight=True, show_mask=False)
+        m_mask.plot_mask()
+        m_mask.savefig(mask_plot)
+        m_mask.close()
 
         return runtime
 
