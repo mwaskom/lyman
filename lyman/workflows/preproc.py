@@ -3,7 +3,6 @@ import os.path as op
 
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
 import nibabel as nib
 
@@ -492,22 +491,21 @@ class RealignmentReport(SimpleInterface):
 
     def plot_motion(self, df):
         """Plot the timecourses of realignment parameters."""
-        with sns.axes_style("whitegrid"):
-            fig, axes = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
+        fig, axes = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
 
         # Trim off all but the axis name
         def axis(s):
             return s[-1]
 
         # Plot rotations
-        pal = sns.color_palette("Reds_d", 3)
+        rot_pal = ["#8b312d", "#e33029", "#f06855"]
         rot_df = df.filter(like="rot").apply(np.rad2deg).rename(columns=axis)
-        rot_df.plot(ax=axes[0], color=pal, lw=1.5)
+        rot_df.plot(ax=axes[0], color=rot_pal, lw=1.5)
 
         # Plot translations
-        pal = sns.color_palette("Blues_d", 3)
+        trans_pal = ["#355d9a", "#3787c0", "#72acd3"]
         trans_df = df.filter(like="trans").rename(columns=axis)
-        trans_df.plot(ax=axes[1], color=pal, lw=1.5)
+        trans_df.plot(ax=axes[1], color=trans_pal, lw=1.5)
 
         # Label the graphs
         axes[0].set_xlim(0, len(df) - 1)
@@ -515,8 +513,7 @@ class RealignmentReport(SimpleInterface):
         axes[1].axhline(0, c=".4", ls="--", zorder=1)
 
         for ax in axes:
-            ax.legend(frameon=True, ncol=3, loc="best")
-            ax.legend_.get_frame().set_color("white")
+            ax.legend(ncol=3, loc="best")
 
         axes[0].set_ylabel("Rotations (degrees)")
         axes[1].set_ylabel("Translations (mm)")
