@@ -108,6 +108,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     reorient_fm = reorient_ts.clone("reorient_fm")
     reorient_sb = reorient_ts.clone("reorient_sb")
 
+    raw_qc = Node(TimeseriesGIF(out_file="raw.gif"), "raw_qc")
+
     # --- Warpfield estimation using topup
 
     # Distortion warpfield estimation
@@ -384,6 +386,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("ts", "in_file")]),
         (runwise_input, reorient_sb,
             [("sb", "in_file")]),
+        (reorient_ts, raw_qc,
+            [("out_file", "in_file")]),
         (reorient_ts, ts2sb,
             [("out_file", "in_file")]),
         (reorient_sb, ts2sb,
@@ -478,6 +482,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("merged_file", "@restored_timeseries")]),
         (average_ts, timeseries_output,
             [("out_file", "@mean_func")]),
+        (raw_qc, timeseries_output,
+            [("out_file", "qc.@raw_gif")]),
         (sb2fm_qc, timeseries_output,
             [("out_file", "qc.@sb2fm_gif")]),
         (realign_qc, timeseries_output,
@@ -625,48 +631,6 @@ class AnatRegReport(SimpleInterface):
         return runtime
 
 
-class FrameGIF(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        out_file = traits.File()
-        delay = traits.Int(100, usedefault=True)
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        img = nib.load(self.inputs.in_file)
-
-        assert len(img.shape) == 4
-        n_frames = img.shape[-1]
-
-        frame_pngs = []
-
-        for i in range(n_frames):
-
-            png_fname = "frame{:02d}.png".format(i)
-            frame_pngs.append(png_fname)
-
-            vol_data = img.get_data()[..., i]
-            vol = nib.Nifti1Image(vol_data, img.affine, img.header)
-            m = Mosaic(vol, tight=False, step=2)
-            m.savefig(png_fname)
-            m.close()
-
-        cmdline = ["convert",
-                   "-loop", "0",
-                   "-delay", str(self.inputs.delay)]
-        cmdline += frame_pngs
-        cmdline.append(self.inputs.out_file)
-
-        self.submit_cmdline(runtime, cmdline,
-                            out_file=op.abspath(self.inputs.out_file))
-
-        return runtime
-
-
 class CoregGIF(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -746,7 +710,114 @@ class DistortionGIF(CoregGIF):
         return runtime
 
 
-class TemplateTransform(SimpleInterface):
+class FrameGIF(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        out_file = traits.File()
+        delay = traits.Int(100, usedefault=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+
+        assert len(img.shape) == 4
+        n_frames = img.shape[-1]
+
+        frame_pngs = []
+
+        for i in range(n_frames):
+
+            png_fname = "frame{:02d}.png".format(i)
+            frame_pngs.append(png_fname)
+
+            vol_data = img.get_data()[..., i]
+            vol = nib.Nifti1Image(vol_data, img.affine, img.header)
+            m = Mosaic(vol, tight=False, step=2)
+            m.savefig(png_fname)
+            m.close()
+
+        out_file = op.abspath(self.inputs.out_file)
+        cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
+        cmdline.extend(frame_pngs)
+        cmdline.append(out_file)
+
+        self.submit_cmdline(runtime, cmdline, out_file=self.inputs.out_file)
+
+        return runtime
+
+
+class TimeseriesGIF(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        out_file = traits.File()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        os.mkdir("png")
+
+        img = nib.as_closest_canonical(nib.load(self.inputs.in_file))
+        nx, ny, nz, nt = img.shape
+
+        width = 5
+        height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
+
+        f, axes = plt.subplots(ncols=3, figsize=(width, height))
+        for ax in axes:
+            ax.set_axis_off()
+
+        data = img.get_data()
+        vmin, vmax = np.percentile(data, [2, 98])
+
+        kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
+        im_x = axes[0].imshow(np.zeros((nz, ny)), **kws)
+        im_y = axes[1].imshow(np.zeros((nz, nx)), **kws)
+        im_z = axes[2].imshow(np.zeros((ny, nx)), **kws)
+
+        f.subplots_adjust(0, 0, 1, 1, 0, 0)
+
+        x, y, z = nx // 2, ny // 2, nz // 2
+
+        text = f.text(0, 0, "",
+                      size=10, ha="left", va="bottom",
+                      color="w", backgroundcolor="0")
+
+        pngs = []
+
+        for t in range(nt):
+
+            vol = data[..., t]
+
+            im_x.set_data(np.rot90(vol[x, :, :]))
+            im_y.set_data(np.rot90(vol[:, y, :]))
+            im_z.set_data(np.rot90(vol[:, :, z]))
+
+            if not t % 10:
+                text.set_text("T: {:d}".format(t))
+
+            frame_png = "png/{:04d}.png".format(t)
+            pngs.append(frame_png)
+            f.savefig(frame_png,
+                      facecolor="0", edgecolor="0")
+
+        out_file = op.abspath(self.inputs.out_file)
+        cmdline = ["convert", "-delay", "20", "-loop", "0"]
+        cmdline.extend(pngs)
+        cmdline.append(out_file)
+
+        self.submit_cmdline(runtime, cmdline, out_file=out_file)
+
+        return runtime
+
+
+class DefineTemplateSpace(SimpleInterface):
 
     class input_spec(TraitedSpec):
         session_info = traits.List(traits.Tuple())
