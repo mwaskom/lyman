@@ -202,7 +202,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     average_template = Node(fsl.MeanImage(out_file="func.nii.gz"),
                             "average_template")
 
-    template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
+    template_qc = Node(FrameGIF(out_file="func_frames.gif", delay=20),
                        "template_qc")
 
     # --- Motion correction of time series to SBRef (with distortions)
@@ -250,7 +250,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                              "timeseries_output")
 
     def define_template_container(subject):
-        return "{}/preproc/template".format(subject)
+        return "{}/template".format(subject)
 
     template_container = Node(Function("subject",
                                        "path", define_template_container),
