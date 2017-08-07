@@ -685,6 +685,7 @@ class DistortionGIF(CoregGIF):
 
         img = nib.load(self.inputs.in_file)
         data = img.get_data()
+        lims = 0, np.percentile(data, 98)
 
         imgs = []
 
@@ -703,7 +704,7 @@ class DistortionGIF(CoregGIF):
         img1, img2 = imgs
 
         self.write_mosaic_gif(runtime, img1, img2, fname,
-                              slice_dir="sag", tight=False)
+                              slice_dir="sag", tight=False, anat_lims=lims)
 
         self._results["out_file"] = op.abspath(fname)
 
@@ -723,6 +724,9 @@ class FrameGIF(SimpleInterface):
     def _run_interface(self, runtime):
 
         img = nib.load(self.inputs.in_file)
+        data = img.get_data()
+
+        lims = 0, np.percentile(data, 98)
 
         assert len(img.shape) == 4
         n_frames = img.shape[-1]
@@ -734,9 +738,9 @@ class FrameGIF(SimpleInterface):
             png_fname = "frame{:02d}.png".format(i)
             frame_pngs.append(png_fname)
 
-            vol_data = img.get_data()[..., i]
+            vol_data = data[..., i]
             vol = nib.Nifti1Image(vol_data, img.affine, img.header)
-            m = Mosaic(vol, tight=False, step=2)
+            m = Mosaic(vol, tight=False, step=2, anat_lims=lims)
             m.savefig(png_fname)
             m.close()
 
@@ -745,7 +749,7 @@ class FrameGIF(SimpleInterface):
         cmdline.extend(frame_pngs)
         cmdline.append(out_file)
 
-        self.submit_cmdline(runtime, cmdline, out_file=self.inputs.out_file)
+        self.submit_cmdline(runtime, cmdline, out_file=out_file)
 
         return runtime
 

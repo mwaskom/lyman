@@ -11,7 +11,8 @@ from six import string_types
 class Mosaic(object):
 
     def __init__(self, anat=None, stat=None, mask=None, n_col=9, step=2,
-                 tight=True, show_mask=True, slice_dir="axial"):
+                 tight=True, show_mask=True, slice_dir="axial",
+                 anat_lims=None):
         """Plot a mosaic of axial slices through an MRI volume.
 
         Parameters
@@ -41,6 +42,8 @@ class Mosaic(object):
             of the mask image.
         slice_dir : axial | coronal | sagital
             Direction to slice the mosaic on.
+        anat_lims : pair of floats
+            Limits for the anatomical (background) image colormap
 
         """
 
@@ -122,7 +125,7 @@ class Mosaic(object):
 
         # Initialize the figure and plot the constant info
         self._setup_figure()
-        self._plot_anat()
+        self._plot_anat(anat_lims)
         if mask is not None and show_mask:
             self._plot_inverse_mask()
 
@@ -152,10 +155,13 @@ class Mosaic(object):
         [ax.set_axis_off() for ax in self.axes.flat]
         self.fig.subplots_adjust(0, 0, 1, 1, 0, 0)
 
-    def _plot_anat(self):
+    def _plot_anat(self, lims=None):
         """Plot the anatomy in grayscale."""
         anat_data = self.anat_img.get_data()
-        vmin, vmax = 0, np.percentile(anat_data[self.fov], 99)
+        if lims is None:
+            vmin, vmax = 0, np.percentile(anat_data[self.fov], 99)
+        else:
+            vmin, vmax = lims
         anat_fov = anat_data[self.x_slice, self.y_slice, self.z_slice]
         self._map("imshow", anat_fov, cmap="gray", vmin=vmin, vmax=vmax)
 
