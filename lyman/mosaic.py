@@ -321,7 +321,7 @@ class Mosaic(object):
         if colorbar:
             self._add_single_colorbar(vmin, vmax, cmap, fmt)
 
-    def plot_mask(self, color="#ddcccc", alpha=.66):
+    def plot_mask(self, color="#dd2222", alpha=.66):
         """Plot the statistical volume as a binary mask."""
         mask_data = self.stat_img.get_data()[self.x_slice,
                                              self.y_slice,
@@ -334,7 +334,7 @@ class Mosaic(object):
         self._map("imshow", mask_data, cmap=cmap, vmin=.5, vmax=1.5,
                   interpolation="nearest", alpha=alpha)
 
-    def plot_mask_edges(self, color="#ddcccc", linewidth=1):
+    def plot_mask_edges(self, color="#dd2222", linewidth=1):
         """Plot the edges of possibly multiple masks to show overlap."""
         cmap = mpl.colors.ListedColormap([color])
 
@@ -401,12 +401,14 @@ class Mosaic(object):
         bar_data = np.linspace(0, 1, 256).reshape(1, 256)
         cbar_ax.pcolormesh(bar_data, cmap=cmap)
 
-        fmt = "{:" + fmt + "}"
+        if fmt is not None:
 
-        self.fig.text(.29, .005 + cbar_height * .5, fmt.format(vmin),
-                      color="white", size=14, ha="right", va="center")
-        self.fig.text(.71, .005 + cbar_height * .5, fmt.format(vmax),
-                      color="white", size=14, ha="left", va="center")
+            fmt = "{:" + fmt + "}"
+
+            self.fig.text(.29, .005 + cbar_height * .5, fmt.format(vmin),
+                          color="white", size=14, ha="right", va="center")
+            self.fig.text(.71, .005 + cbar_height * .5, fmt.format(vmax),
+                          color="white", size=14, ha="left", va="center")
 
     def _add_double_colorbar(self, vmin, vmax, pos_cmap, neg_cmap, fmt):
         """Add colorbars for a positive and a negative overlay."""
@@ -426,17 +428,19 @@ class Mosaic(object):
         pos_ax.pcolormesh(bar_data, cmap=pos_cmap)
         neg_ax.pcolormesh(bar_data, cmap=neg_cmap)
 
-        fmt = "{:" + fmt + "}"
+        if fmt is not None:
 
-        self.fig.text(.54, .005 + cbar_height * .5, fmt.format(vmin),
-                      color="white", size=14, ha="right", va="center")
-        self.fig.text(.86, .005 + cbar_height * .5, fmt.format(vmax),
-                      color="white", size=14, ha="left", va="center")
+            fmt = "{:" + fmt + "}"
 
-        self.fig.text(.14, .005 + cbar_height * .5, fmt.format(-vmax),
-                      color="white", size=14, ha="right", va="center")
-        self.fig.text(.46, .005 + cbar_height * .5, fmt.format(-vmin),
-                      color="white", size=14, ha="left", va="center")
+            self.fig.text(.54, .005 + cbar_height * .5, fmt.format(vmin),
+                          color="white", size=14, ha="right", va="center")
+            self.fig.text(.86, .005 + cbar_height * .5, fmt.format(vmax),
+                          color="white", size=14, ha="left", va="center")
+
+            self.fig.text(.14, .005 + cbar_height * .5, fmt.format(-vmax),
+                          color="white", size=14, ha="right", va="center")
+            self.fig.text(.46, .005 + cbar_height * .5, fmt.format(-vmin),
+                          color="white", size=14, ha="left", va="center")
 
     def _get_cmap(self, cmap):
         """Parse a string spec of a cubehelix palette."""
