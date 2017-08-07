@@ -32,6 +32,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Workflow parameterization
 
+    # TODO The iterable creation should be moved to separate functions
+    # and tested well, as the logic is fairly complicated. Also there
+    # should be a validation of the session info with informative errors
+
     subject_iterables = list(sess_info.keys())
     subject_source = Node(IdentityInterface(["subject"]),
                           name="subject_source",
@@ -57,6 +61,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                       iterables=("run", run_iterables))
 
     # --- Semantic information
+
+    # These nodes simply unpack the tuples that are used as iterables
+    # (necessary to organize the workflow parameterization properly)
+    # into named fields that can be connected where appropriate below
 
     def info_func(info_tuple):
         try:
@@ -90,7 +98,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # --- Reorientation of functional data
 
-    # TODO we all need to impelement removal of first n frames
+    # TODO We also need to impelement removal of first n frames
     # (not relevant for Prisma data but necessary elsewhere)
     # Also the FSL workflow converts input data to float32.
     # All of these steps can be done in pure Python, so perhaps a
@@ -145,7 +153,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                  out_reg_file="fm2anat_tkreg.dat"),
                    "fm2anat")
 
-    # TODO anatomy registration QC
     fm2anat_qc = Node(AnatRegReport(out_file="func2anat.png"), "fm2anat_qc")
 
     # --- Definition of common cross-session space (template space)
@@ -156,11 +163,15 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                            joinfield=["session_info",
                                       "in_matrices", "in_volumes"])
 
-    # TODO template creation QC
     func2anat_qc = Node(AnatRegReport(out_file="func2anat.png"),
                         "func2anat_qc")
 
     # --- Associate template-space transforms with data from correct session
+
+    # The logic here is a little complex. The template creation node collapses
+    # the session-wise iterables and returns list of files that then need
+    # to hook back into the iterable parameterization so that they can be
+    # associated with data from the correct session when they are applied.
 
     def select_transform_func(session_info, subject, session, in_matrices):
 
@@ -286,7 +297,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
              ("session", "session"),
              ("run", "run")]),
 
-        # --- Distortion correction and template definition
+        # --- SE-EPI fieldmap processing and template creation
+
+        # Phase-encode distortion estimation
 
         (sesswise_input, reorient_fm,
             [("se", "in_file")]),
@@ -306,6 +319,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out", "in_file")]),
         (estimate_distortions, average_fm,
             [("out_corrected", "in_file")]),
+
+        # Registration of corrected SE-EPI to anatomy
+
         (sesswise_info, fm2anat,
             [("subject", "subject_id")]),
         (average_fm, fm2anat,
@@ -318,20 +334,25 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (fm2anat, fm2anat_qc,
             [("out_reg_file", "reg_file"),
              ("min_cost_file", "cost_file")]),
+
+        # Creation of cross-session subject-specific template
+
         (session_source, fm2template,
             [("session", "session_info")]),
         (reorient_fm, fm2template,
             [("out_file", "in_volumes")]),
         (fm2anat, fm2template,
             [("out_fsl_file", "in_matrices")]),
-        (fm2template, select_sesswise,
-            [("out_matrices", "in_matrices"),
-             ("out_template", "in_templates"),
-             ("session_info", "session_info")]),
         (sesswise_info, func2anat_qc,
             [("subject", "subject_id")]),
         (fm2template, func2anat_qc,
             [("out_tkreg_file", "reg_file")]),
+        (average_template, func2anat_qc,
+            [("out_file", "in_file")]),
+        (fm2template, select_sesswise,
+            [("out_matrices", "in_matrices"),
+             ("out_template", "in_templates"),
+             ("session_info", "session_info")]),
         (sesswise_info, select_sesswise,
             [("subject", "subject"),
              ("session", "session")]),
@@ -352,12 +373,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_files", "in_files")]),
         (merge_template, average_template,
             [("merged_file", "in_file")]),
-        (average_template, func2anat_qc,
-            [("out_file", "in_file")]),
         (merge_template, template_qc,
             [("merged_file", "in_file")]),
 
-        # --- Time series realignment
+        # --- Time series spatial processing
+
+        # Registration of each frame to SBRef image
 
         (runwise_input, reorient_ts,
             [("ts", "in_file")]),
@@ -367,8 +388,13 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_file")]),
         (reorient_sb, ts2sb,
             [("out_file", "ref_file")]),
-        (reorient_ts, split_ts,
-            [("out_file", "in_file")]),
+        (reorient_sb, realign_qc,
+            [("out_file", "target_file")]),
+        (ts2sb, realign_qc,
+            [("par_file", "realign_params")]),
+
+        # Registration of SBRef volume to SE-EPI fieldmap
+
         (reorient_sb, sb2fm,
             [("out_file", "in_file")]),
         (reorient_fm, sb2fm,
@@ -379,14 +405,15 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_file")]),
         (reorient_fm, sb2fm_qc,
             [("out_file", "ref_file")]),
+
+        # Single-interpolation spatial realignment and unwarping
+
         (ts2sb, combine_rigids,
             [("mat_file", "in_file")]),
-        (reorient_sb, realign_qc,
-            [("out_file", "target_file")]),
-        (ts2sb, realign_qc,
-            [("par_file", "realign_params")]),
         (sb2fm, combine_rigids,
             [("out_matrix_file", "in_file2")]),
+        (reorient_ts, split_ts,
+            [("out_file", "in_file")]),
         (split_ts, restore_ts_frames,
             [("out_files", "in_file")]),
         (combine_rigids, restore_ts_frames,
@@ -405,10 +432,19 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_matrix", "postmat")]),
         (restore_ts_frames, merge_ts,
             [("out_file", "in_files")]),
+
         (merge_ts, average_ts,
             [("merged_file", "in_file")]),
 
+        # --- Segementation of anatomical tissue in functional space
+
+
+        # Estimation of descriptive temporal statistics
+
+
         # --- Persistent data storage
+
+        # Ouputs associated with the subject-specific template
 
         (sesswise_info, template_container,
             [("subject", "subject")]),
@@ -428,6 +464,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "qc.@func2anat_plot")]),
         (template_qc, template_output,
             [("out_file", "qc.@template_gif")]),
+
+        # Ouputs associated with each scanner run
 
         (runwise_info, timeseries_container,
             [("subject", "subject"),
