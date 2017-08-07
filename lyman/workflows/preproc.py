@@ -249,11 +249,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     output_dir = op.join(proj_info.analysis_dir, exp_info.name)
 
     def define_timeseries_container(subject, session, run):
-        return "{}/preproc/{}_{}".format(subject, session, run)
+        return "{}/timeseries/{}_{}".format(subject, session, run)
 
     timeseries_container = Node(Function(["subject", "session", "run"],
                                          "path", define_timeseries_container),
-                                "runwise_container")
+                                "timeseries_container")
 
     timeseries_output = Node(DataSink(base_directory=output_dir,
                                       parameterization=False),
