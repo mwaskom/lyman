@@ -213,11 +213,15 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     merge_template = Node(fsl.Merge(dimension="t"), name="merge_template")
 
-    average_template = Node(fsl.MeanImage(out_file="func.nii.gz"),
-                            "average_template")
+    average_template = Node(fsl.MeanImage(), "average_template")
+
+    mask_template = Node(fsl.ApplyMask(out_file="func.nii.gz"),
+                         "mask_template")
 
     template_qc = Node(FrameGIF(out_file="func_frames.gif", delay=20),
                        "template_qc")
+
+    # TODO also make a static png of the final template?
 
     # --- Segementation of anatomical tissue in functional space
 
@@ -381,6 +385,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_files", "in_files")]),
         (merge_template, average_template,
             [("merged_file", "in_file")]),
+        (average_template, mask_template,
+            [("out_file", "in_file")]),
+        (anat_segment, mask_template,
+            [("mask_file", "mask_file")]),
         (merge_template, template_qc,
             [("merged_file", "in_file")]),
 
@@ -464,7 +472,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("subject", "subject")]),
         (template_container, template_output,
             [("path", "container")]),
-        (average_template, template_output,
+        (mask_template, template_output,
             [("out_file", "@template")]),
         (define_template, template_output,
             [("out_tkreg_file", "@tkr_file"),
