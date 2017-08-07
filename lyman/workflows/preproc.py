@@ -14,7 +14,7 @@ from nipype.interfaces.base import (traits, File, TraitedSpec,
                                     isdefined)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
-from moss.mosaic import Mosaic  # TODO move into lyman
+from ..mosaic import Mosaic
 from ..graphutils import SimpleInterface
 
 
