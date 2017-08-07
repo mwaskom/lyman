@@ -108,7 +108,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     reorient_fm = reorient_ts.clone("reorient_fm")
     reorient_sb = reorient_ts.clone("reorient_sb")
 
-    raw_qc = Node(TimeseriesGIF(out_file="raw.gif"), "raw_qc")
+    raw_qc = Node(TimeSeriesGIF(out_file="raw.gif"), "raw_qc")
 
     # --- Warpfield estimation using topup
 
@@ -754,10 +754,11 @@ class FrameGIF(SimpleInterface):
         return runtime
 
 
-class TimeseriesGIF(SimpleInterface):
+class TimeSeriesGIF(SimpleInterface):
 
     class input_spec(TraitedSpec):
         in_file = traits.File(exists=True)
+        delay = traits.Int(20, usedefault=True)
         out_file = traits.File()
 
     class output_spec(TraitedSpec):
@@ -812,7 +813,7 @@ class TimeseriesGIF(SimpleInterface):
                       facecolor="0", edgecolor="0")
 
         out_file = op.abspath(self.inputs.out_file)
-        cmdline = ["convert", "-delay", "20", "-loop", "0"]
+        cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
         cmdline.extend(pngs)
         cmdline.append(out_file)
 
