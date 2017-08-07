@@ -217,6 +217,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     template_qc = Node(FrameGIF(out_file="func_frames.gif", delay=20),
                        "template_qc")
 
+    # --- Segementation of anatomical tissue in functional space
+
+    anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
+
     # --- Motion correction of time series to SBRef (with distortions)
 
     ts2sb = Node(fsl.MCFLIRT(save_mats=True, save_plots=True),
@@ -378,6 +382,14 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (merge_template, template_qc,
             [("merged_file", "in_file")]),
 
+        # Segementation of anatomical tissue in functional space
+
+        (define_template, anat_segment,
+            [("subject_id", "subject_id"),
+             ("out_tkreg_file", "reg_file")]),
+        (average_template, anat_segment,
+            [("out_file", "template_file")]),
+
         # --- Time series spatial processing
 
         # Registration of each frame to SBRef image
@@ -440,11 +452,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (merge_ts, average_ts,
             [("merged_file", "in_file")]),
 
-        # --- Segementation of anatomical tissue in functional space
-
-
         # Estimation of descriptive temporal statistics
-
 
         # --- Persistent data storage
 
@@ -822,6 +830,71 @@ class TimeSeriesGIF(SimpleInterface):
         return runtime
 
 
+class AnatomicalSegmentation(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        subject_id = traits.Str()
+        template_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        seg_file = traits.File(exists=True)
+        seg_plot = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        mask_plot = traits.File(exists=True)
+        surf_file = traits.File(exists=True)
+        surf_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Transform the wmparc image into functional space
+        # (we are calling this the aseg but using the wmparc to
+        # separate out cortical and deep white matter)
+        data_dir = op.join(os.environ["SUBJECTS_DIR"],
+                           self.inputs.subject_id)
+
+        fs_fname = "wmparc.nii.gz"
+        cmdline = ["mri_vol2vol",
+                   "--nearest",
+                   "--inv",
+                   "--mov", self.inputs.template_file,
+                   "--fstarg", "wmparc.mgz",
+                   "--reg", self.inputs.reg_file,
+                   "--o", fs_fname]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # Load the template-space wmparc and reclassify voxels
+
+        fs_img = nib.load(fs_fname)
+        fs_data = fs_img.get_data()
+
+        seg_data = np.zeros_like(fs_data)
+
+        seg_ids = [
+            np.arange(1000, 3000),  # Cortical gray matter
+            [10, 11, 12, 13, 17, 18,  # Subcortical gray matter
+             49, 50, 51, 52, 53, 54],
+            [16, 28, 60],  # Brain stem and ventral diencephalon
+            [8, 47],  # Cerebellar gray matter
+            np.arange(3000, 5000),  # Superficial ("cortical") white matter
+            [5001, 5002],  # Deep white matter
+            [7, 46],  # Cerebellar white matter
+            [4, 43, 31, 63],  # Lateral ventricle CSF
+        ]
+
+        for seg_val, id_vals in enumerate(seg_ids, 1):
+            mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
+            seg_data[mask] = seg_val
+
+        out_seg = op.abspath("seg.nii.gz")
+        seg_img = nib.Nifti1Image(seg_data, fs_img.affine, fs_img.header)
+        seg_img.to_filename(out_seg)
+        self._results["seg_file"] = out_seg
+
+        return runtime
+
+
 class DefineTemplateSpace(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -830,6 +903,7 @@ class DefineTemplateSpace(SimpleInterface):
         in_volumes = InputMultiPath(File(exists=True))
 
     class output_spec(TraitedSpec):
+        subject_id = traits.Str()
         session_info = traits.List(traits.Tuple())
         out_template = File(exists=True)
         out_flirt_file = File(exists=True)
@@ -838,12 +912,14 @@ class DefineTemplateSpace(SimpleInterface):
 
     def _run_interface(self, runtime):
 
-        self._results["session_info"] = self.inputs.session_info
-
         subjects_dir = os.environ["SUBJECTS_DIR"]
+
         subject_ids = set([s for s, _ in self.inputs.session_info])
         assert len(subject_ids) == 1
         subj = subject_ids.pop()
+
+        self._results["subject_id"] = self.inputs.session_info[0]
+        self._results["session_info"] = self.inputs.session_info
 
         # -- Convert the anatomical image to nifti
         anat_file = "orig.nii.gz"
