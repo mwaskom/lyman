@@ -16,6 +16,7 @@ from nipype.interfaces.base import (traits, File, TraitedSpec,
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
 from ..mosaic import Mosaic
+from ..carpetplot import CarpetPlot
 from ..graphutils import SimpleInterface
 
 
@@ -249,8 +250,16 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                 "restore_ts")
 
     # Recombine the time series frames into a 4D image
-    merge_ts = Node(fsl.Merge(merged_file="timeseries.nii.gz",
-                              dimension="t"), "merge_ts")
+    merge_ts = Node(fsl.Merge(dimension="t"), "merge_ts")
+
+    # Use the brainmask to skullstrip the timeseries image
+    mask_ts = Node(fsl.ApplyMask(out_file="func.nii.gz"), "mask_ts")
+
+    # QC plots for the preprocessed timeseries
+    static_ts_qc = Node(CarpetPlot(out_file="func.png"), "static_ts_qc")
+    dynamic_ts_qc = Node(TimeSeriesGIF(out_file="func.gif"), "dynamic_ts_qc")
+
+    # --- Descriptive timeseries statistics
 
     # Take a temporal average of the time series
     average_ts = Node(fsl.MeanImage(out_file="mean.nii.gz"),
@@ -458,11 +467,23 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_matrix", "postmat")]),
         (restore_ts_frames, merge_ts,
             [("out_file", "in_files")]),
-
-        (merge_ts, average_ts,
+        (merge_ts, mask_ts,
             [("merged_file", "in_file")]),
+        (anat_segment, mask_ts,
+            [("mask_file", "mask_file")]),
+        (mask_ts, static_ts_qc,
+            [("out_file", "in_file")]),
+        (anat_segment, static_ts_qc,
+            [("seg_file", "seg_file")]),
+        (realign_qc, static_ts_qc,
+            [("params_file", "mc_file")]),
+        (mask_ts, dynamic_ts_qc,
+            [("out_file", "in_file")]),
 
-        # Estimation of descriptive temporal statistics
+        # Descriptive timeseries temporal statistics
+
+        (mask_ts, average_ts,
+            [("out_file", "in_file")]),
 
         # --- Persistent data storage
 
@@ -504,8 +525,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
              ("run", "run")]),
         (timeseries_container, timeseries_output,
             [("path", "container")]),
-        (merge_ts, timeseries_output,
-            [("merged_file", "@restored_timeseries")]),
+        (mask_ts, timeseries_output,
+            [("out_file", "@restored_timeseries")]),
         (average_ts, timeseries_output,
             [("out_file", "@mean_func")]),
         (raw_qc, timeseries_output,
@@ -516,6 +537,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("params_file", "@realign_params"),
              ("params_plot", "qc.@params_plot"),
              ("target_plot", "qc.@target_plot")]),
+        (static_ts_qc, timeseries_output,
+            [("out_file", "qc.@ts_png")]),
+        (dynamic_ts_qc, timeseries_output,
+            [("out_file", "qc.@ts_gif")]),
     ])
 
     return workflow
@@ -816,7 +841,7 @@ class TimeSeriesGIF(SimpleInterface):
 
         x, y, z = nx // 2, ny // 2, nz // 2
 
-        text = f.text(0, 0, "",
+        text = f.text(0.02, 0.02, "",
                       size=10, ha="left", va="bottom",
                       color="w", backgroundcolor="0")
 
