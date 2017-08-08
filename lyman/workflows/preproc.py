@@ -481,9 +481,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("seg_file", "@seg_file"),
              ("mask_file", "@mask_file"),
              ("anat_file", "@anat_file"),
+             ("surf_file", "@surf_file"),
              ("seg_plot", "qc.@seg_plot"),
              ("mask_plot", "qc.@mask_plot"),
-             ("anat_plot", "qc.@anat_plot")]),
+             ("anat_plot", "qc.@anat_plot"),
+             ("surf_plot", "qc.@surf_plot")]),
         (fieldmap_qc, template_output,
             [("out_file", "qc.@fieldmap_gif")]),
         (unwarp_qc, template_output,
@@ -872,6 +874,9 @@ class AnatomicalSegmentation(SimpleInterface):
         data_dir = op.join(os.environ["SUBJECTS_DIR"],
                            self.inputs.subject_id)
 
+        template_img = nib.load(self.inputs.template_file)
+        affine, header = template_img.affine, template_img.header
+
         fs_fname = "wmparc.nii.gz"
         cmdline = ["mri_vol2vol",
                    "--nearest",
@@ -908,7 +913,7 @@ class AnatomicalSegmentation(SimpleInterface):
             seg_data[mask] = seg_val
 
         seg_file = op.abspath("seg.nii.gz")
-        seg_img = nib.Nifti1Image(seg_data, fs_img.affine, fs_img.header)
+        seg_img = nib.Nifti1Image(seg_data, affine, header)
         seg_img.to_filename(seg_file)
         self._results["seg_file"] = seg_file
 
@@ -917,14 +922,14 @@ class AnatomicalSegmentation(SimpleInterface):
         # Binarize the segmentation and dilate to generate a brain mask
 
         brainmask = seg_data > 0
-        vox_mm = np.mean(fs_img.header.get_zooms()[:3])
+        vox_mm = np.mean(header.get_zooms()[:3])
         iterations = int(np.ceil(4 / vox_mm))
         brainmask = ndimage.binary_dilation(brainmask, iterations=iterations)
         brainmask = ndimage.binary_closing(brainmask)
         brainmask = ndimage.binary_fill_holes(brainmask)
 
         mask_file = op.abspath("brainmask.nii.gz")
-        mask_img = nib.Nifti1Image(brainmask, fs_img.affine, fs_img.header)
+        mask_img = nib.Nifti1Image(brainmask, affine, header)
         mask_img.to_filename(mask_file)
         self._results["mask_file"] = mask_file
 
@@ -943,6 +948,30 @@ class AnatomicalSegmentation(SimpleInterface):
 
         # --- Surface vertex mapping
 
+        hemi_files = []
+        for hemi in ["lh", "rh"]:
+            hemi_mask = "{}.ribbon.nii.gz".format(hemi)
+            hemi_file = "{}.surf.nii.gz".format(hemi)
+            cmdline = ["mri_surf2vol",
+                       "--template", self.inputs.template_file,
+                       "--reg", self.inputs.reg_file,
+                       "--surf", "graymid",
+                       "--hemi", hemi,
+                       "--mkmask",
+                       "--o", hemi_mask,
+                       "--vtxvol", hemi_file]
+
+            self.submit_cmdline(runtime, cmdline)
+            hemi_files.append(hemi_file)
+
+        hemi_data = [nib.load(f).get_data() for f in hemi_files]
+        surf = np.stack(hemi_data, axis=-1)
+
+        surf_file = op.abspath("surf.nii.gz")
+        self._results["surf_file"] = surf_file
+        surf_img = nib.Nifti1Image(surf, affine, header)
+        surf_img.to_filename(surf_file)
+
         # --- Generate QC mosaics
 
         # Anatomical segmentation
@@ -953,7 +982,7 @@ class AnatomicalSegmentation(SimpleInterface):
             ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
              '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
          )
-        m_seg = Mosaic(self.inputs.template_file, seg_img, mask_img,
+        m_seg = Mosaic(template_img, seg_img, mask_img,
                        step=2, tight=True, show_mask=False)
         m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
         m_seg.savefig(seg_plot)
@@ -963,7 +992,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         mask_plot = op.abspath("brainmask.png")
         self._results["mask_plot"] = mask_plot
-        m_mask = Mosaic(self.inputs.template_file, mask_img, mask_img,
+        m_mask = Mosaic(template_img, mask_img, mask_img,
                         step=2, tight=True, show_mask=False)
         m_mask.plot_mask()
         m_mask.savefig(mask_plot)
@@ -977,6 +1006,20 @@ class AnatomicalSegmentation(SimpleInterface):
                         step=2, tight=True, show_mask=False)
         m_mask.savefig(anat_plot)
         m_mask.close()
+
+        # Surface ribbon
+
+        surf_plot = op.abspath("surf.png")
+        self._results["surf_plot"] = surf_plot
+        ribbon = np.zeros(template_img.shape)
+        ribbon[surf[..., 0] > 0] = 1
+        ribbon[surf[..., 1] > 0] = 2
+        ribbon_cmap = mpl.colors.ListedColormap(["#87a0c4", "#cc8582"])
+        m_surf = Mosaic(template_img, ribbon, mask_img,
+                        step=2, tight=True, show_mask=False)
+        m_surf.plot_overlay(ribbon_cmap, 1, 2, thresh=.5, fmt=None)
+        m_surf.savefig(surf_plot)
+        m_surf.close()
 
         return runtime
 
