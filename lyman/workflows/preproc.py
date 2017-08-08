@@ -480,8 +480,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (anat_segment, template_output,
             [("seg_file", "@seg_file"),
              ("mask_file", "@mask_file"),
+             ("anat_file", "@anat_file"),
              ("seg_plot", "qc.@seg_plot"),
-             ("mask_plot", "qc.@mask_plot")]),
+             ("mask_plot", "qc.@mask_plot"),
+             ("anat_plot", "qc.@anat_plot")]),
         (fieldmap_qc, template_output,
             [("out_file", "qc.@fieldmap_gif")]),
         (unwarp_qc, template_output,
@@ -855,6 +857,8 @@ class AnatomicalSegmentation(SimpleInterface):
     class output_spec(TraitedSpec):
         seg_file = traits.File(exists=True)
         seg_plot = traits.File(exists=True)
+        anat_file = traits.File(exists=True)
+        anat_plot = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         mask_plot = traits.File(exists=True)
         surf_file = traits.File(exists=True)
@@ -924,6 +928,19 @@ class AnatomicalSegmentation(SimpleInterface):
         mask_img.to_filename(mask_file)
         self._results["mask_file"] = mask_file
 
+        # --- T1w anatomical image in functional space
+
+        anat_file = op.abspath("anat.nii.gz")
+        cmdline = ["mri_vol2vol",
+                   "--cubic",
+                   "--inv",
+                   "--mov", self.inputs.template_file,
+                   "--fstarg", "brain.finalsurfs.mgz",
+                   "--reg", self.inputs.reg_file,
+                   "--o", anat_file]
+
+        self.submit_cmdline(runtime, cmdline, anat_file=anat_file)
+
         # --- Surface vertex mapping
 
         # --- Generate QC mosaics
@@ -950,6 +967,15 @@ class AnatomicalSegmentation(SimpleInterface):
                         step=2, tight=True, show_mask=False)
         m_mask.plot_mask()
         m_mask.savefig(mask_plot)
+        m_mask.close()
+
+        # Anatomical image
+
+        anat_plot = op.abspath("anat.png")
+        self._results["anat_plot"] = anat_plot
+        m_mask = Mosaic(anat_file, mask=mask_img,
+                        step=2, tight=True, show_mask=False)
+        m_mask.savefig(anat_plot)
         m_mask.close()
 
         return runtime
