@@ -255,10 +255,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     # Recombine the time series frames into a 4D image
     merge_ts = Node(fsl.Merge(dimension="t"), "merge_ts")
 
-    # Use the brain mask to skullstrip the timeseries image
-    mask_ts = Node(fsl.ApplyMask(out_file="func.nii.gz"), "mask_ts")
-
-    # TODO Rescale timeseries ... maybe detrend too
+    # Mask, scale, and detrend the timeseries
+    finalize_ts = Node(FinalizeTimeseries(out_file="func.nii.gz"),
+                       "finalize_ts")
 
     # Descriptive timeseries statistics
     ts_stats = Node(TimeSeriesStats(), "ts_stats")
@@ -471,21 +470,21 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_matrix", "postmat")]),
         (restore_ts_frames, merge_ts,
             [("out_file", "in_files")]),
-        (merge_ts, mask_ts,
+        (merge_ts, finalize_ts,
             [("merged_file", "in_file")]),
-        (anat_segment, mask_ts,
+        (anat_segment, finalize_ts,
             [("mask_file", "mask_file")]),
-        (mask_ts, ts_stats,
+        (finalize_ts, ts_stats,
             [("out_file", "in_file")]),
         (anat_segment, ts_stats,
             [("mask_file", "mask_file")]),
-        (mask_ts, static_ts_qc,
+        (finalize_ts, static_ts_qc,
             [("out_file", "in_file")]),
         (anat_segment, static_ts_qc,
             [("seg_file", "seg_file")]),
         (realign_qc, static_ts_qc,
             [("params_file", "mc_file")]),
-        (mask_ts, dynamic_ts_qc,
+        (finalize_ts, dynamic_ts_qc,
             [("out_file", "in_file")]),
 
         # --- Persistent data storage
@@ -532,8 +531,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
              ("run", "run")]),
         (timeseries_container, timeseries_output,
             [("path", "container")]),
-        (mask_ts, timeseries_output,
-            [("out_file", "@restored_timeseries")]),
+        (finalize_ts, timeseries_output,
+            [("out_file", "@timeseries")]),
         (ts_stats, timeseries_output,
             [("mean_file", "@ts_mean"),
              ("tsnr_file", "@ts_tsnr")]),
@@ -886,6 +885,54 @@ class TimeSeriesGIF(SimpleInterface):
         return runtime
 
 
+class FinalizeTimeseries(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        out_file = traits.File()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+        data = img.get_data()
+
+        mask = nib.load(self.inputs.mask_file).get_data().astype(np.bool)
+
+        # Zero-out data outside the mask
+        data[~mask] = 0
+
+        # Scale the timeseries for cross-run intensity normalization
+        target = 10000
+        data = self.scale_timeseries(data, mask, target)
+        mean = data.mean(axis=-1, keepdims=True)
+
+        # Detrend the timeseries
+        data[mask] = signal.detrend(data[mask])
+
+        # Add the original temporal mean back in
+        data += mean
+
+        # Save out the final time series
+        out_file = op.abspath(self.inputs.out_file)
+        self._results["out_file"] = out_file
+
+        out_img = nib.Nifti1Image(data, img.affine, img.header)
+        out_img.to_filename(out_file)
+
+        return runtime
+
+    def scale_timeseries(self, data, mask, target):
+        """Make scale timeseries across four dimensions to a target."""
+        stat_value = data[mask].mean()
+        scale_value = target / stat_value
+        scaled_data = data * scale_value
+        return scaled_data
+
+
 class TimeSeriesStats(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -935,6 +982,7 @@ class TimeSeriesStats(SimpleInterface):
         mean_m.close()
 
         tsnr_plot = op.abspath("tsnr.png")
+        self._results["tsnr_plot"] = tsnr_plot
         tsnr_m = Mosaic(mean_img, tsnr, mask_img,
                         tight=True, show_mask=False)
         tsnr_m.plot_overlay("viridis", vmin=20, vmax=100, fmt="d")
