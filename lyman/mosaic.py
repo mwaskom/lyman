@@ -8,6 +8,9 @@ import nibabel as nib
 from six import string_types
 
 
+# TODO Wrap the class in a nipype interface for simple usage in the workflows
+
+
 class Mosaic(object):
 
     def __init__(self, anat=None, stat=None, mask=None, n_col=9, step=2,
