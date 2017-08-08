@@ -15,6 +15,7 @@ from nipype.interfaces.base import (traits, File, TraitedSpec,
                                     isdefined)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
+from .. import signals  # TODO confusingly close to scipy.signal
 from ..mosaic import Mosaic, MosaicInterface
 from ..carpetplot import CarpetPlot
 from ..graphutils import SimpleInterface
@@ -262,6 +263,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     # Descriptive timeseries statistics
     ts_stats = Node(TimeSeriesStats(), "ts_stats")
 
+    # Generate a mask of noise voxels
+    # TODO parameterizer the neighborhood and/or threshold
+    # also maybe this should be move downstream into modeling
+    # so those can be changed without rerunning preproc...
+    identify_noise = Node(IdentifyNoiseVoxels(), "identify_noise")
+
     # QC plots for the preprocessed timeseries
     static_ts_qc = Node(CarpetPlot(out_file="func.png"), "static_ts_qc")
     dynamic_ts_qc = Node(TimeSeriesGIF(out_file="func.gif"), "dynamic_ts_qc")
@@ -478,6 +485,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_file")]),
         (anat_segment, ts_stats,
             [("mask_file", "mask_file")]),
+        (finalize_ts, identify_noise,
+            [("out_file", "in_file")]),
+        (anat_segment, identify_noise,
+            [("seg_file", "seg_file")]),
         (finalize_ts, static_ts_qc,
             [("out_file", "in_file")]),
         (anat_segment, static_ts_qc,
@@ -536,6 +547,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (ts_stats, timeseries_output,
             [("mean_file", "@ts_mean"),
              ("tsnr_file", "@ts_tsnr")]),
+        (identify_noise, timeseries_output,
+            [("out_file", "@noise")]),
 
         (raw_qc, timeseries_output,
             [("out_file", "qc.@raw_gif")]),
@@ -552,6 +565,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (ts_stats, timeseries_output,
             [("mean_plot", "qc.@ts_mean_plot"),
              ("tsnr_plot", "qc.@ts_tsnr_plot")]),
+        (identify_noise, timeseries_output,
+            [("out_plot", "qc.@noise_plot")]),
 
     ])
 
@@ -931,6 +946,57 @@ class FinalizeTimeseries(SimpleInterface):
         scale_value = target / stat_value
         scaled_data = data * scale_value
         return scaled_data
+
+
+class IdentifyNoiseVoxels(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        seg_file = traits.File(exists=True)
+        neighborhood = traits.Float(5, usedefault=True)
+        threshold = traits.Float(1.5, usedefault=True)
+        subcortical = traits.Bool(True, usedefault=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+        out_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        ts_img = nib.load(self.inputs.in_file)
+
+        seg_img = nib.load(self.inputs.seg_file)
+        seg = seg_img.get_data()
+        if self.inputs.subcortical:
+            mask = (seg > 0) & (seg < 5)
+        else:
+            mask = seg == 1
+        mask_img = nib.Nifti1Image(mask, seg_img.affine, seg_img.header)
+
+        noise_img = signals.identify_noisy_voxels(
+            ts_img, mask_img,
+            neighborhood=self.inputs.neighborhood,
+            threshold=self.inputs.threshold,
+            detrend=False
+        )
+
+        out_file = op.abspath("noise.nii.gz")
+        self._results["out_file"] = out_file
+        noise_img.to_filename(out_file)
+
+        data = ts_img.get_data()
+        mean = data.mean(axis=-1)
+        mean_img = nib.Nifti1Image(mean, ts_img.affine, ts_img.header)
+
+        out_plot = op.abspath("noise.png")
+        self._results["out_plot"] = out_plot
+
+        m = Mosaic(mean_img, noise_img, seg > 0, show_mask=False)
+        m.plot_mask(alpha=1)
+        m.savefig(out_plot)
+        m.close()
+
+        return runtime
 
 
 class TimeSeriesStats(SimpleInterface):
