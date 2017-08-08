@@ -158,7 +158,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                  out_reg_file="fm2anat_tkreg.dat"),
                    "fm2anat")
 
-    fm2anat_qc = Node(AnatRegReport(out_file="func2anat.png"), "fm2anat_qc")
+    fm2anat_qc = Node(AnatRegReport(out_file="reg.png"), "fm2anat_qc")
 
     # --- Definition of common cross-session space (template space)
 
@@ -219,7 +219,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     mask_template = Node(fsl.ApplyMask(out_file="func.nii.gz"),
                          "mask_template")
 
-    template_qc = Node(FrameGIF(out_file="func_frames.gif", delay=20),
+    template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
                        "template_qc")
 
     # TODO also make a static png of the final template?
@@ -506,16 +506,16 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
              ("mask_plot", "qc.@mask_plot"),
              ("anat_plot", "qc.@anat_plot"),
              ("surf_plot", "qc.@surf_plot")]),
-        (fieldmap_qc, template_output,
-            [("out_file", "qc.@fieldmap_gif")]),
-        (unwarp_qc, template_output,
-            [("out_file", "qc.@unwarp_gif")]),
-        (fm2anat_qc, template_output,
-            [("out_file", "qc.@fm2anat_plot")]),
         (func2anat_qc, template_output,
             [("out_file", "qc.@func2anat_plot")]),
         (template_qc, template_output,
             [("out_file", "qc.@template_gif")]),
+        (fieldmap_qc, template_output,
+            [("out_file", "qc.sessions.@fieldmap_gif")]),
+        (unwarp_qc, template_output,
+            [("out_file", "qc.sessions.@unwarp_gif")]),
+        (fm2anat_qc, template_output,
+            [("out_file", "qc.sessions.@fm2anat_plot")]),
 
         # Ouputs associated with each scanner run
 
@@ -565,7 +565,7 @@ class RealignmentReport(SimpleInterface):
         df = pd.DataFrame(params, columns=cols)
 
         # Write the motion file to csv
-        params_file = op.abspath("mc_params.csv")
+        params_file = op.abspath("mc.csv")
         self._results["params_file"] = params_file
         df.to_csv(params_file, index=False)
 
