@@ -1,5 +1,6 @@
 from __future__ import division
 import os
+import os.path as op
 import numpy as np
 from scipy import ndimage
 import matplotlib as mpl
@@ -7,8 +8,8 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 from six import string_types
 
-
-# TODO Wrap the class in a nipype interface for simple usage in the workflows
+from nipype.interfaces.base import (traits, File, TraitedSpec, isdefined)
+from .graphutils import SimpleInterface
 
 
 class Mosaic(object):
@@ -471,3 +472,38 @@ class Mosaic(object):
     def close(self):
         """Close the figure."""
         plt.close(self.fig)
+
+
+class MosaicInterface(SimpleInterface):
+
+    # TODO extend to cover a broader range of Mosaic usecases
+
+    class input_spec(TraitedSpec):
+        anat_file = File(exists=True)
+        mask_file = File(exists=True)
+        tight = traits.Bool(True, usedefault=True)
+        step = traits.Int(2, usedefault=True)
+        show_mask = traits.Bool(True, usedefault=True)
+        out_file = File()
+
+    class output_spec(TraitedSpec):
+        out_file = File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        if isdefined(self.inputs.mask_file):
+            mask_file = self.inputs.mask_file
+        else:
+            mask_file = None
+
+        out_file = op.abspath(self.inputs.out_file)
+        self._results["out_file"] = out_file
+
+        m = Mosaic(self.inputs.anat_file, mask=mask_file,
+                   show_mask=self.inputs.show_mask,
+                   tight=self.inputs.tight, step=self.inputs.step)
+
+        m.savefig(out_file)
+        m.close()
+
+        return runtime

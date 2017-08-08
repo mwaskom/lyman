@@ -15,7 +15,7 @@ from nipype.interfaces.base import (traits, File, TraitedSpec,
                                     isdefined)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
-from ..mosaic import Mosaic
+from ..mosaic import Mosaic, MosaicInterface
 from ..carpetplot import CarpetPlot
 from ..graphutils import SimpleInterface
 
@@ -219,8 +219,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     mask_template = Node(fsl.ApplyMask(out_file="func.nii.gz"),
                          "mask_template")
 
-    template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
-                       "template_qc")
+    static_template_qc = Node(MosaicInterface(out_file="func.png"),
+                              "static_template_qc")
+
+    dynamic_template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
+                               "dynamic_template_qc")
 
     # TODO also make a static png of the final template?
 
@@ -397,8 +400,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_file")]),
         (anat_segment, mask_template,
             [("mask_file", "mask_file")]),
-        (merge_template, template_qc,
+        (merge_template, dynamic_template_qc,
             [("merged_file", "in_file")]),
+        (mask_template, static_template_qc,
+            [("out_file", "anat_file")]),
 
         # Segementation of anatomical tissue in functional space
 
@@ -508,7 +513,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
              ("surf_plot", "qc.@surf_plot")]),
         (func2anat_qc, template_output,
             [("out_file", "qc.@func2anat_plot")]),
-        (template_qc, template_output,
+        (static_template_qc, template_output,
+            [("out_file", "qc.@template_png")]),
+        (dynamic_template_qc, template_output,
             [("out_file", "qc.@template_gif")]),
         (fieldmap_qc, template_output,
             [("out_file", "qc.sessions.@fieldmap_gif")]),
