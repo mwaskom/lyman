@@ -32,8 +32,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     # exp_info is a bunch or dict or other obj with experiment parameters
 
-    # TODO change se to fm, it will be less confusing
-
     # --- Workflow parameterization
 
     # TODO The iterable creation should be moved to separate functions
