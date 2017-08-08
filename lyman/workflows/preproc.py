@@ -2,7 +2,7 @@ import os
 import os.path as op
 
 import numpy as np
-from scipy import ndimage
+from scipy import ndimage, signal
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -168,7 +168,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                                joinfield=["session_info",
                                           "in_matrices", "in_volumes"])
 
-    func2anat_qc = Node(AnatRegReport(out_file="func2anat.png"),
+    func2anat_qc = Node(AnatRegReport(out_file="reg.png"),
                         "func2anat_qc")
 
     # --- Associate template-space transforms with data from correct session
@@ -252,18 +252,17 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     # Recombine the time series frames into a 4D image
     merge_ts = Node(fsl.Merge(dimension="t"), "merge_ts")
 
-    # Use the brainmask to skullstrip the timeseries image
+    # Use the brain mask to skullstrip the timeseries image
     mask_ts = Node(fsl.ApplyMask(out_file="func.nii.gz"), "mask_ts")
+
+    # TODO Rescale timeseries ... maybe detrend too
+
+    # Descriptive timeseries statistics
+    ts_stats = Node(TimeSeriesStats(), "ts_stats")
 
     # QC plots for the preprocessed timeseries
     static_ts_qc = Node(CarpetPlot(out_file="func.png"), "static_ts_qc")
     dynamic_ts_qc = Node(TimeSeriesGIF(out_file="func.gif"), "dynamic_ts_qc")
-
-    # --- Descriptive timeseries statistics
-
-    # Take a temporal average of the time series
-    average_ts = Node(fsl.MeanImage(out_file="mean.nii.gz"),
-                      "average_ts")
 
     # --- Workflow ouptut
 
@@ -471,6 +470,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("merged_file", "in_file")]),
         (anat_segment, mask_ts,
             [("mask_file", "mask_file")]),
+        (mask_ts, ts_stats,
+            [("out_file", "in_file")]),
+        (anat_segment, ts_stats,
+            [("mask_file", "mask_file")]),
         (mask_ts, static_ts_qc,
             [("out_file", "in_file")]),
         (anat_segment, static_ts_qc,
@@ -478,11 +481,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (realign_qc, static_ts_qc,
             [("params_file", "mc_file")]),
         (mask_ts, dynamic_ts_qc,
-            [("out_file", "in_file")]),
-
-        # Descriptive timeseries temporal statistics
-
-        (mask_ts, average_ts,
             [("out_file", "in_file")]),
 
         # --- Persistent data storage
@@ -501,8 +499,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("seg_file", "@seg"),
              ("mask_file", "@mask"),
              ("anat_file", "@anat"),
-             ("surf_file", "@surf"),
-             ("seg_plot", "qc.@seg_plot"),
+             ("surf_file", "@surf")]),
+
+        (anat_segment, template_output,
+            [("seg_plot", "qc.@seg_plot"),
              ("mask_plot", "qc.@mask_plot"),
              ("anat_plot", "qc.@anat_plot"),
              ("surf_plot", "qc.@surf_plot")]),
@@ -527,8 +527,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("path", "container")]),
         (mask_ts, timeseries_output,
             [("out_file", "@restored_timeseries")]),
-        (average_ts, timeseries_output,
-            [("out_file", "@mean_func")]),
+        (ts_stats, timeseries_output,
+            [("mean_file", "@ts_mean"),
+             ("tsnr_file", "@ts_tsnr")]),
+
         (raw_qc, timeseries_output,
             [("out_file", "qc.@raw_gif")]),
         (sb2fm_qc, timeseries_output,
@@ -541,6 +543,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "qc.@ts_png")]),
         (dynamic_ts_qc, timeseries_output,
             [("out_file", "qc.@ts_gif")]),
+        (ts_stats, timeseries_output,
+            [("mean_plot", "qc.@ts_mean_plot"),
+             ("tsnr_plot", "qc.@ts_tsnr_plot")]),
+
     ])
 
     return workflow
@@ -873,6 +879,64 @@ class TimeSeriesGIF(SimpleInterface):
         return runtime
 
 
+class TimeSeriesStats(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        mean_file = traits.File(exists=True)
+        tsnr_file = traits.File(exists=True)
+        mean_plot = traits.File(exists=True)
+        tsnr_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        ts_img = nib.load(self.inputs.in_file)
+        affine, header = ts_img.affine, ts_img.header
+        data = ts_img.get_data()
+
+        mask_img = nib.load(self.inputs.mask_file)
+        mask = mask_img.get_data().astype(np.bool)
+
+        mean = data.mean(axis=-1)
+        data[mask] = signal.detrend(data[mask])
+        sd = data.std(axis=-1)
+
+        with np.errstate(all="ignore"):
+            tsnr = mean / sd
+            tsnr[~mask] = 0
+
+        mean_file = op.abspath("mean.nii.gz")
+        self._results["mean_file"] = mean_file
+        mean_img = nib.Nifti1Image(mean, affine, header)
+        mean_img.to_filename(mean_file)
+
+        tsnr_file = op.abspath("tsnr.nii.gz")
+        self._results["tsnr_file"] = tsnr_file
+        tsnr_img = nib.Nifti1Image(tsnr, affine, header)
+        tsnr_img.to_filename(tsnr_file)
+
+        mean_plot = op.abspath("mean.png")
+        self._results["mean_plot"] = mean_plot
+        norm_mean = mean / mean.max()
+        mean_m = Mosaic(mean_img, norm_mean, mask_img,
+                        tight=True, show_mask=False)
+        mean_m.plot_overlay("magma", vmin=0, vmax=1, fmt="d")
+        mean_m.savefig(mean_plot)
+        mean_m.close()
+
+        tsnr_plot = op.abspath("tsnr.png")
+        tsnr_m = Mosaic(mean_img, tsnr, mask_img,
+                        tight=True, show_mask=False)
+        tsnr_m.plot_overlay("viridis", vmin=20, vmax=100, fmt="d")
+        tsnr_m.savefig(tsnr_plot)
+        tsnr_m.close()
+
+        return runtime
+
+
 class AnatomicalSegmentation(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -950,7 +1014,7 @@ class AnatomicalSegmentation(SimpleInterface):
         brainmask = ndimage.binary_closing(brainmask)
         brainmask = ndimage.binary_fill_holes(brainmask)
 
-        mask_file = op.abspath("brainmask.nii.gz")
+        mask_file = op.abspath("mask.nii.gz")
         mask_img = nib.Nifti1Image(brainmask, affine, header)
         mask_img.to_filename(mask_file)
         self._results["mask_file"] = mask_file
@@ -1012,7 +1076,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         # Brain mask
 
-        mask_plot = op.abspath("brainmask.png")
+        mask_plot = op.abspath("mask.png")
         self._results["mask_plot"] = mask_plot
         m_mask = Mosaic(template_img, mask_img, mask_img,
                         step=2, tight=True, show_mask=False)
