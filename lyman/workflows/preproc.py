@@ -358,7 +358,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (sesswise_info, func2anat_qc,
             [("subject", "subject_id")]),
         (define_template, func2anat_qc,
-            [("out_tkreg_file", "reg_file")]),
+            [("reg_file", "reg_file")]),
         (average_template, func2anat_qc,
             [("out_file", "in_file")]),
         (define_template, select_sesswise,
@@ -396,7 +396,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         (define_template, anat_segment,
             [("subject_id", "subject_id"),
-             ("out_tkreg_file", "reg_file")]),
+             ("reg_file", "reg_file")]),
         (average_template, anat_segment,
             [("out_file", "template_file")]),
 
@@ -475,13 +475,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (mask_template, template_output,
             [("out_file", "@template")]),
         (define_template, template_output,
-            [("out_tkreg_file", "@tkr_file"),
-             ("out_flirt_file", "@fsl_file")]),  # TODO do we need this?
+            [("reg_file", "@reg")]),
         (anat_segment, template_output,
-            [("seg_file", "@seg_file"),
-             ("mask_file", "@mask_file"),
-             ("anat_file", "@anat_file"),
-             ("surf_file", "@surf_file"),
+            [("seg_file", "@seg"),
+             ("mask_file", "@mask"),
+             ("anat_file", "@anat"),
+             ("surf_file", "@surf"),
              ("seg_plot", "qc.@seg_plot"),
              ("mask_plot", "qc.@mask_plot"),
              ("anat_plot", "qc.@anat_plot"),
@@ -868,14 +867,14 @@ class AnatomicalSegmentation(SimpleInterface):
 
     def _run_interface(self, runtime):
 
-        # Transform the wmparc image into functional space
-        # (we are calling this the aseg but using the wmparc to
-        # separate out cortical and deep white matter)
-        data_dir = op.join(os.environ["SUBJECTS_DIR"],
-                           self.inputs.subject_id)
+        # Define the template space geometry
 
         template_img = nib.load(self.inputs.template_file)
         affine, header = template_img.affine, template_img.header
+
+        # --- Coarse segmentation into anatomical components
+
+        # Transform the wmparc image into functional space
 
         fs_fname = "wmparc.nii.gz"
         cmdline = ["mri_vol2vol",
@@ -887,8 +886,6 @@ class AnatomicalSegmentation(SimpleInterface):
                    "--o", fs_fname]
 
         self.submit_cmdline(runtime, cmdline)
-
-        # --- Coarse segmentation into anatomical components
 
         # Load the template-space wmparc and reclassify voxels
 
@@ -1035,8 +1032,7 @@ class DefineTemplateSpace(SimpleInterface):
         subject_id = traits.Str()
         session_info = traits.List(traits.Tuple())
         out_template = File(exists=True)
-        out_flirt_file = File(exists=True)
-        out_tkreg_file = File(exists=True)
+        reg_file = File(exists=True)
         out_matrices = OutputMultiPath(File(exists=True))
 
     def _run_interface(self, runtime):
@@ -1047,7 +1043,7 @@ class DefineTemplateSpace(SimpleInterface):
         assert len(subject_ids) == 1
         subj = subject_ids.pop()
 
-        self._results["subject_id"] = self.inputs.session_info[0]
+        self._results["subject_id"] = subj
         self._results["session_info"] = self.inputs.session_info
 
         # -- Convert the anatomical image to nifti
@@ -1059,10 +1055,11 @@ class DefineTemplateSpace(SimpleInterface):
         self.submit_cmdline(runtime, cmdline)
 
         # -- Compute the intermediate transform
+        midtrans_file = "anat2func.mat"
         cmdline = ["midtrans",
                    "--template=" + anat_file,
                    "--separate=se2template_",
-                   "--out=anat2func_flirt.mat"]
+                   "--out=" + midtrans_file]
         cmdline.extend(self.inputs.in_matrices)
         out_matrices = [
             op.abspath("se2template_{:04d}.mat".format(i))
@@ -1072,13 +1069,13 @@ class DefineTemplateSpace(SimpleInterface):
         self.submit_cmdline(runtime, cmdline, out_matrices=out_matrices)
 
         # -- Invert the anat2temp transformation
-        out_flirt_file = op.abspath("func2anat_fsl.mat")
+        flirt_file = "func2anat.mat"
         cmdline = ["convert_xfm",
-                   "-omat", out_flirt_file,
+                   "-omat", flirt_file,
                    "-inverse",
-                   "anat2func_flirt.mat"]
+                   midtrans_file]
 
-        self.submit_cmdline(runtime, cmdline, out_flirt_file=out_flirt_file)
+        self.submit_cmdline(runtime, cmdline)
 
         # -- Transform first volume into template space to get the geometry
         out_template = op.abspath("template_space.nii.gz")
@@ -1092,14 +1089,14 @@ class DefineTemplateSpace(SimpleInterface):
         self.submit_cmdline(runtime, cmdline, out_template=out_template)
 
         # -- Convert the FSL matrices to tkreg matrix format
-        out_tkreg_file = op.abspath("func2anat_tkr.dat")
+        reg_file = op.abspath("reg.dat")
         cmdline = ["tkregister2",
                    "--s", subj,
                    "--mov", "template_space.nii.gz",
-                   "--fsl", out_flirt_file,
-                   "--reg", out_tkreg_file,
+                   "--fsl", flirt_file,
+                   "--reg", reg_file,
                    "--noedit"]
 
-        self.submit_cmdline(runtime, cmdline, out_tkreg_file=out_tkreg_file)
+        self.submit_cmdline(runtime, cmdline, reg_file=reg_file)
 
         return runtime
