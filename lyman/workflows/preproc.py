@@ -201,6 +201,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                          ["in_file", "premat", "field_file"],
                          "restore_fm")
 
+    # TODO everything from here on could probably be done using Python
+    # in a single interface to simplify the logic of the workflow
+
     def flatten_file_list(in_files):
         out_files = [item for sublist in in_files for item in sublist]
         return out_files
@@ -223,8 +226,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     dynamic_template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
                                "dynamic_template_qc")
-
-    # TODO also make a static png of the final template?
 
     # --- Segementation of anatomical tissue in functional space
 
