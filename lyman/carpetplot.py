@@ -1,7 +1,6 @@
 from __future__ import division
 import os.path as op
 import numpy as np
-import pandas as pd
 from scipy.signal import detrend
 from scipy.ndimage import gaussian_filter
 import matplotlib as mpl
@@ -35,10 +34,10 @@ class CarpetPlotter(object):
             4D time series data to plot.
         wmparc : filename or nibabel image
             Freesurfer wmparc image in functional space.
-        realign_params : filename or pandas DataFrame, optional
-            Text file or array of realignment parameters. If present, the time
-            series of framewise displacements will be shown at the top of the
-            figure.
+        realign_params : filename or numpy array, optional
+            Text file or array of FSL realignment parameters. If present, the
+            time series of framewise displacements will be shown at the top of
+            the figure.
         smooth_fwhm : float or None, optional
             Size of the smoothing kernel, in mm, to apply. Smoothing is
             restricted within the mask for each component (cortex, cerebellum,
@@ -155,13 +154,13 @@ class CarpetPlotter(object):
     def framewise_displacement(self, realign_params):
         """Compute the time series of framewise displacements."""
         if isinstance(realign_params, str):
-            rp = pd.read_csv(realign_params)
-        elif isinstance(realign_params, pd.DataFrame):
+            rp = np.loadtxt(realign_params)
+        elif isinstance(realign_params, np.ndarray):
             rp = realign_params
         else:
             return None
 
-        r, t = rp.filter(regex="rot").values, rp.filter(regex="trans").values
+        r, t = np.hsplit(rp, 2)
         s = r * 50
         ad = np.hstack([s, t])
         rd = np.abs(np.diff(ad, axis=0))

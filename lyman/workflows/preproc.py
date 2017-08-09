@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
-                    IdentityInterface, Function, DataSink)
+                    IdentityInterface, Function, Rename, DataSink)
 from nipype.interfaces.base import (traits, File, TraitedSpec,
                                     InputMultiPath, OutputMultiPath,
                                     isdefined)
@@ -198,6 +198,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     ts2sb = Node(fsl.MCFLIRT(save_mats=True, save_plots=True),
                  "ts2sb")
 
+    rename_params = Node(Rename("mc.txt"), "rename_params")
+
     realign_qc = Node(RealignmentReport(), "realign_qc")
 
     # --- Combined motion correction and unwarping of time series
@@ -319,9 +321,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Creation of cross-session subject-specific template
 
+        (session_source, define_template,
+            [("session", "session_info")]),
         (session_input, define_template,
-            [("session", "session_info"),
-             ("fm", "in_volumes")]),
+            [("fm", "in_volumes")]),
         (fm2anat, define_template,
             [("out_fsl_file", "in_matrices")]),
         (session_input, func2anat_qc,
@@ -380,6 +383,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (run_input, ts2sb,
             [("ts", "in_file"),
              ("sb", "ref_file")]),
+        (ts2sb, rename_params,
+            [("par_file", "in_file")]),
         (run_input, realign_qc,
             [("sb", "target_file")]),
         (ts2sb, realign_qc,
@@ -440,8 +445,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_file")]),
         (anat_segment, static_ts_qc,
             [("seg_file", "seg_file")]),
-        (realign_qc, static_ts_qc,
-            [("params_file", "mc_file")]),
+        (ts2sb, static_ts_qc,
+            [("par_file", "mc_file")]),
         (finalize_ts, dynamic_ts_qc,
             [("out_file", "in_file")]),
 
@@ -491,6 +496,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("path", "container")]),
         (finalize_ts, timeseries_output,
             [("out_file", "@timeseries")]),
+        (rename_params, timeseries_output,
+            [("out_file", "@mc_params")]),
         (ts_stats, timeseries_output,
             [("mean_file", "@ts_mean"),
              ("tsnr_file", "@ts_tsnr")]),
@@ -502,8 +509,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (sb2fm_qc, timeseries_output,
             [("out_file", "qc.@sb2fm_gif")]),
         (realign_qc, timeseries_output,
-            [("params_file", "@realign_params"),
-             ("params_plot", "qc.@params_plot"),
+            [("params_plot", "qc.@params_plot"),
              ("target_plot", "qc.@target_plot")]),
         (static_ts_qc, timeseries_output,
             [("out_file", "qc.@ts_png")]),
@@ -653,7 +659,6 @@ class RealignmentReport(SimpleInterface):
         realign_params = File(exists=True)
 
     class output_spec(TraitedSpec):
-        params_file = File(exists=True)
         params_plot = File(exists=True)
         target_plot = File(exists=True)
 
@@ -663,11 +668,6 @@ class RealignmentReport(SimpleInterface):
         params = np.loadtxt(self.inputs.realign_params)
         cols = ["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"]
         df = pd.DataFrame(params, columns=cols)
-
-        # Write the motion file to csv
-        params_file = op.abspath("mc.csv")
-        self._results["params_file"] = params_file
-        df.to_csv(params_file, index=False)
 
         # Plot the motion timeseries
         params_plot = op.abspath("mc_params.png")
@@ -1010,6 +1010,8 @@ class FinalizeTimeseries(SimpleInterface):
 
         out_img = nib.Nifti1Image(data, img.affine, img.header)
         out_img.to_filename(out_file)
+
+        # TODO make the final time series gif here
 
         return runtime
 
