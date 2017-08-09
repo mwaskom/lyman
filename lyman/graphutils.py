@@ -178,6 +178,17 @@ class SimpleInterface(BaseInterface):
 
         return self._results
 
+    def define_output(self, field, fname):
+
+        fname = op.abspath(fname)
+        self._results[field] = fname
+        return fname
+
+    def save_image(self, img, field, fname):
+
+        fname = self.define_output(field, fname)
+        img.to_filename(fname)
+
     def submit_cmdline(self, runtime, cmdline, **results):
         """Submit a command-line job and capture the output."""
 
