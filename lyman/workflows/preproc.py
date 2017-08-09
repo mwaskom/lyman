@@ -77,8 +77,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
                               ts_template=exp_info.ts_template),
                      name="run_input")
 
-    raw_qc = Node(TimeSeriesGIF(out_file="raw.gif"), "raw_qc")
-
     # --- Warpfield estimation using topup
 
     # Distortion warpfield estimation
@@ -219,22 +217,20 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
     # Recombine the time series frames into a 4D image
     merge_ts = Node(fsl.Merge(dimension="t"), "merge_ts")
 
-    # Mask, scale, and detrend the timeseries
-    finalize_ts = Node(FinalizeTimeseries(out_file="func.nii.gz"),
-                       "finalize_ts")
+    # Mask, scale, and detrend the timeseries; make a gif
+    finalize_ts = Node(FinalizeTimeseries(), "finalize_ts")
 
     # Descriptive timeseries statistics
     ts_stats = Node(TimeSeriesStats(), "ts_stats")
 
     # Generate a mask of noise voxels
-    # TODO parameterizer the neighborhood and/or threshold
+    # TODO parameterize the neighborhood and/or threshold
     # also maybe this should be move downstream into modeling
     # so those can be changed without rerunning preproc...
     identify_noise = Node(IdentifyNoiseVoxels(), "identify_noise")
 
     # QC plots for the preprocessed timeseries
     static_ts_qc = Node(CarpetPlot(out_file="func.png"), "static_ts_qc")
-    dynamic_ts_qc = Node(TimeSeriesGIF(out_file="func.gif"), "dynamic_ts_qc")
 
     # --- Workflow ouptut
 
@@ -488,8 +484,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
         # Registration of each frame to SBRef image
 
-        (run_input, raw_qc,
-            [("ts", "in_file")]),
         (run_input, realign_qc,
             [("sb", "target_file")]),
         (ts2sb, realign_qc,
@@ -510,8 +504,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
             [("seg_file", "seg_file")]),
         (ts2sb, static_ts_qc,
             [("par_file", "mc_file")]),
-        (finalize_ts, dynamic_ts_qc,
-            [("out_file", "in_file")]),
 
         # Ouputs associated with the subject-specific template
 
@@ -535,8 +527,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
         # Ouputs associated with each scanner run
 
-        (raw_qc, timeseries_output,
-            [("out_file", "qc.@raw_gif")]),
+        (run_input, timeseries_output,
+            [("ts_plot", "qc.@raw_gif")]),
         (sb2fm_qc, timeseries_output,
             [("out_file", "qc.@sb2fm_gif")]),
         (realign_qc, timeseries_output,
@@ -544,8 +536,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
              ("target_plot", "qc.@target_plot")]),
         (static_ts_qc, timeseries_output,
             [("out_file", "qc.@ts_png")]),
-        (dynamic_ts_qc, timeseries_output,
-            [("out_file", "qc.@ts_gif")]),
+        (finalize_ts, timeseries_output,
+            [("out_plot", "qc.@ts_gif")]),
         (ts_stats, timeseries_output,
             [("mean_plot", "qc.@ts_mean_plot"),
              ("tsnr_plot", "qc.@ts_tsnr_plot")]),
@@ -560,6 +552,64 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
 
 # =========================================================================== #
+
+
+class TimeSeriesGIF(object):
+
+    def write_time_series_gif(self, runtime, img, fname):
+
+        os.mkdir("png")
+
+        nx, ny, nz, nt = img.shape
+        tr = img.header.get_zooms()[3]
+        delay = tr * 1000 / 75
+
+        width = 5
+        height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
+
+        f, axes = plt.subplots(ncols=3, figsize=(width, height))
+        for ax in axes:
+            ax.set_axis_off()
+
+        data = img.get_data()
+        vmin, vmax = np.percentile(data, [2, 98])
+
+        kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
+        im_x = axes[0].imshow(np.zeros((nz, ny)), **kws)
+        im_y = axes[1].imshow(np.zeros((nz, nx)), **kws)
+        im_z = axes[2].imshow(np.zeros((ny, nx)), **kws)
+
+        f.subplots_adjust(0, 0, 1, 1, 0, 0)
+
+        x, y, z = nx // 2, ny // 2, nz // 2
+
+        text = f.text(0.02, 0.02, "",
+                      size=10, ha="left", va="bottom",
+                      color="w", backgroundcolor="0")
+
+        pngs = []
+
+        for t in range(nt):
+
+            vol = data[..., t]
+
+            im_x.set_data(np.rot90(vol[x, :, :]))
+            im_y.set_data(np.rot90(vol[:, y, :]))
+            im_z.set_data(np.rot90(vol[:, :, z]))
+
+            if not t % 10:
+                text.set_text("T: {:d}".format(t))
+
+            frame_png = "png/{:04d}.png".format(t)
+            pngs.append(frame_png)
+            f.savefig(frame_png,
+                      facecolor="0", edgecolor="0")
+
+        cmdline = ["convert", "-loop", "0", "-delay", str(delay)]
+        cmdline.extend(pngs)
+        cmdline.append(fname)
+
+        self.submit_cmdline(runtime, cmdline)
 
 
 class SessionInput(SimpleInterface):
@@ -631,7 +681,7 @@ class SessionInput(SimpleInterface):
         return runtime
 
 
-class RunInput(SimpleInterface):
+class RunInput(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         run = traits.Tuple()
@@ -643,6 +693,7 @@ class RunInput(SimpleInterface):
     class output_spec(TraitedSpec):
         sb = traits.File(exists=True)
         ts = traits.File(exists=True)
+        ts_plot = traits.File(exists=True)
         subject = traits.Str()
         session = traits.Str()
         run = traits.Str()
@@ -680,7 +731,9 @@ class RunInput(SimpleInterface):
         self.save_image(sb_img, "sb", "sb.nii.gz")
         self.save_image(ts_img, "ts", "ts.nii.gz")
 
-        # TODO Better to generate the timeseries GIF here?
+        # Make a GIF movie of the raw timeseries
+        out_plot = self.define_output("out_plot", "func.gif")
+        self.write_time_series_gif(runtime, ts_img, out_plot)
 
         return runtime
 
@@ -938,83 +991,15 @@ class FrameGIF(SimpleInterface):
         return runtime
 
 
-class TimeSeriesGIF(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        delay = traits.Int(20, usedefault=True)
-        out_file = traits.File()
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        os.mkdir("png")
-
-        img = nib.as_closest_canonical(nib.load(self.inputs.in_file))
-        nx, ny, nz, nt = img.shape
-
-        width = 5
-        height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
-
-        f, axes = plt.subplots(ncols=3, figsize=(width, height))
-        for ax in axes:
-            ax.set_axis_off()
-
-        data = img.get_data()
-        vmin, vmax = np.percentile(data, [2, 98])
-
-        kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
-        im_x = axes[0].imshow(np.zeros((nz, ny)), **kws)
-        im_y = axes[1].imshow(np.zeros((nz, nx)), **kws)
-        im_z = axes[2].imshow(np.zeros((ny, nx)), **kws)
-
-        f.subplots_adjust(0, 0, 1, 1, 0, 0)
-
-        x, y, z = nx // 2, ny // 2, nz // 2
-
-        text = f.text(0.02, 0.02, "",
-                      size=10, ha="left", va="bottom",
-                      color="w", backgroundcolor="0")
-
-        pngs = []
-
-        for t in range(nt):
-
-            vol = data[..., t]
-
-            im_x.set_data(np.rot90(vol[x, :, :]))
-            im_y.set_data(np.rot90(vol[:, y, :]))
-            im_z.set_data(np.rot90(vol[:, :, z]))
-
-            if not t % 10:
-                text.set_text("T: {:d}".format(t))
-
-            frame_png = "png/{:04d}.png".format(t)
-            pngs.append(frame_png)
-            f.savefig(frame_png,
-                      facecolor="0", edgecolor="0")
-
-        out_file = op.abspath(self.inputs.out_file)
-        cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
-        cmdline.extend(pngs)
-        cmdline.append(out_file)
-
-        self.submit_cmdline(runtime, cmdline, out_file=out_file)
-
-        return runtime
-
-
-class FinalizeTimeseries(SimpleInterface):
+class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         in_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
-        out_file = traits.File()
 
     class output_spec(TraitedSpec):
         out_file = traits.File(exists=True)
+        out_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -1038,13 +1023,20 @@ class FinalizeTimeseries(SimpleInterface):
         data += mean
 
         # Save out the final time series
-        out_file = op.abspath(self.inputs.out_file)
+        out_file = op.abspath("func.nii.gz")
         self._results["out_file"] = out_file
 
         out_img = nib.Nifti1Image(data, img.affine, img.header)
         out_img.to_filename(out_file)
 
-        # TODO make the final time series gif here
+        # Make a GIF movie of the final timeseries
+        out_plot = self.define_output("out_plot", "func.gif")
+        self.write_time_series_gif(runtime, out_img, out_plot)
+
+        # TODO also make the carpet plot here?
+        # Just to save an additional loading of the time series
+        # Although also we would need the moco params to do so,
+        # and thus could rename / add a header to obviate that extra node
 
         return runtime
 
