@@ -1294,7 +1294,7 @@ class AnatomicalSegmentation(SimpleInterface):
         ribbon = np.zeros(template_img.shape)
         ribbon[surf[..., 0] > 0] = 1
         ribbon[surf[..., 1] > 0] = 2
-        ribbon_cmap = mpl.colors.ListedColormap(["#87a0c4", "#cc8582"])
+        ribbon_cmap = mpl.colors.ListedColormap(["#5ebe82", "#ec966f"])
         m_surf = Mosaic(template_img, ribbon, mask_img,
                         step=2, tight=True, show_mask=False)
         m_surf.plot_overlay(ribbon_cmap, 1, 2, thresh=.5, fmt=None)
