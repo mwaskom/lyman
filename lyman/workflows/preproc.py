@@ -21,7 +21,7 @@ from ..carpetplot import CarpetPlot
 from ..graphutils import SimpleInterface
 
 
-def define_preproc_workflow(proj_info, sess_info, exp_info):
+def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
     # proj_info will be a bunch or other object with data_dir, etc. fields
 
@@ -267,7 +267,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     cache_base = op.join(proj_info.cache_dir, exp_info.name)
     workflow = Workflow(name="preproc", base_dir=cache_base)
 
-    workflow.connect([
+    # Connect processing nodes
+
+    processing_edges = [
 
         (subject_source, session_source,
             [("subject", "subject")]),
@@ -288,17 +290,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("fm", "in_file"),
              ("phase_encoding", "encoding_direction"),
              ("readout_times", "readout_times")]),
-        (session_input, fieldmap_qc,
-            [("fm", "in_file"),
-             ("session", "session"),
-             ("phase_encoding", "phase_encoding")]),
         (estimate_distortions, select_warp,
             [("out_warps", "inlist")]),
-        (session_input, unwarp_qc,
-            [("session", "session"),
-             ("phase_encoding", "phase_encoding")]),
-        (estimate_distortions, unwarp_qc,
-            [("out_corrected", "in_file")]),
         (select_warp, mask_distortions,
             [("out", "in_file")]),
         (estimate_distortions, average_fm,
@@ -310,14 +303,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("subject", "subject_id")]),
         (average_fm, fm2anat,
             [("out_file", "source_file")]),
-        (session_input, fm2anat_qc,
-            [("subject", "subject_id"),
-             ("session", "session")]),
-        (average_fm, fm2anat_qc,
-            [("out_file", "in_file")]),
-        (fm2anat, fm2anat_qc,
-            [("out_reg_file", "reg_file"),
-             ("min_cost_file", "cost_file")]),
 
         # Creation of cross-session subject-specific template
 
@@ -327,12 +312,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("fm", "in_volumes")]),
         (fm2anat, define_template,
             [("out_fsl_file", "in_matrices")]),
-        (session_input, func2anat_qc,
-            [("subject", "subject_id")]),
-        (define_template, func2anat_qc,
-            [("reg_file", "reg_file")]),
-        (average_template, func2anat_qc,
-            [("out_file", "in_file")]),
         (define_template, select_sesswise,
             [("out_matrices", "in_matrices"),
              ("out_template", "in_templates"),
@@ -361,10 +340,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_file")]),
         (anat_segment, mask_template,
             [("mask_file", "mask_file")]),
-        (merge_template, dynamic_template_qc,
-            [("merged_file", "in_file")]),
-        (mask_template, static_template_qc,
-            [("out_file", "anat_file")]),
 
         # Segementation of anatomical tissue in functional space
 
@@ -378,17 +353,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Registration of each frame to SBRef image
 
-        (run_input, raw_qc,
-            [("ts", "in_file")]),
         (run_input, ts2sb,
             [("ts", "in_file"),
              ("sb", "ref_file")]),
         (ts2sb, rename_params,
             [("par_file", "in_file")]),
-        (run_input, realign_qc,
-            [("sb", "target_file")]),
-        (ts2sb, realign_qc,
-            [("par_file", "realign_params")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
 
@@ -398,10 +367,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("fm", "reference")]),
         (mask_distortions, sb2fm,
             [("out_file", "ref_weight")]),
-        (sb2fm, sb2fm_qc,
-            [("out_file", "in_file")]),
-        (session_input, sb2fm_qc,
-            [("fm", "ref_file")]),
 
         # Single-interpolation spatial realignment and unwarping
 
@@ -411,18 +376,18 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_matrix_file", "in_file2")]),
         (run_input, split_ts,
             [("ts", "in_file")]),
-        (split_ts, restore_ts_frames,
-            [("out_files", "in_file")]),
-        (combine_rigids, restore_ts_frames,
-            [("out_file", "premat")]),
-        (select_warp, restore_ts_frames,
-            [("out", "field_file")]),
         (define_template, select_runwise,
             [("out_matrices", "in_matrices"),
              ("session_info", "session_info")]),
         (run_input, select_runwise,
             [("subject", "subject"),
              ("session", "session")]),
+        (split_ts, restore_ts_frames,
+            [("out_files", "in_file")]),
+        (combine_rigids, restore_ts_frames,
+            [("out_file", "premat")]),
+        (select_warp, restore_ts_frames,
+            [("out", "field_file")]),
         (define_template, restore_ts_frames,
             [("out_template", "ref_file")]),
         (select_runwise, restore_ts_frames,
@@ -441,14 +406,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_file", "in_file")]),
         (anat_segment, identify_noise,
             [("seg_file", "seg_file")]),
-        (finalize_ts, static_ts_qc,
-            [("out_file", "in_file")]),
-        (anat_segment, static_ts_qc,
-            [("seg_file", "seg_file")]),
-        (ts2sb, static_ts_qc,
-            [("par_file", "mc_file")]),
-        (finalize_ts, dynamic_ts_qc,
-            [("out_file", "in_file")]),
 
         # --- Persistent data storage
 
@@ -467,6 +424,96 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
              ("mask_file", "@mask"),
              ("anat_file", "@anat"),
              ("surf_file", "@surf")]),
+
+        # Ouputs associated with each scanner run
+
+        (run_input, timeseries_container,
+            [("subject", "subject"),
+             ("session", "session"),
+             ("run", "run")]),
+        (timeseries_container, timeseries_output,
+            [("path", "container")]),
+        (finalize_ts, timeseries_output,
+            [("out_file", "@timeseries")]),
+        (rename_params, timeseries_output,
+            [("out_file", "@mc_params")]),
+        (ts_stats, timeseries_output,
+            [("mean_file", "@ts_mean"),
+             ("tsnr_file", "@ts_tsnr")]),
+        (identify_noise, timeseries_output,
+            [("out_file", "@noise")]),
+
+    ]
+    workflow.connect(processing_edges)
+
+    # Optionally connect QC nodes
+
+    qc_edges = [
+
+        # Phase-encode distortion estimation
+
+        (session_input, fieldmap_qc,
+            [("fm", "in_file"),
+             ("session", "session"),
+             ("phase_encoding", "phase_encoding")]),
+        (session_input, unwarp_qc,
+            [("session", "session"),
+             ("phase_encoding", "phase_encoding")]),
+        (estimate_distortions, unwarp_qc,
+            [("out_corrected", "in_file")]),
+
+        # Registration of corrected SE-EPI to anatomy
+
+        (session_input, fm2anat_qc,
+            [("subject", "subject_id"),
+             ("session", "session")]),
+        (average_fm, fm2anat_qc,
+            [("out_file", "in_file")]),
+        (fm2anat, fm2anat_qc,
+            [("out_reg_file", "reg_file"),
+             ("min_cost_file", "cost_file")]),
+
+        # Creation of cross-session subject-specific template
+
+        (session_input, func2anat_qc,
+            [("subject", "subject_id")]),
+        (define_template, func2anat_qc,
+            [("reg_file", "reg_file")]),
+        (average_template, func2anat_qc,
+            [("out_file", "in_file")]),
+        (merge_template, dynamic_template_qc,
+            [("merged_file", "in_file")]),
+        (mask_template, static_template_qc,
+            [("out_file", "anat_file")]),
+
+        # Registration of each frame to SBRef image
+
+        (run_input, raw_qc,
+            [("ts", "in_file")]),
+        (run_input, realign_qc,
+            [("sb", "target_file")]),
+        (ts2sb, realign_qc,
+            [("par_file", "realign_params")]),
+
+        # Registration of SBRef volume to SE-EPI fieldmap
+
+        (sb2fm, sb2fm_qc,
+            [("out_file", "in_file")]),
+        (session_input, sb2fm_qc,
+            [("fm", "ref_file")]),
+
+        # Single-interpolation spatial realignment and unwarping
+
+        (finalize_ts, static_ts_qc,
+            [("out_file", "in_file")]),
+        (anat_segment, static_ts_qc,
+            [("seg_file", "seg_file")]),
+        (ts2sb, static_ts_qc,
+            [("par_file", "mc_file")]),
+        (finalize_ts, dynamic_ts_qc,
+            [("out_file", "in_file")]),
+
+        # Ouputs associated with the subject-specific template
 
         (anat_segment, template_output,
             [("seg_plot", "qc.@seg_plot"),
@@ -488,22 +535,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Ouputs associated with each scanner run
 
-        (run_input, timeseries_container,
-            [("subject", "subject"),
-             ("session", "session"),
-             ("run", "run")]),
-        (timeseries_container, timeseries_output,
-            [("path", "container")]),
-        (finalize_ts, timeseries_output,
-            [("out_file", "@timeseries")]),
-        (rename_params, timeseries_output,
-            [("out_file", "@mc_params")]),
-        (ts_stats, timeseries_output,
-            [("mean_file", "@ts_mean"),
-             ("tsnr_file", "@ts_tsnr")]),
-        (identify_noise, timeseries_output,
-            [("out_file", "@noise")]),
-
         (raw_qc, timeseries_output,
             [("out_file", "qc.@raw_gif")]),
         (sb2fm_qc, timeseries_output,
@@ -521,7 +552,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (identify_noise, timeseries_output,
             [("out_plot", "qc.@noise_plot")]),
 
-    ])
+    ]
+    if qc:
+        workflow.connect(qc_edges)
 
     return workflow
 

@@ -225,9 +225,10 @@ def execute_workflow(args):
     subjects = determine_subjects(args.subject)
     sess_info = gather_session_info(proj_info, args.experiment, subjects)
     exp_info = gather_experiment_info(args.experiment)
+    qc = args.qc
 
     if stage == "preproc":
-        wf = define_preproc_workflow(proj_info, sess_info, exp_info)
+        wf = define_preproc_workflow(proj_info, sess_info, exp_info, qc)
 
     wf.config["crashdump_dir"] = os.path.abspath(proj_info["crash_dir"])
 

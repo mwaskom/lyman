@@ -29,6 +29,9 @@ def add_execution(parser):
     parser.add_argument("-g", "--graph",
                         action="store_true",  # TODO make this take a filename
                         help="write graph instead of executing")
+    parser.add_argument("--no-qc",
+                        dest="qc", action="store_false",
+                        help="don't connect qc nodes")
 
 
 if __name__ == "__main__":
