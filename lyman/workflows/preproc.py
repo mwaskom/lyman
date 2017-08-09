@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
-                    Function, IdentityInterface, SelectFiles, DataSink)
+                    IdentityInterface, Function, DataSink)
 from nipype.interfaces.base import (traits, File, TraitedSpec,
                                     InputMultiPath, OutputMultiPath,
                                     isdefined)
@@ -38,7 +38,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     # and tested well, as the logic is fairly complicated. Also there
     # should be a validation of the session info with informative errors
 
-    subject_iterables = list(sess_info.keys())
+    subject_iterables = [subj for subj in sess_info]
+
     subject_source = Node(IdentityInterface(["subject"]),
                           name="subject_source",
                           iterables=("subject", subject_iterables))
@@ -52,83 +53,42 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
                           itersource=("subject_source", "subject"),
                           iterables=("session", session_iterables))
 
+    # TODO The comprehension below drives home that `sess_info` is a
+    # confusion name when the outer layer of parameterization is subject
+    # Need a new name!
+
     run_iterables = {
         (subj, sess): [(subj, sess, run) for run in sess_info[subj][sess]]
-        for subj, subj_info in sess_info.items()
-        for sess in subj_info
+        for subj in sess_info
+        for sess in sess_info[subj]
     }
     run_source = Node(IdentityInterface(["subject", "session", "run"]),
                       name="run_source",
                       itersource=("session_source", "session"),
                       iterables=("run", run_iterables))
 
-    # --- Semantic information
+    session_input = Node(SessionInput(base_directory=proj_info.data_dir,
+                                      fm_template=exp_info.fm_template,
+                                      phase_encoding=exp_info.phase_encoding),
+                         "session_input")
 
-    # These nodes simply unpack the tuples that are used as iterables
-    # (necessary to organize the workflow parameterization properly)
-    # into named fields that can be connected where appropriate below
-
-    def info_func(info_tuple):
-        try:
-            subject, session = info_tuple
-            return subject, session
-        except ValueError:
-            subject, session, run = info_tuple
-            return subject, session, run
-
-    sesswise_info = Node(Function("info_tuple",
-                                  ["subject", "session"],
-                                  info_func),
-                         "sesswise_info")
-
-    runwise_info = Node(Function("info_tuple",
-                                 ["subject", "session", "run"],
-                                 info_func),
-                        "runwise_info")
-
-    # --- Input file selection
-
-    session_templates = dict(se=exp_info.se_template)
-    sesswise_input = Node(SelectFiles(session_templates,
-                                      base_directory=proj_info.data_dir),
-                          "sesswise_input")
-
-    run_templates = dict(ts=exp_info.ts_template, sb=exp_info.sb_template)
-    runwise_input = Node(SelectFiles(run_templates,
-                                     base_directory=proj_info.data_dir),
-                         "runwise_input")
-
-    # --- Reorientation of functional data
-
-    # TODO We also need to impelement removal of first n frames
-    # (not relevant for Prisma data but necessary elsewhere)
-    # Also the FSL workflow converts input data to float32.
-    # All of these steps can be done in pure Python, so perhaps a
-    # custom interface should be defined and replace these FSL calls
-
-    reorient_ts = Node(fsl.Reorient2Std(), "reorient_ts")
-    reorient_fm = reorient_ts.clone("reorient_fm")
-    reorient_sb = reorient_ts.clone("reorient_sb")
+    run_input = Node(RunInput(base_directory=proj_info.data_dir,
+                              sb_template=exp_info.sb_template,
+                              ts_template=exp_info.ts_template),
+                     name="run_input")
 
     raw_qc = Node(TimeSeriesGIF(out_file="raw.gif"), "raw_qc")
 
     # --- Warpfield estimation using topup
 
     # Distortion warpfield estimation
-    # TODO this needs to be in the experiment file!
-    phase_encoding = ["y", "y", "y", "y-", "y-", "y-"]
-    readout_times = [1, 1, 1, 1, 1, 1]
-    estimate_distortions = Node(fsl.TOPUP(encoding_direction=phase_encoding,
-                                          readout_times=readout_times,
-                                          config="b02b0.cnf"),
+    estimate_distortions = Node(fsl.TOPUP(config="b02b0.cnf"),
                                 "estimate_distortions")
 
-    fieldmap_qc = Node(DistortionGIF(phase_encoding=phase_encoding,
-                                     out_file="fieldmap.gif"),
+    fieldmap_qc = Node(DistortionGIF(out_file="fieldmap.gif"),
                        "fieldmap_qc")
 
-    unwarp_qc = Node(DistortionGIF(phase_encoding=phase_encoding,
-                                   out_file="unwarp.gif"),
+    unwarp_qc = Node(DistortionGIF(out_file="unwarp.gif"),
                      "unwarp_qc")
 
     # Average distortion-corrected spin-echo images
@@ -169,6 +129,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     func2anat_qc = Node(AnatRegReport(out_file="reg.png"),
                         "func2anat_qc")
+
+    # --- Segementation of anatomical tissue in functional space
+
+    anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
 
     # --- Associate template-space transforms with data from correct session
 
@@ -216,6 +180,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     merge_template = Node(fsl.Merge(dimension="t"), name="merge_template")
 
+    # TODO scale the templates somehow before averaging?
+
     average_template = Node(fsl.MeanImage(), "average_template")
 
     mask_template = Node(fsl.ApplyMask(out_file="func.nii.gz"),
@@ -226,10 +192,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     dynamic_template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
                                "dynamic_template_qc")
-
-    # --- Segementation of anatomical tissue in functional space
-
-    anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
 
     # --- Motion correction of time series to SBRef (with distortions)
 
@@ -305,42 +267,34 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
     workflow.connect([
 
-        # --- Workflow setup and data ingest
-
         (subject_source, session_source,
             [("subject", "subject")]),
         (subject_source, run_source,
             [("subject", "subject")]),
         (session_source, run_source,
             [("session", "session")]),
-        (session_source, sesswise_info,
-            [("session", "info_tuple")]),
-        (run_source, runwise_info,
-            [("run", "info_tuple")]),
-        (sesswise_info, sesswise_input,
-            [("subject", "subject"),
-             ("session", "session")]),
-        (runwise_info, runwise_input,
-            [("subject", "subject"),
-             ("session", "session"),
-             ("run", "run")]),
+        (session_source, session_input,
+            [("session", "session")]),
+        (run_source, run_input,
+            [("run", "run")]),
 
         # --- SE-EPI fieldmap processing and template creation
 
         # Phase-encode distortion estimation
 
-        (sesswise_input, reorient_fm,
-            [("se", "in_file")]),
-        (reorient_fm, estimate_distortions,
-            [("out_file", "in_file")]),
-        (reorient_fm, fieldmap_qc,
-            [("out_file", "in_file")]),
-        (sesswise_info, fieldmap_qc,
-            [("session", "session")]),
+        (session_input, estimate_distortions,
+            [("fm", "in_file"),
+             ("phase_encoding", "encoding_direction"),
+             ("readout_times", "readout_times")]),
+        (session_input, fieldmap_qc,
+            [("fm", "in_file"),
+             ("session", "session"),
+             ("phase_encoding", "phase_encoding")]),
         (estimate_distortions, select_warp,
             [("out_warps", "inlist")]),
-        (sesswise_info, unwarp_qc,
-            [("session", "session")]),
+        (session_input, unwarp_qc,
+            [("session", "session"),
+             ("phase_encoding", "phase_encoding")]),
         (estimate_distortions, unwarp_qc,
             [("out_corrected", "in_file")]),
         (select_warp, mask_distortions,
@@ -350,11 +304,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Registration of corrected SE-EPI to anatomy
 
-        (sesswise_info, fm2anat,
+        (session_input, fm2anat,
             [("subject", "subject_id")]),
         (average_fm, fm2anat,
             [("out_file", "source_file")]),
-        (sesswise_info, fm2anat_qc,
+        (session_input, fm2anat_qc,
             [("subject", "subject_id"),
              ("session", "session")]),
         (average_fm, fm2anat_qc,
@@ -365,13 +319,12 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Creation of cross-session subject-specific template
 
-        (session_source, define_template,
-            [("session", "session_info")]),
-        (reorient_fm, define_template,
-            [("out_file", "in_volumes")]),
+        (session_input, define_template,
+            [("session", "session_info"),
+             ("fm", "in_volumes")]),
         (fm2anat, define_template,
             [("out_fsl_file", "in_matrices")]),
-        (sesswise_info, func2anat_qc,
+        (session_input, func2anat_qc,
             [("subject", "subject_id")]),
         (define_template, func2anat_qc,
             [("reg_file", "reg_file")]),
@@ -381,11 +334,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("out_matrices", "in_matrices"),
              ("out_template", "in_templates"),
              ("session_info", "session_info")]),
-        (sesswise_info, select_sesswise,
+        (session_input, select_sesswise,
             [("subject", "subject"),
              ("session", "session")]),
-        (reorient_fm, split_fm,
-            [("out_file", "in_file")]),
+        (session_input, split_fm,
+            [("fm", "in_file")]),
         (split_fm, restore_fm,
             [("out_files", "in_file")]),
         (estimate_distortions, restore_fm,
@@ -422,33 +375,28 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Registration of each frame to SBRef image
 
-        (runwise_input, reorient_ts,
+        (run_input, raw_qc,
             [("ts", "in_file")]),
-        (runwise_input, reorient_sb,
-            [("sb", "in_file")]),
-        (reorient_ts, raw_qc,
-            [("out_file", "in_file")]),
-        (reorient_ts, ts2sb,
-            [("out_file", "in_file")]),
-        (reorient_sb, ts2sb,
-            [("out_file", "ref_file")]),
-        (reorient_sb, realign_qc,
-            [("out_file", "target_file")]),
+        (run_input, ts2sb,
+            [("ts", "in_file"),
+             ("sb", "ref_file")]),
+        (run_input, realign_qc,
+            [("sb", "target_file")]),
         (ts2sb, realign_qc,
             [("par_file", "realign_params")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
 
-        (reorient_sb, sb2fm,
-            [("out_file", "in_file")]),
-        (reorient_fm, sb2fm,
-            [("out_file", "reference")]),
+        (run_input, sb2fm,
+            [("sb", "in_file")]),
+        (session_input, sb2fm,
+            [("fm", "reference")]),
         (mask_distortions, sb2fm,
             [("out_file", "ref_weight")]),
         (sb2fm, sb2fm_qc,
             [("out_file", "in_file")]),
-        (reorient_fm, sb2fm_qc,
-            [("out_file", "ref_file")]),
+        (session_input, sb2fm_qc,
+            [("fm", "ref_file")]),
 
         # Single-interpolation spatial realignment and unwarping
 
@@ -456,8 +404,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
             [("mat_file", "in_file")]),
         (sb2fm, combine_rigids,
             [("out_matrix_file", "in_file2")]),
-        (reorient_ts, split_ts,
-            [("out_file", "in_file")]),
+        (run_input, split_ts,
+            [("ts", "in_file")]),
         (split_ts, restore_ts_frames,
             [("out_files", "in_file")]),
         (combine_rigids, restore_ts_frames,
@@ -467,7 +415,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
         (define_template, select_runwise,
             [("out_matrices", "in_matrices"),
              ("session_info", "session_info")]),
-        (runwise_info, select_runwise,
+        (run_input, select_runwise,
             [("subject", "subject"),
              ("session", "session")]),
         (define_template, restore_ts_frames,
@@ -501,7 +449,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Ouputs associated with the subject-specific template
 
-        (sesswise_info, template_container,
+        (session_input, template_container,
             [("subject", "subject")]),
         (template_container, template_output,
             [("path", "container")]),
@@ -535,7 +483,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
 
         # Ouputs associated with each scanner run
 
-        (runwise_info, timeseries_container,
+        (run_input, timeseries_container,
             [("subject", "subject"),
              ("session", "session"),
              ("run", "run")]),
@@ -570,6 +518,132 @@ def define_preproc_workflow(proj_info, sess_info, exp_info):
     ])
 
     return workflow
+
+
+# =========================================================================== #
+
+
+class SessionInput(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        session = traits.Tuple()
+        base_directory = traits.Str()
+        fm_template = traits.Str()
+        phase_encoding = traits.Str()
+
+    class output_spec(TraitedSpec):
+        fm = traits.File(exists=True)
+        phase_encoding = traits.List(traits.Str())
+        readout_times = traits.List(traits.Float())
+        session_key = traits.Tuple()
+        subject = traits.Str()
+        session = traits.Str()
+
+    def _run_interface(self, runtime):
+
+        # Determine the phase encoding directions
+        pe = self.inputs.phase_encoding
+        if pe == "ap":
+            pos_pe, neg_pe = "ap", "pa"
+        elif pe == "pa":
+            pos_pe, neg_pe = "pa", "ap"
+        else:
+            raise ValueError("Phase encoding must be 'ap' or 'pa'")
+
+        # Determine the parameters
+        subject, session = self.inputs.session
+        self._results["session_key"] = self.inputs.session
+        self._results["subject"] = str(subject)
+        self._results["session"] = str(session)
+
+        # Spec out full paths to the pair of fieldmap files
+        keys = dict(subject=subject, session=session)
+        template = self.inputs.fm_template
+        pos_fname = op.join(self.inputs.base_directory,
+                            template.format(encoding=pos_pe, **keys))
+        neg_fname = op.join(self.inputs.base_directory,
+                            template.format(encoding=neg_pe, **keys))
+
+        # Load the two images in canonical orientation
+        pos_img = nib.as_closest_canonical(nib.load(pos_fname))
+        neg_img = nib.as_closest_canonical(nib.load(neg_fname))
+        affine, header = pos_img.affine, pos_img.header
+
+        # Concatenate the images into a single volume
+        pos_data = pos_img.get_data()
+        neg_data = neg_img.get_data()
+        data = np.concatenate([pos_data, neg_data], axis=-1)
+        assert len(data.shape) == 4
+
+        # Convert image datatype to float
+        header.set_data_dtype(np.float32)
+
+        # Write out a 4D file
+        fname = self.define_output("fm", "fieldmap.nii.gz")
+        img = nib.Nifti1Image(data, affine, header)
+        img.to_filename(fname)
+
+        # Define phase encoding and readout times for TOPUP
+        pe_dir = ["y"] * pos_img.shape[-1] + ["y-"] * neg_img.shape[-1]
+        readout_times = [1 for _ in pe_dir]
+        self._results["phase_encoding"] = pe_dir
+        self._results["readout_times"] = readout_times
+
+        return runtime
+
+
+class RunInput(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        run = traits.Tuple()
+        base_directory = traits.Str()
+        sb_template = traits.Str()
+        ts_template = traits.Str()
+        crop_frames = traits.Int(0, usedefault=True)
+
+    class output_spec(TraitedSpec):
+        sb = traits.File(exists=True)
+        ts = traits.File(exists=True)
+        subject = traits.Str()
+        session = traits.Str()
+        run = traits.Str()
+
+    def _run_interface(self, runtime):
+
+        # Determine the parameters
+        subject, session, run = self.inputs.run
+        self._results["subject"] = subject
+        self._results["session"] = session
+        self._results["run"] = run
+
+        # Spec out paths to the input files
+        keys = dict(subject=subject, session=session, run=run)
+        sb_fname = op.join(self.inputs.base_directory,
+                           self.inputs.sb_template.format(**keys))
+        ts_fname = op.join(self.inputs.base_directory,
+                           self.inputs.ts_template.format(**keys))
+
+        # Load the input images in canonical orientation
+        sb_img = nib.as_closest_canonical(nib.load(sb_fname))
+        ts_img = nib.as_closest_canonical(nib.load(ts_fname))
+
+        # Convert image datatypes to float
+        sb_img.set_data_dtype(np.float32)
+        ts_img.set_data_dtype(np.float32)
+
+        # Optionally crop the first n frames of the timeseries
+        if self.inputs.crop_frames > 0:
+            ts_data = ts_img.get_data()
+            ts_data = ts_data[..., self.inputs.crop_frames:]
+            ts_img = nib.Nifti1Image(ts_data, ts_img.affine, ts_img.header)
+
+        # Write out the new images
+        self.save_image(sb_img, "sb", "sb.nii.gz")
+        self.save_image(ts_img, "ts", "ts.nii.gz")
+
+        # TODO Better to generate the timeseries GIF here?
+
+        return runtime
 
 
 class RealignmentReport(SimpleInterface):
