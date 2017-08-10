@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
-                    IdentityInterface, Function, Rename, DataSink)
+                    IdentityInterface, Function, DataSink)
 from nipype.interfaces.base import (traits, File, TraitedSpec,
                                     InputMultiPath, OutputMultiPath,
                                     isdefined)
@@ -197,8 +197,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
     ts2sb = Node(fsl.MCFLIRT(save_mats=True, save_plots=True),
                  "ts2sb")
 
-    rename_params = Node(Rename("mc.txt"), "rename_params")
-
     realign_qc = Node(RealignmentReport(), "realign_qc")
 
     # --- Combined motion correction and unwarping of time series
@@ -215,23 +213,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
                                 ["in_file", "premat"],
                                 "restore_ts")
 
-    # Recombine the time series frames into a 4D image
-    merge_ts = Node(fsl.Merge(dimension="t"), "merge_ts")
-
-    # Mask, scale, and detrend the timeseries; make a gif
+    # Perform final preprocessing operations on timeseries
     finalize_ts = Node(FinalizeTimeseries(), "finalize_ts")
-
-    # Descriptive timeseries statistics
-    ts_stats = Node(TimeSeriesStats(), "ts_stats")
-
-    # Generate a mask of noise voxels
-    # TODO parameterize the neighborhood and/or threshold
-    # also maybe this should be move downstream into modeling
-    # so those can be changed without rerunning preproc...
-    identify_noise = Node(IdentifyNoiseVoxels(), "identify_noise")
-
-    # QC plots for the preprocessed timeseries
-    static_ts_qc = Node(CarpetPlot(out_file="func.png"), "static_ts_qc")
 
     # --- Workflow ouptut
 
@@ -353,8 +336,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (run_input, ts2sb,
             [("ts", "in_file"),
              ("sb", "ref_file")]),
-        (ts2sb, rename_params,
-            [("par_file", "in_file")]),
+        (ts2sb, finalize_ts,
+            [("par_file", "mc_file")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
 
@@ -389,20 +372,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
             [("out_template", "ref_file")]),
         (select_runwise, restore_ts_frames,
             [("out_matrix", "postmat")]),
-        (restore_ts_frames, merge_ts,
+        (restore_ts_frames, finalize_ts,
             [("out_file", "in_files")]),
-        (merge_ts, finalize_ts,
-            [("merged_file", "in_file")]),
         (anat_segment, finalize_ts,
-            [("mask_file", "mask_file")]),
-        (finalize_ts, ts_stats,
-            [("out_file", "in_file")]),
-        (anat_segment, ts_stats,
-            [("mask_file", "mask_file")]),
-        (finalize_ts, identify_noise,
-            [("out_file", "in_file")]),
-        (anat_segment, identify_noise,
-            [("seg_file", "seg_file")]),
+            [("seg_file", "seg_file"),
+             ("mask_file", "mask_file")]),
 
         # --- Persistent data storage
 
@@ -431,14 +405,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (timeseries_container, timeseries_output,
             [("path", "container")]),
         (finalize_ts, timeseries_output,
-            [("out_file", "@timeseries")]),
-        (rename_params, timeseries_output,
-            [("out_file", "@mc_params")]),
-        (ts_stats, timeseries_output,
-            [("mean_file", "@ts_mean"),
-             ("tsnr_file", "@ts_tsnr")]),
-        (identify_noise, timeseries_output,
-            [("out_file", "@noise")]),
+            [("out_file", "@func"),
+             ("mean_file", "@mean"),
+             ("tsnr_file", "@tsnr"),
+             ("noise_file", "@noise"),
+             ("mc_file", "@mc")]),
 
     ]
     workflow.connect(processing_edges)
@@ -497,15 +468,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (session_input, sb2fm_qc,
             [("fm", "ref_file")]),
 
-        # Single-interpolation spatial realignment and unwarping
-
-        (finalize_ts, static_ts_qc,
-            [("out_file", "in_file")]),
-        (anat_segment, static_ts_qc,
-            [("seg_file", "seg_file")]),
-        (ts2sb, static_ts_qc,
-            [("par_file", "mc_file")]),
-
         # Ouputs associated with the subject-specific template
 
         (anat_segment, template_output,
@@ -535,17 +497,15 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (realign_qc, timeseries_output,
             [("params_plot", "qc.@params_plot"),
              ("target_plot", "qc.@target_plot")]),
-        (static_ts_qc, timeseries_output,
-            [("out_file", "qc.@ts_png")]),
         (finalize_ts, timeseries_output,
-            [("out_plot", "qc.@ts_gif")]),
-        (ts_stats, timeseries_output,
-            [("mean_plot", "qc.@ts_mean_plot"),
-             ("tsnr_plot", "qc.@ts_tsnr_plot")]),
-        (identify_noise, timeseries_output,
-            [("out_plot", "qc.@noise_plot")]),
+            [("out_gif", "qc.@ts_gif"),
+             ("out_png", "qc.@ts_png"),
+             ("mean_plot", "qc.@ts_mean_plot"),
+             ("tsnr_plot", "qc.@ts_tsnr_plot"),
+             ("noise_plot", "qc.@noise_plot")]),
 
     ]
+
     if qc:
         workflow.connect(qc_edges)
 
@@ -739,7 +699,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         self.save_image(ts_img, "ts", "ts.nii.gz")
 
         # Make a GIF movie of the raw timeseries
-        out_plot = self.define_output("out_plot", "func.gif")
+        out_plot = self.define_output("ts_plot", "raw.gif")
         self.write_time_series_gif(runtime, ts_img, out_plot)
 
         return runtime
@@ -751,170 +711,117 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
 class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
+        in_files = InputMultiPath(traits.File(exists=True))
+        seg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
+        mc_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         out_file = traits.File(exists=True)
-        out_plot = traits.File(exists=True)
+        out_gif = traits.File(exists=True)
+        out_png = traits.File(exists=True)
+        mean_file = traits.File(exists=True)
+        mean_plot = traits.File(exists=True)
+        tsnr_file = traits.File(exists=True)
+        tsnr_plot = traits.File(exists=True)
+        noise_file = traits.File(exists=True)
+        noise_plot = traits.File(exists=True)
+        mc_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        img = nib.load(self.inputs.in_file)
+        # Concatenate timeseries frames into 4D image
+        img = nib.concat_images(self.inputs.in_files)
+        affine, header = img.affine, img.header
         data = img.get_data()
 
-        mask = nib.load(self.inputs.mask_file).get_data().astype(np.bool)
+        # Load the brain mask and seg images
+        seg_img = nib.load(self.inputs.seg_file)
+        seg = seg_img.get_data()
+
+        mask_img = nib.load(self.inputs.mask_file)
+        mask = mask_img.get_data().astype(np.bool)
 
         # Zero-out data outside the mask
         data[~mask] = 0
 
         # Scale the timeseries for cross-run intensity normalization
         target = 10000
-        data = self.scale_timeseries(data, mask, target)
+        stat_value = data[mask].mean()
+        scale_value = target / stat_value
+        data = data * scale_value
+
+        # Remove linear but not constant trend
         mean = data.mean(axis=-1, keepdims=True)
-
-        # Detrend the timeseries
         data[mask] = signal.detrend(data[mask])
-
-        # Add the original temporal mean back in
         data += mean
 
         # Save out the final time series
-        out_file = op.abspath("func.nii.gz")
-        self._results["out_file"] = out_file
-
-        out_img = nib.Nifti1Image(data, img.affine, img.header)
+        out_file = self.define_output("out_file", "func.nii.gz")
+        out_img = nib.Nifti1Image(data, affine, header)
         out_img.to_filename(out_file)
 
-        # Make a GIF movie of the final timeseries
-        out_plot = self.define_output("out_plot", "func.gif")
-        self.write_time_series_gif(runtime, out_img, out_plot)
-
-        # TODO move much more into here!
-        # TODO also make the carpet plot here?
-        # Just to save an additional loading of the time series
-        # Although also we would need the moco params to do so,
-        # and thus could rename / add a header to obviate that extra node
-
-        return runtime
-
-    def scale_timeseries(self, data, mask, target):
-        """Make scale timeseries across four dimensions to a target."""
-        stat_value = data[mask].mean()
-        scale_value = target / stat_value
-        scaled_data = data * scale_value
-        return scaled_data
-
-
-class IdentifyNoiseVoxels(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        seg_file = traits.File(exists=True)
-        neighborhood = traits.Float(5, usedefault=True)
-        threshold = traits.Float(1.5, usedefault=True)
-        subcortical = traits.Bool(True, usedefault=True)
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-        out_plot = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        ts_img = nib.load(self.inputs.in_file)
-
-        seg_img = nib.load(self.inputs.seg_file)
-        seg = seg_img.get_data()
-        if self.inputs.subcortical:
-            mask = (seg > 0) & (seg < 5)
-        else:
-            mask = seg == 1
-        mask_img = nib.Nifti1Image(mask, seg_img.affine, seg_img.header)
-
-        noise_img = signals.identify_noisy_voxels(
-            ts_img, mask_img,
-            neighborhood=self.inputs.neighborhood,
-            threshold=self.inputs.threshold,
-            detrend=False
-        )
-
-        out_file = op.abspath("noise.nii.gz")
-        self._results["out_file"] = out_file
-        noise_img.to_filename(out_file)
-
-        data = ts_img.get_data()
+        # Generate the temporal mean and SNR images
         mean = data.mean(axis=-1)
-        mean_img = nib.Nifti1Image(mean, ts_img.affine, ts_img.header)
-
-        out_plot = op.abspath("noise.png")
-        self._results["out_plot"] = out_plot
-
-        m = Mosaic(mean_img, noise_img, seg > 0, show_mask=False)
-        m.plot_mask(alpha=1)
-        m.savefig(out_plot)
-        m.close()
-
-        return runtime
-
-
-class TimeSeriesStats(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        mask_file = traits.File(exists=True)
-
-    class output_spec(TraitedSpec):
-        mean_file = traits.File(exists=True)
-        tsnr_file = traits.File(exists=True)
-        mean_plot = traits.File(exists=True)
-        tsnr_plot = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        ts_img = nib.load(self.inputs.in_file)
-        affine, header = ts_img.affine, ts_img.header
-        data = ts_img.get_data()
-
-        mask_img = nib.load(self.inputs.mask_file)
-        mask = mask_img.get_data().astype(np.bool)
-
-        mean = data.mean(axis=-1)
-        data[mask] = signal.detrend(data[mask])
         sd = data.std(axis=-1)
-
         with np.errstate(all="ignore"):
             tsnr = mean / sd
             tsnr[~mask] = 0
 
-        mean_file = op.abspath("mean.nii.gz")
-        self._results["mean_file"] = mean_file
+        mean_file = self.define_output("mean_file", "mean.nii.gz")
         mean_img = nib.Nifti1Image(mean, affine, header)
         mean_img.to_filename(mean_file)
 
-        tsnr_file = op.abspath("tsnr.nii.gz")
-        self._results["tsnr_file"] = tsnr_file
+        tsnr_file = self.define_output("tsnr_file", "tsnr.nii.gz")
         tsnr_img = nib.Nifti1Image(tsnr, affine, header)
         tsnr_img.to_filename(tsnr_file)
 
-        # TODO normalize by within cortex mean?
-        # TODO use cubehelix colormaps
+        # Identify unusually noisy voxels
+        noise_file = self.define_output("noise_file", "noise.nii.gz")
+        gray_mask = (0 < seg) & (seg < 5)
+        gray_img = nib.Nifti1Image(gray_mask, img.affine, img.header)
+        noise_img = signals.identify_noisy_voxels(
+            out_img, gray_img, neighborhood=5, threshold=1.5, detrend=False
+        )
+        noise_img.to_filename(noise_file)
 
-        mean_plot = op.abspath("mean.png")
-        self._results["mean_plot"] = mean_plot
-        norm_mean = mean / mean.max()
-        mean_m = Mosaic(mean_img, norm_mean, mask_img,
-                        tight=True, show_mask=False)
-        mean_m.plot_overlay("magma", vmin=0, vmax=1, fmt="d")
+        # Load the motion correction params and convert to CSV with header
+        mc_file = self.define_output("mc_file", "mc.csv")
+        mc_data = np.loadtxt(self.inputs.mc_file)
+        cols = ["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"]
+        mc_data = pd.DataFrame(mc_data, columns=cols)
+        mc_data.to_csv(mc_file, index=False)
+
+        # Make a carpet plot of the final timeseries
+        out_png = self.define_output("out_png", "func.png")
+        p = CarpetPlot(out_img, seg_img, mc_data)
+        p.savefig(out_png)
+        p.close()
+
+        # Make a GIF movie of the final timeseries
+        out_gif = self.define_output("out_gif", "func.gif")
+        self.write_time_series_gif(runtime, out_img, out_gif)
+
+        # Make mosaics of the temporal mean and SNR
+        mean_plot = self.define_output("mean_plot", "mean.png")
+        norm_mean = mean / mean[gray_mask].mean()
+        mean_m = Mosaic(mean_img, norm_mean, mask_img, show_mask=False)
+        mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=1, fmt="d")
         mean_m.savefig(mean_plot)
         mean_m.close()
 
-        tsnr_plot = op.abspath("tsnr.png")
-        self._results["tsnr_plot"] = tsnr_plot
-        tsnr_m = Mosaic(mean_img, tsnr, mask_img,
-                        tight=True, show_mask=False)
-        tsnr_m.plot_overlay("viridis", vmin=20, vmax=100, fmt="d")
+        tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
+        tsnr_m = Mosaic(tsnr_img, tsnr_img, mask_img, show_mask=False)
+        tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
         tsnr_m.savefig(tsnr_plot)
         tsnr_m.close()
+
+        # Make a mosaic of the noisy voxels
+        noise_plot = self.define_output("noise_plot", "noise.png")
+        m = Mosaic(mean_img, noise_img, mask_img, show_mask=False)
+        m.plot_mask(alpha=1)
+        m.savefig(noise_plot)
+        m.close()
 
         return runtime
 
@@ -1052,7 +959,7 @@ class AnatomicalSegmentation(SimpleInterface):
          )
         m_seg = Mosaic(template_img, seg_img, mask_img,
                        step=2, tight=True, show_mask=False)
-        m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
+        m_seg.plot_overlay(seg_cmap, 1, len(seg_cmap), thresh=.5, fmt=None)
         m_seg.savefig(seg_plot)
         m_seg.close()
 

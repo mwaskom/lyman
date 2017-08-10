@@ -1,17 +1,14 @@
 from __future__ import division
-import os.path as op
 import numpy as np
+import pandas as pd
 from scipy.signal import detrend
 from scipy.ndimage import gaussian_filter
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import nibabel as nib
 
-from nipype.interfaces.base import File, TraitedSpec, isdefined
-from .graphutils import SimpleInterface
 
-
-class CarpetPlotter(object):
+class CarpetPlot(object):
 
     components = [
         "cortex", "subgm", "brainstem", "cerebellum",
@@ -34,10 +31,10 @@ class CarpetPlotter(object):
             4D time series data to plot.
         wmparc : filename or nibabel image
             Freesurfer wmparc image in functional space.
-        realign_params : filename or numpy array, optional
-            Text file or array of FSL realignment parameters. If present, the
-            time series of framewise displacements will be shown at the top of
-            the figure.
+        realign_params : filename or DataFrame, optional
+            Text file or array of realignment parameters. If present, the time
+            series of framewise displacements will be shown at the top of the
+            figure.
         smooth_fwhm : float or None, optional
             Size of the smoothing kernel, in mm, to apply. Smoothing is
             restricted within the mask for each component (cortex, cerebellum,
@@ -103,6 +100,10 @@ class CarpetPlotter(object):
         self.segdata = segdata
         self.fd = fd
 
+    def savefig(self, fname, **kwargs):
+
+        self.fig.savefig(fname, **kwargs)
+
     def close(self):
 
         plt.close(self.fig)
@@ -154,13 +155,14 @@ class CarpetPlotter(object):
     def framewise_displacement(self, realign_params):
         """Compute the time series of framewise displacements."""
         if isinstance(realign_params, str):
-            rp = np.loadtxt(realign_params)
+            rp = pd.read_csv(realign_params)
         elif isinstance(realign_params, np.ndarray):
             rp = realign_params
         else:
             return None
 
-        r, t = np.hsplit(rp, 2)
+        r = rp.filter(regexp="rot").values
+        t = rp.filter(regexp="trans").values
         s = r * 50
         ad = np.hstack([s, t])
         rd = np.abs(np.diff(ad, axis=0))
@@ -238,32 +240,3 @@ class CarpetPlotter(object):
                 ha="center", va="bottom", clip_on=False)
         ax.text(0, 103, "$-${}".format(vlim),
                 ha="center", va="top", clip_on=False)
-
-
-class CarpetPlot(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = File(exists=True)
-        seg_file = File(exists=True)
-        mc_file = File(exists=True)
-        out_file = File()
-
-    class output_spec(TraitedSpec):
-        out_file = File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        ts_img = nib.load(self.inputs.in_file)
-        seg_img = nib.load(self.inputs.seg_file)
-        if isdefined(self.inputs.mc_file):
-            mc = self.inputs.mc_file
-        else:
-            mc = None
-
-        out_file = op.abspath(self.inputs.out_file)
-        self._results["out_file"] = out_file
-        p = CarpetPlotter(ts_img, seg_img, mc)
-        p.fig.savefig(out_file)
-        p.close()
-
-        return runtime
