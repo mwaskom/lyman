@@ -82,12 +82,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
     estimate_distortions = Node(fsl.TOPUP(config="b02b0.cnf"),
                                 "estimate_distortions")
 
-    # TODO do this in one image with both pairs, and compute correlations
-    fieldmap_qc = Node(DistortionGIF(out_file="fieldmap.gif"),
-                       "fieldmap_qc")
-
-    unwarp_qc = Node(DistortionGIF(out_file="unwarp.gif"),
-                     "unwarp_qc")
+    fieldmap_qc = Node(FieldMapReport(), "fieldmap_qc")
 
     # Average distortion-corrected spin-echo images
     average_fm = Node(fsl.MeanImage(out_file="fm_restored.nii.gz"),
@@ -420,14 +415,11 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         # Phase-encode distortion estimation
 
         (session_input, fieldmap_qc,
-            [("fm", "in_file"),
+            [("fm", "orig_file"),
              ("session", "session"),
              ("phase_encoding", "phase_encoding")]),
-        (session_input, unwarp_qc,
-            [("session", "session"),
-             ("phase_encoding", "phase_encoding")]),
-        (estimate_distortions, unwarp_qc,
-            [("out_corrected", "in_file")]),
+        (estimate_distortions, fieldmap_qc,
+            [("out_corrected", "corr_file")]),
 
         # Registration of corrected SE-EPI to anatomy
 
@@ -481,8 +473,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (dynamic_template_qc, template_output,
             [("out_file", "qc.@template_gif")]),
         (fieldmap_qc, template_output,
-            [("out_file", "qc.sessions.@fieldmap_gif")]),
-        (unwarp_qc, template_output,
             [("out_file", "qc.sessions.@unwarp_gif")]),
         (fm2anat_qc, template_output,
             [("out_file", "qc.sessions.@fm2anat_plot")]),
@@ -1202,6 +1192,86 @@ class AnatRegReport(SimpleInterface):
         return runtime
 
 
+class FieldMapReport(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        orig_file = traits.File(exists=True)
+        corr_file = traits.File(exists=True)
+        phase_encoding = traits.List(traits.Str)
+        session = traits.Str()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        vol_data = dict(orig=nib.load(self.inputs.orig_file).get_data(),
+                        corr=nib.load(self.inputs.corr_file).get_data())
+
+        pe_data = dict(orig=[], corr=[])
+        pe = np.array(self.inputs.phase_encoding)
+        for enc in np.unique(pe):
+            enc_trs = pe == enc
+            for scan in ["orig", "corr"]:
+                enc_data = vol_data[scan][..., enc_trs].mean(axis=-1)
+                pe_data[scan].append(enc_data)
+
+        r_vals = dict()
+        for scan, (scan_pos, scan_neg) in pe_data.items():
+            r_vals[scan] = np.corrcoef(scan_pos.flat, scan_neg.flat)[0, 1]
+
+        nx, ny, nz, _ = vol_data["orig"].shape
+        x_slc = (np.linspace(.2, .8, 8) * nx).astype(np.int)
+
+        vmin, vmax = np.percentile(vol_data["orig"].flat, [2, 98])
+        kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
+
+        width = len(x_slc)
+        height = (nz / ny) * 2.75
+
+        png_fnames = []
+        for i, enc in enumerate(["pos", "neg"]):
+
+            f = plt.figure(figsize=(width, height))
+            gs = dict(
+                orig=plt.GridSpec(1, len(x_slc), 0, .5, 1, .95, 0, 0),
+                corr=plt.GridSpec(1, len(x_slc), 0, 0, 1, .45, 0, 0)
+            )
+
+            text_kws = dict(size=7, color="w", backgroundcolor="0",
+                            ha="center", va="bottom")
+            f.text(.5, .93,
+                   "Original similarity: {:.2f}".format(r_vals["orig"]),
+                   **text_kws)
+            f.text(.5, .43,
+                   "Corrected similarity: {:.2f}".format(r_vals["corr"]),
+                   **text_kws)
+
+            for scan in ["orig", "corr"]:
+                axes = [f.add_subplot(pos) for pos in gs[scan]]
+                vol = pe_data[scan][i]
+
+                for ax, x in zip(axes, x_slc):
+                    slice = np.rot90(vol[x])
+                    ax.imshow(slice, **kws)
+                    ax.set_axis_off()
+
+                png_fname = "frame{}.png".format(i)
+                png_fnames.append(png_fname)
+                f.savefig(png_fname, facecolor="0", edgecolor="0")
+                plt.close(f)
+
+        out_fname = "{}_unwarp.gif".format(self.inputs.session)
+        out_file = self.define_output("out_file", out_fname)
+        cmdline = ["convert", "-loop", "0", "-delay", "100"]
+        cmdline.extend(png_fnames)
+        cmdline.append(out_file)
+
+        self.submit_cmdline(runtime, cmdline)
+
+        return runtime
+
+
 class CoregGIF(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -1240,43 +1310,6 @@ class CoregGIF(SimpleInterface):
                    "img1.png", "img2.png", fname]
 
         self.submit_cmdline(runtime, cmdline)
-
-
-class DistortionGIF(CoregGIF):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        out_file = traits.File()
-        phase_encoding = traits.List(traits.Str)
-        session = traits.Str()
-
-    def _run_interface(self, runtime):
-
-        img = nib.load(self.inputs.in_file)
-        data = img.get_data()
-        lims = 0, np.percentile(data, 98)
-
-        imgs = []
-
-        pe = np.array(self.inputs.phase_encoding)
-        for enc in np.unique(pe):
-
-            enc_trs = pe == enc
-            enc_data = data[..., enc_trs].mean(axis=-1)
-
-            imgs.append(nib.Nifti1Image(enc_data, img.affine, img.header))
-
-        if isdefined(self.inputs.session):
-            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
-        else:
-            fname = self.inputs.out_file
-        out_file = self.define_output("out_file", fname)
-
-        img1, img2 = imgs
-        self.write_mosaic_gif(runtime, img1, img2, out_file,
-                              slice_dir="sag", tight=False, anat_lims=lims)
-
-        return runtime
 
 
 class FrameGIF(SimpleInterface):
