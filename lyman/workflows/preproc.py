@@ -802,14 +802,15 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         out_gif = self.define_output("out_gif", "func.gif")
         self.write_time_series_gif(runtime, out_img, out_gif)
 
-        # Make mosaics of the temporal mean and SNR
+        # Make a mosaic of the temporal mean normalized to mean cortical signal
         mean_plot = self.define_output("mean_plot", "mean.png")
-        norm_mean = mean / mean[gray_mask].mean()
+        norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(mean_img, norm_mean, mask_img, show_mask=False)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=1, fmt="d")
         mean_m.savefig(mean_plot)
         mean_m.close()
 
+        # Make a mosaic of the tSNR
         tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
         tsnr_m = Mosaic(tsnr_img, tsnr_img, mask_img, show_mask=False)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
@@ -953,7 +954,7 @@ class AnatomicalSegmentation(SimpleInterface):
          )
         m_seg = Mosaic(template_img, seg_img, mask_img,
                        step=2, tight=True, show_mask=False)
-        m_seg.plot_overlay(seg_cmap, 1, len(seg_cmap), thresh=.5, fmt=None)
+        m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
         m_seg.savefig(seg_plot)
         m_seg.close()
 
