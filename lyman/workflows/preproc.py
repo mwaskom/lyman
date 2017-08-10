@@ -83,6 +83,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
     estimate_distortions = Node(fsl.TOPUP(config="b02b0.cnf"),
                                 "estimate_distortions")
 
+    # TODO do this in one image with both pairs, and compute correlations
     fieldmap_qc = Node(DistortionGIF(out_file="fieldmap.gif"),
                        "fieldmap_qc")
 
@@ -552,7 +553,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
 
 # =========================================================================== #
+# Custom processing nodes
+# =========================================================================== #
 
+# ---- Quality control mixins
 
 class TimeSeriesGIF(object):
 
@@ -610,6 +614,9 @@ class TimeSeriesGIF(object):
         cmdline.append(fname)
 
         self.submit_cmdline(runtime, cmdline)
+
+
+# ---- Data input and pre-preprocessing
 
 
 class SessionInput(SimpleInterface):
@@ -738,257 +745,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         return runtime
 
 
-class RealignmentReport(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        target_file = File(exists=True)
-        realign_params = File(exists=True)
-
-    class output_spec(TraitedSpec):
-        params_plot = File(exists=True)
-        target_plot = File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        # Load the realignment parameters
-        params = np.loadtxt(self.inputs.realign_params)
-        cols = ["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"]
-        df = pd.DataFrame(params, columns=cols)
-
-        # Plot the motion timeseries
-        params_plot = op.abspath("mc_params.png")
-        self._results["params_plot"] = params_plot
-        f = self.plot_motion(df)
-        f.savefig(params_plot, dpi=100)
-        plt.close(f)
-
-        # Plot the target image
-        target_plot = op.abspath("mc_target.png")
-        self._results["target_plot"] = target_plot
-        m = self.plot_target()
-        m.savefig(target_plot)
-        m.close()
-
-        return runtime
-
-    def plot_motion(self, df):
-        """Plot the timecourses of realignment parameters."""
-        fig, axes = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
-
-        # Trim off all but the axis name
-        def axis(s):
-            return s[-1]
-
-        # Plot rotations
-        rot_pal = ["#8b312d", "#e33029", "#f06855"]
-        rot_df = df.filter(like="rot").apply(np.rad2deg).rename(columns=axis)
-        rot_df.plot(ax=axes[0], color=rot_pal, lw=1.5)
-
-        # Plot translations
-        trans_pal = ["#355d9a", "#3787c0", "#72acd3"]
-        trans_df = df.filter(like="trans").rename(columns=axis)
-        trans_df.plot(ax=axes[1], color=trans_pal, lw=1.5)
-
-        # Label the graphs
-        axes[0].set_xlim(0, len(df) - 1)
-        axes[0].axhline(0, c=".4", ls="--", zorder=1)
-        axes[1].axhline(0, c=".4", ls="--", zorder=1)
-
-        for ax in axes:
-            ax.legend(ncol=3, loc="best")
-
-        axes[0].set_ylabel("Rotations (degrees)")
-        axes[1].set_ylabel("Translations (mm)")
-        fig.tight_layout()
-        return fig
-
-    def plot_target(self):
-        """Plot a mosaic of the motion correction target image."""
-        return Mosaic(self.inputs.target_file, step=2)
-
-
-class AnatRegReport(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        subject_id = traits.Str()
-        session = traits.Str()
-        in_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
-        cost_file = traits.File(exists=True)
-        out_file = traits.File()
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        # Use the registration to transform the input file
-        registered_file = "func_in_anat.nii.gz"
-        cmdline = ["mri_vol2vol",
-                   "--mov", self.inputs.in_file,
-                   "--reg", self.inputs.reg_file,
-                   "--o", registered_file,
-                   "--fstarg",
-                   "--cubic"]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # Load the WM segmentation and a brain mask
-        mri_dir = op.join(os.environ["SUBJECTS_DIR"],
-                          self.inputs.subject_id, "mri")
-
-        wm_file = op.join(mri_dir, "wm.mgz")
-        wm_data = (nib.load(wm_file).get_data() > 0).astype(int)
-
-        aseg_file = op.join(mri_dir, "aseg.mgz")
-        mask = (nib.load(aseg_file).get_data() > 0).astype(int)
-
-        # Read the final registration cost
-        if isdefined(self.inputs.cost_file):
-            cost = np.loadtxt(self.inputs.cost_file)[0]
-        else:
-            cost = None
-
-        # Make a mosaic of the registration from func to wm seg
-        # TODO this should be an OrthoMosaic when that is implemented
-        if isdefined(self.inputs.session):
-            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
-        else:
-            fname = self.inputs.out_file
-        self._results["out_file"] = op.abspath(fname)
-
-        m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
-        m.plot_mask_edges()
-        if cost is not None:
-            m.fig.suptitle("Final cost: {:.2f}".format(cost),
-                           size=10, color="white")
-        m.savefig(fname)
-        m.close()
-
-        return runtime
-
-
-class CoregGIF(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        ref_file = traits.File(exists=True)
-        out_file = traits.File()
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        in_img = nib.load(self.inputs.in_file)
-        ref_img = nib.load(self.inputs.ref_file)
-        out_fname = self.inputs.out_file
-
-        if len(ref_img.shape) > 3:
-            ref_data = ref_img.get_data()[..., 0]
-            ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
-
-        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname)
-
-        self._results["out_file"] = op.abspath(out_fname)
-
-        return runtime
-
-    def write_mosaic_gif(self, runtime, img1, img2, fname, **kws):
-
-        m1 = Mosaic(img1, **kws)
-        m1.savefig("img1.png")
-        m1.close()
-
-        m2 = Mosaic(img2, **kws)
-        m2.savefig("img2.png")
-        m2.close()
-
-        cmdline = ["convert", "-loop", "0", "-delay", "100",
-                   "img1.png", "img2.png", fname]
-
-        self.submit_cmdline(runtime, cmdline)
-
-
-class DistortionGIF(CoregGIF):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        out_file = traits.File()
-        phase_encoding = traits.List(traits.Str)
-        session = traits.Str()
-
-    def _run_interface(self, runtime):
-
-        img = nib.load(self.inputs.in_file)
-        data = img.get_data()
-        lims = 0, np.percentile(data, 98)
-
-        imgs = []
-
-        pe = np.array(self.inputs.phase_encoding)
-        for enc in np.unique(pe):
-
-            enc_trs = pe == enc
-            enc_data = data[..., enc_trs].mean(axis=-1)
-
-            imgs.append(nib.Nifti1Image(enc_data, img.affine, img.header))
-
-        if isdefined(self.inputs.session):
-            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
-        else:
-            fname = self.inputs.out_file
-        img1, img2 = imgs
-
-        self.write_mosaic_gif(runtime, img1, img2, fname,
-                              slice_dir="sag", tight=False, anat_lims=lims)
-
-        self._results["out_file"] = op.abspath(fname)
-
-        return runtime
-
-
-class FrameGIF(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        out_file = traits.File()
-        delay = traits.Int(100, usedefault=True)
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        img = nib.load(self.inputs.in_file)
-        data = img.get_data()
-
-        lims = 0, np.percentile(data, 98)
-
-        assert len(img.shape) == 4
-        n_frames = img.shape[-1]
-
-        frame_pngs = []
-
-        for i in range(n_frames):
-
-            png_fname = "frame{:02d}.png".format(i)
-            frame_pngs.append(png_fname)
-
-            vol_data = data[..., i]
-            vol = nib.Nifti1Image(vol_data, img.affine, img.header)
-            m = Mosaic(vol, tight=False, step=2, anat_lims=lims)
-            m.savefig(png_fname)
-            m.close()
-
-        out_file = op.abspath(self.inputs.out_file)
-        cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
-        cmdline.extend(frame_pngs)
-        cmdline.append(out_file)
-
-        self.submit_cmdline(runtime, cmdline, out_file=out_file)
-
-        return runtime
+# --- Preprocessing operations
 
 
 class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
@@ -1033,6 +790,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         out_plot = self.define_output("out_plot", "func.gif")
         self.write_time_series_gif(runtime, out_img, out_plot)
 
+        # TODO move much more into here!
         # TODO also make the carpet plot here?
         # Just to save an additional loading of the time series
         # Although also we would need the moco params to do so,
@@ -1137,6 +895,9 @@ class TimeSeriesStats(SimpleInterface):
         self._results["tsnr_file"] = tsnr_file
         tsnr_img = nib.Nifti1Image(tsnr, affine, header)
         tsnr_img.to_filename(tsnr_file)
+
+        # TODO normalize by within cortex mean?
+        # TODO use cubehelix colormaps
 
         mean_plot = op.abspath("mean.png")
         self._results["mean_plot"] = mean_plot
@@ -1408,5 +1169,261 @@ class DefineTemplateSpace(SimpleInterface):
                    "--noedit"]
 
         self.submit_cmdline(runtime, cmdline, reg_file=reg_file)
+
+        return runtime
+
+
+# --- Preprocessing quality control
+
+
+class RealignmentReport(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        target_file = File(exists=True)
+        realign_params = File(exists=True)
+
+    class output_spec(TraitedSpec):
+        params_plot = File(exists=True)
+        target_plot = File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Load the realignment parameters
+        params = np.loadtxt(self.inputs.realign_params)
+        cols = ["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"]
+        df = pd.DataFrame(params, columns=cols)
+
+        # Plot the motion timeseries
+        params_plot = op.abspath("mc_params.png")
+        self._results["params_plot"] = params_plot
+        f = self.plot_motion(df)
+        f.savefig(params_plot, dpi=100)
+        plt.close(f)
+
+        # Plot the target image
+        target_plot = op.abspath("mc_target.png")
+        self._results["target_plot"] = target_plot
+        m = self.plot_target()
+        m.savefig(target_plot)
+        m.close()
+
+        return runtime
+
+    def plot_motion(self, df):
+        """Plot the timecourses of realignment parameters."""
+        fig, axes = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
+
+        # Trim off all but the axis name
+        def axis(s):
+            return s[-1]
+
+        # Plot rotations
+        rot_pal = ["#8b312d", "#e33029", "#f06855"]
+        rot_df = df.filter(like="rot").apply(np.rad2deg).rename(columns=axis)
+        rot_df.plot(ax=axes[0], color=rot_pal, lw=1.5)
+
+        # Plot translations
+        trans_pal = ["#355d9a", "#3787c0", "#72acd3"]
+        trans_df = df.filter(like="trans").rename(columns=axis)
+        trans_df.plot(ax=axes[1], color=trans_pal, lw=1.5)
+
+        # Label the graphs
+        axes[0].set_xlim(0, len(df) - 1)
+        axes[0].axhline(0, c=".4", ls="--", zorder=1)
+        axes[1].axhline(0, c=".4", ls="--", zorder=1)
+
+        for ax in axes:
+            ax.legend(ncol=3, loc="best")
+
+        axes[0].set_ylabel("Rotations (degrees)")
+        axes[1].set_ylabel("Translations (mm)")
+        fig.tight_layout()
+        return fig
+
+    def plot_target(self):
+        """Plot a mosaic of the motion correction target image."""
+        return Mosaic(self.inputs.target_file, step=2)
+
+
+class AnatRegReport(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        subject_id = traits.Str()
+        session = traits.Str()
+        in_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        cost_file = traits.File(exists=True)
+        out_file = traits.File()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Use the registration to transform the input file
+        registered_file = "func_in_anat.nii.gz"
+        cmdline = ["mri_vol2vol",
+                   "--mov", self.inputs.in_file,
+                   "--reg", self.inputs.reg_file,
+                   "--o", registered_file,
+                   "--fstarg",
+                   "--cubic"]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # Load the WM segmentation and a brain mask
+        mri_dir = op.join(os.environ["SUBJECTS_DIR"],
+                          self.inputs.subject_id, "mri")
+
+        wm_file = op.join(mri_dir, "wm.mgz")
+        wm_data = (nib.load(wm_file).get_data() > 0).astype(int)
+
+        aseg_file = op.join(mri_dir, "aseg.mgz")
+        mask = (nib.load(aseg_file).get_data() > 0).astype(int)
+
+        # Read the final registration cost
+        if isdefined(self.inputs.cost_file):
+            cost = np.loadtxt(self.inputs.cost_file)[0]
+        else:
+            cost = None
+
+        # Make a mosaic of the registration from func to wm seg
+        # TODO this should be an OrthoMosaic when that is implemented
+        if isdefined(self.inputs.session):
+            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
+        else:
+            fname = self.inputs.out_file
+        self._results["out_file"] = op.abspath(fname)
+
+        m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
+        m.plot_mask_edges()
+        if cost is not None:
+            m.fig.suptitle("Final cost: {:.2f}".format(cost),
+                           size=10, color="white")
+        m.savefig(fname)
+        m.close()
+
+        return runtime
+
+
+class CoregGIF(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        ref_file = traits.File(exists=True)
+        out_file = traits.File()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        in_img = nib.load(self.inputs.in_file)
+        ref_img = nib.load(self.inputs.ref_file)
+        out_fname = self.inputs.out_file
+
+        if len(ref_img.shape) > 3:
+            ref_data = ref_img.get_data()[..., 0]
+            ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
+
+        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname)
+
+        self._results["out_file"] = op.abspath(out_fname)
+
+        return runtime
+
+    def write_mosaic_gif(self, runtime, img1, img2, fname, **kws):
+
+        m1 = Mosaic(img1, **kws)
+        m1.savefig("img1.png")
+        m1.close()
+
+        m2 = Mosaic(img2, **kws)
+        m2.savefig("img2.png")
+        m2.close()
+
+        cmdline = ["convert", "-loop", "0", "-delay", "100",
+                   "img1.png", "img2.png", fname]
+
+        self.submit_cmdline(runtime, cmdline)
+
+
+class DistortionGIF(CoregGIF):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        out_file = traits.File()
+        phase_encoding = traits.List(traits.Str)
+        session = traits.Str()
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+        data = img.get_data()
+        lims = 0, np.percentile(data, 98)
+
+        imgs = []
+
+        pe = np.array(self.inputs.phase_encoding)
+        for enc in np.unique(pe):
+
+            enc_trs = pe == enc
+            enc_data = data[..., enc_trs].mean(axis=-1)
+
+            imgs.append(nib.Nifti1Image(enc_data, img.affine, img.header))
+
+        if isdefined(self.inputs.session):
+            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
+        else:
+            fname = self.inputs.out_file
+        img1, img2 = imgs
+
+        self.write_mosaic_gif(runtime, img1, img2, fname,
+                              slice_dir="sag", tight=False, anat_lims=lims)
+
+        self._results["out_file"] = op.abspath(fname)
+
+        return runtime
+
+
+class FrameGIF(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        out_file = traits.File()
+        delay = traits.Int(100, usedefault=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+        data = img.get_data()
+
+        lims = 0, np.percentile(data, 98)
+
+        assert len(img.shape) == 4
+        n_frames = img.shape[-1]
+
+        frame_pngs = []
+
+        for i in range(n_frames):
+
+            png_fname = "frame{:02d}.png".format(i)
+            frame_pngs.append(png_fname)
+
+            vol_data = data[..., i]
+            vol = nib.Nifti1Image(vol_data, img.affine, img.header)
+            m = Mosaic(vol, tight=False, step=2, anat_lims=lims)
+            m.savefig(png_fname)
+            m.close()
+
+        out_file = op.abspath(self.inputs.out_file)
+        cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
+        cmdline.extend(frame_pngs)
+        cmdline.append(out_file)
+
+        self.submit_cmdline(runtime, cmdline, out_file=out_file)
 
         return runtime
