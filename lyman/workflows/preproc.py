@@ -10,9 +10,8 @@ import nibabel as nib
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     IdentityInterface, Function, DataSink)
-from nipype.interfaces.base import (traits, File, TraitedSpec,
-                                    InputMultiPath, OutputMultiPath,
-                                    isdefined)
+from nipype.interfaces.base import (traits, TraitedSpec,
+                                    InputMultiPath, OutputMultiPath, isdefined)
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
 from .. import signals  # TODO confusingly close to scipy.signal
@@ -995,15 +994,15 @@ class DefineTemplateSpace(SimpleInterface):
 
     class input_spec(TraitedSpec):
         session_info = traits.List(traits.Tuple())
-        in_matrices = InputMultiPath(File(exists=True))
-        in_volumes = InputMultiPath(File(exists=True))
+        in_matrices = InputMultiPath(traits.File(exists=True))
+        in_volumes = InputMultiPath(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
         subject_id = traits.Str()
         session_info = traits.List(traits.Tuple())
-        out_template = File(exists=True)
-        reg_file = File(exists=True)
-        out_matrices = OutputMultiPath(File(exists=True))
+        out_template = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        out_matrices = OutputMultiPath(traits.File(exists=True))
 
     def _run_interface(self, runtime):
 
@@ -1078,12 +1077,12 @@ class DefineTemplateSpace(SimpleInterface):
 class RealignmentReport(SimpleInterface):
 
     class input_spec(TraitedSpec):
-        target_file = File(exists=True)
-        realign_params = File(exists=True)
+        target_file = traits.File(exists=True)
+        realign_params = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
-        params_plot = File(exists=True)
-        target_plot = File(exists=True)
+        params_plot = traits.File(exists=True)
+        target_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
