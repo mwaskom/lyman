@@ -887,10 +887,9 @@ class AnatomicalSegmentation(SimpleInterface):
             mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
             seg_data[mask] = seg_val
 
-        seg_file = op.abspath("seg.nii.gz")
+        seg_file = self.define_output("seg_file", "seg.nii.gz")
         seg_img = nib.Nifti1Image(seg_data, affine, header)
         seg_img.to_filename(seg_file)
-        self._results["seg_file"] = seg_file
 
         # --- Whole brain mask
 
@@ -903,14 +902,13 @@ class AnatomicalSegmentation(SimpleInterface):
         brainmask = ndimage.binary_closing(brainmask)
         brainmask = ndimage.binary_fill_holes(brainmask)
 
-        mask_file = op.abspath("mask.nii.gz")
+        mask_file = self.define_output("mask_file", "mask.nii.gz")
         mask_img = nib.Nifti1Image(brainmask, affine, header)
         mask_img.to_filename(mask_file)
-        self._results["mask_file"] = mask_file
 
         # --- T1w anatomical image in functional space
 
-        anat_file = op.abspath("anat.nii.gz")
+        anat_file = self.define_output("anat_file", "anat.nii.gz")
         cmdline = ["mri_vol2vol",
                    "--cubic",
                    "--inv",
@@ -919,7 +917,7 @@ class AnatomicalSegmentation(SimpleInterface):
                    "--reg", self.inputs.reg_file,
                    "--o", anat_file]
 
-        self.submit_cmdline(runtime, cmdline, anat_file=anat_file)
+        self.submit_cmdline(runtime, cmdline)
 
         # --- Surface vertex mapping
 
@@ -942,8 +940,7 @@ class AnatomicalSegmentation(SimpleInterface):
         hemi_data = [nib.load(f).get_data() for f in hemi_files]
         surf = np.stack(hemi_data, axis=-1)
 
-        surf_file = op.abspath("surf.nii.gz")
-        self._results["surf_file"] = surf_file
+        surf_file = self.define_output("surf_file", "surf.nii.gz")
         surf_img = nib.Nifti1Image(surf, affine, header)
         surf_img.to_filename(surf_file)
 
@@ -951,8 +948,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         # Anatomical segmentation
 
-        seg_plot = op.abspath("seg.png")
-        self._results["seg_plot"] = seg_plot
+        seg_plot = self.define_output("seg_plot", "seg.png")
         seg_cmap = mpl.colors.ListedColormap(
             ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
              '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
@@ -965,8 +961,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         # Brain mask
 
-        mask_plot = op.abspath("mask.png")
-        self._results["mask_plot"] = mask_plot
+        mask_plot = self.define_output("mask_plot", "mask.png")
         m_mask = Mosaic(template_img, mask_img, mask_img,
                         step=2, tight=True, show_mask=False)
         m_mask.plot_mask()
@@ -975,8 +970,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         # Anatomical image
 
-        anat_plot = op.abspath("anat.png")
-        self._results["anat_plot"] = anat_plot
+        anat_plot = self.define_output("anat_plot", "anat.png")
         m_mask = Mosaic(anat_file, mask=mask_img,
                         step=2, tight=True, show_mask=False)
         m_mask.savefig(anat_plot)
@@ -984,8 +978,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         # Surface ribbon
 
-        surf_plot = op.abspath("surf.png")
-        self._results["surf_plot"] = surf_plot
+        surf_plot = self.define_output("surf_plot", "surf.png")
         ribbon = np.zeros(template_img.shape)
         ribbon[surf[..., 0] > 0] = 1
         ribbon[surf[..., 1] > 0] = 2
@@ -1056,7 +1049,7 @@ class DefineTemplateSpace(SimpleInterface):
         self.submit_cmdline(runtime, cmdline)
 
         # -- Transform first volume into template space to get the geometry
-        out_template = op.abspath("template_space.nii.gz")
+        out_template = self.define_output("out_template", "space.nii.gz")
         cmdline = ["flirt",
                    "-in", self.inputs.in_volumes[0],
                    "-ref", self.inputs.in_volumes[0],
@@ -1064,10 +1057,10 @@ class DefineTemplateSpace(SimpleInterface):
                    "-out", out_template,
                    "-applyxfm"]
 
-        self.submit_cmdline(runtime, cmdline, out_template=out_template)
+        self.submit_cmdline(runtime, cmdline)
 
         # -- Convert the FSL matrices to tkreg matrix format
-        reg_file = op.abspath("reg.dat")
+        reg_file = self.define_output("reg_file", "reg.dat")
         cmdline = ["tkregister2",
                    "--s", subj,
                    "--mov", "template_space.nii.gz",
@@ -1075,7 +1068,7 @@ class DefineTemplateSpace(SimpleInterface):
                    "--reg", reg_file,
                    "--noedit"]
 
-        self.submit_cmdline(runtime, cmdline, reg_file=reg_file)
+        self.submit_cmdline(runtime, cmdline)
 
         return runtime
 
@@ -1101,15 +1094,13 @@ class RealignmentReport(SimpleInterface):
         df = pd.DataFrame(params, columns=cols)
 
         # Plot the motion timeseries
-        params_plot = op.abspath("mc_params.png")
-        self._results["params_plot"] = params_plot
+        params_plot = self.define_output("params_plot", "mc_params.png")
         f = self.plot_motion(df)
         f.savefig(params_plot, dpi=100)
         plt.close(f)
 
         # Plot the target image
-        target_plot = op.abspath("mc_target.png")
-        self._results["target_plot"] = target_plot
+        target_plot = self.define_output("target_plot", "mc_target.png")
         m = self.plot_target()
         m.savefig(target_plot)
         m.close()
@@ -1200,14 +1191,14 @@ class AnatRegReport(SimpleInterface):
             fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
         else:
             fname = self.inputs.out_file
-        self._results["out_file"] = op.abspath(fname)
+        out_file = self.define_output("out_file", fname)
 
         m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
         m.plot_mask_edges()
         if cost is not None:
             m.fig.suptitle("Final cost: {:.2f}".format(cost),
                            size=10, color="white")
-        m.savefig(fname)
+        m.savefig(out_file)
         m.close()
 
         return runtime
@@ -1227,15 +1218,13 @@ class CoregGIF(SimpleInterface):
 
         in_img = nib.load(self.inputs.in_file)
         ref_img = nib.load(self.inputs.ref_file)
-        out_fname = self.inputs.out_file
+        out_fname = self.define_output("out_file", self.inputs.out_file)
 
         if len(ref_img.shape) > 3:
             ref_data = ref_img.get_data()[..., 0]
             ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
 
         self.write_mosaic_gif(runtime, in_img, ref_img, out_fname)
-
-        self._results["out_file"] = op.abspath(out_fname)
 
         return runtime
 
@@ -1283,12 +1272,11 @@ class DistortionGIF(CoregGIF):
             fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
         else:
             fname = self.inputs.out_file
+        out_file = self.define_output("out_file", fname)
+
         img1, img2 = imgs
-
-        self.write_mosaic_gif(runtime, img1, img2, fname,
+        self.write_mosaic_gif(runtime, img1, img2, out_file,
                               slice_dir="sag", tight=False, anat_lims=lims)
-
-        self._results["out_file"] = op.abspath(fname)
 
         return runtime
 
@@ -1326,11 +1314,11 @@ class FrameGIF(SimpleInterface):
             m.savefig(png_fname)
             m.close()
 
-        out_file = op.abspath(self.inputs.out_file)
+        out_file = self.define_output("out_file", self.inputs.out_file)
         cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
         cmdline.extend(frame_pngs)
         cmdline.append(out_file)
 
-        self.submit_cmdline(runtime, cmdline, out_file=out_file)
+        self.submit_cmdline(runtime, cmdline)
 
         return runtime
