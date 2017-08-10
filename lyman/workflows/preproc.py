@@ -896,10 +896,8 @@ class AnatomicalSegmentation(SimpleInterface):
         # Binarize the segmentation and dilate to generate a brain mask
 
         brainmask = seg_data > 0
-        vox_mm = np.mean(header.get_zooms()[:3])
-        iterations = int(np.ceil(4 / vox_mm))
-        brainmask = ndimage.binary_dilation(brainmask, iterations=iterations)
-        brainmask = ndimage.binary_closing(brainmask)
+        brainmask = ndimage.binary_dilation(brainmask, iterations=2)
+        brainmask = ndimage.binary_erosion(brainmask)
         brainmask = ndimage.binary_fill_holes(brainmask)
 
         mask_file = self.define_output("mask_file", "mask.nii.gz")
