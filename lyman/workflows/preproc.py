@@ -280,6 +280,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
         # Creation of cross-session subject-specific template
 
+        (subject_source, define_template,
+            [("subject", "subject_id")]),
         (session_source, define_template,
             [("session", "session_info")]),
         (session_input, define_template,
@@ -983,6 +985,7 @@ class AnatomicalSegmentation(SimpleInterface):
 class DefineTemplateSpace(SimpleInterface):
 
     class input_spec(TraitedSpec):
+        subject_id = traits.Str()
         session_info = traits.List(traits.Tuple())
         in_matrices = InputMultiPath(traits.File(exists=True))
         in_volumes = InputMultiPath(traits.File(exists=True))
@@ -998,9 +1001,9 @@ class DefineTemplateSpace(SimpleInterface):
 
         subjects_dir = os.environ["SUBJECTS_DIR"]
 
-        subject_ids = set([s for s, _ in self.inputs.session_info])
-        assert len(subject_ids) == 1
-        subj = subject_ids.pop()
+        assert all([s == self.inputs.subject_id
+                    for s, _ in self.inputs.session_info])
+        subj = self.inputs.subject_id
 
         self._results["subject_id"] = subj
         self._results["session_info"] = self.inputs.session_info
@@ -1051,7 +1054,7 @@ class DefineTemplateSpace(SimpleInterface):
         reg_file = self.define_output("reg_file", "reg.dat")
         cmdline = ["tkregister2",
                    "--s", subj,
-                   "--mov", "template_space.nii.gz",
+                   "--mov", out_template,
                    "--fsl", flirt_file,
                    "--reg", reg_file,
                    "--noedit"]
