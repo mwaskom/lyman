@@ -10,12 +10,11 @@ import nibabel as nib
 
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     IdentityInterface, Function, DataSink)
-from nipype.interfaces.base import (traits, TraitedSpec,
-                                    InputMultiPath, OutputMultiPath, isdefined)
+from nipype.interfaces.base import traits, TraitedSpec, isdefined
 from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
 
 from .. import signals  # TODO confusingly close to scipy.signal
-from ..mosaic import Mosaic, MosaicInterface
+from ..mosaic import Mosaic
 from ..carpetplot import CarpetPlot
 from ..graphutils import SimpleInterface
 
@@ -118,7 +117,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
                                name="define_template",
                                joinsource="session_source",
                                joinfield=["session_info",
-                                          "in_matrices", "in_volumes"])
+                                          "in_matrices",
+                                          "in_volumes"])
 
     func2anat_qc = Node(AnatRegReport(out_file="reg.png"),
                         "func2anat_qc")
@@ -158,33 +158,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
                          ["in_file", "premat", "field_file"],
                          "restore_fm")
 
-    # TODO everything from here on could probably be done using Python
-    # in a single interface to simplify the logic of the workflow
-
-    def flatten_file_list(in_files):
-        out_files = [item for sublist in in_files for item in sublist]
-        return out_files
-
-    combine_template = JoinNode(Function("in_files", "out_files",
-                                         flatten_file_list),
-                                name="combine_template",
-                                joinsource="session_source",
-                                joinfield=["in_files"])
-
-    merge_template = Node(fsl.Merge(dimension="t"), name="merge_template")
-
-    # TODO scale the templates somehow before averaging?
-
-    average_template = Node(fsl.MeanImage(), "average_template")
-
-    mask_template = Node(fsl.ApplyMask(out_file="func.nii.gz"),
-                         "mask_template")
-
-    static_template_qc = Node(MosaicInterface(out_file="func.png"),
-                              "static_template_qc")
-
-    dynamic_template_qc = Node(FrameGIF(out_file="func.gif", delay=20),
-                               "dynamic_template_qc")
+    finalize_template = JoinNode(FinalizeTemplate(),
+                                 name="finalize_template",
+                                 joinsource="session_source",
+                                 joinfield=["in_files"])
 
     # --- Motion correction of time series to SBRef (with distortions)
 
@@ -288,6 +265,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
             [("fm", "in_volumes")]),
         (fm2anat, define_template,
             [("out_fsl_file", "in_matrices")]),
+        (define_template, anat_segment,
+            [("subject_id", "subject_id"),
+             ("reg_file", "reg_file"),
+             ("out_template", "template_file")]),
         (define_template, select_sesswise,
             [("out_matrices", "in_matrices"),
              ("out_template", "in_templates"),
@@ -306,24 +287,10 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
             [("out_template", "ref_file")]),
         (select_sesswise, restore_fm,
             [("out_matrix", "postmat")]),
-        (restore_fm, combine_template,
+        (restore_fm, finalize_template,
             [("out_file", "in_files")]),
-        (combine_template, merge_template,
-            [("out_files", "in_files")]),
-        (merge_template, average_template,
-            [("merged_file", "in_file")]),
-        (average_template, mask_template,
-            [("out_file", "in_file")]),
-        (anat_segment, mask_template,
+        (anat_segment, finalize_template,
             [("mask_file", "mask_file")]),
-
-        # Segementation of anatomical tissue in functional space
-
-        (define_template, anat_segment,
-            [("subject_id", "subject_id"),
-             ("reg_file", "reg_file")]),
-        (average_template, anat_segment,
-            [("out_file", "template_file")]),
 
         # --- Time series spatial processing
 
@@ -382,7 +349,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
             [("subject", "subject")]),
         (template_container, template_output,
             [("path", "container")]),
-        (mask_template, template_output,
+        (finalize_template, template_output,
             [("out_file", "@template")]),
         (define_template, template_output,
             [("reg_file", "@reg")]),
@@ -440,12 +407,8 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
             [("subject", "subject_id")]),
         (define_template, func2anat_qc,
             [("reg_file", "reg_file")]),
-        (average_template, func2anat_qc,
+        (finalize_template, func2anat_qc,
             [("out_file", "in_file")]),
-        (merge_template, dynamic_template_qc,
-            [("merged_file", "in_file")]),
-        (mask_template, static_template_qc,
-            [("out_file", "anat_file")]),
 
         # Registration of each frame to SBRef image
 
@@ -470,10 +433,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
              ("surf_plot", "qc.@surf_plot")]),
         (func2anat_qc, template_output,
             [("out_file", "qc.@func2anat_plot")]),
-        (static_template_qc, template_output,
-            [("out_file", "qc.@template_png")]),
-        (dynamic_template_qc, template_output,
-            [("out_file", "qc.@template_gif")]),
+        (finalize_template, template_output,
+            [("out_png", "qc.@template_png"),
+             ("out_gif", "qc.@template_gif")]),
         (fieldmap_qc, template_output,
             [("out_file", "qc.sessions.@unwarp_gif")]),
         (fm2anat_qc, template_output,
@@ -699,10 +661,67 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
 # --- Preprocessing operations
 
 
+class FinalizeTemplate(SimpleInterface, TimeSeriesGIF):
+
+    class input_spec(TraitedSpec):
+        in_files = traits.List(traits.List(traits.File(exists=True)))
+        mask_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+        out_gif = traits.File(exists=True)
+        out_png = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Load the mask image
+        mask_img = nib.load(self.inputs.mask_file)
+        mask = mask_img.get_data().astype(bool)
+
+        # Load each frame and scale to a common mean
+        template_imgs = []
+        for sess_files in self.inputs.in_files:
+            for fname in sess_files:
+                img = nib.load(fname)
+                data = img.get_data()
+
+                target = 10000
+                scale_value = target / data[mask].mean()
+                data = data * scale_value
+
+                img = nib.Nifti1Image(data, img.affine, img.header)
+                template_imgs.append(img)
+
+        # Take the temporal mean over all template frames
+        frame_img = nib.concat_images(template_imgs)
+        template_data = frame_img.get_data().mean(axis=-1)
+
+        # Apply the mask to skullstrip
+        template_data[~mask] = 0
+
+        # Write out the 3D template image
+        affine, header = frame_img.affine, frame_img.header
+        out_file = self.define_output("out_file", "func.nii.gz")
+        out_img = nib.Nifti1Image(template_data, affine, header)
+        out_img.to_filename(out_file)
+
+        # Make a GIF movie of the template_frames
+        out_gif = self.define_output("out_gif", "func.gif")
+        self.write_time_series_gif(runtime, frame_img, out_gif)
+
+        # Make a static png of the final template
+        out_png = self.define_output("out_png", "func.png")
+        m = Mosaic(out_img, mask=mask_img)
+        m.savefig(out_png)
+        m.close()
+
+        return runtime
+
+
 class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
-        in_files = InputMultiPath(traits.File(exists=True))
+        in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
@@ -738,8 +757,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
 
         # Scale the timeseries for cross-run intensity normalization
         target = 10000
-        stat_value = data[mask].mean()
-        scale_value = target / stat_value
+        scale_value = target / data[mask].mean()
         data = data * scale_value
 
         # Remove linear but not constant trend
@@ -987,15 +1005,15 @@ class DefineTemplateSpace(SimpleInterface):
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
         session_info = traits.List(traits.Tuple())
-        in_matrices = InputMultiPath(traits.File(exists=True))
-        in_volumes = InputMultiPath(traits.File(exists=True))
+        in_matrices = traits.List(traits.File(exists=True))
+        in_volumes = traits.List(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
         subject_id = traits.Str()
         session_info = traits.List(traits.Tuple())
         out_template = traits.File(exists=True)
         reg_file = traits.File(exists=True)
-        out_matrices = OutputMultiPath(traits.File(exists=True))
+        out_matrices = traits.List(traits.File(exists=True))
 
     def _run_interface(self, runtime):
 
@@ -1039,14 +1057,20 @@ class DefineTemplateSpace(SimpleInterface):
 
         self.submit_cmdline(runtime, cmdline)
 
-        # -- Transform first volume into template space to get the geometry
+        # -- Tansform first fieldmap info template space to get geometry
         out_template = self.define_output("out_template", "space.nii.gz")
+
         cmdline = ["flirt",
                    "-in", self.inputs.in_volumes[0],
                    "-ref", self.inputs.in_volumes[0],
                    "-init", out_matrices[0],
                    "-out", out_template,
                    "-applyxfm"]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # -- Average frames of fieldmap image in template space
+        cmdline = ["fslmaths", out_template, "-Tmean", out_template]
 
         self.submit_cmdline(runtime, cmdline)
 
