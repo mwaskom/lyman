@@ -1,892 +1,1144 @@
-"""Preprocessing workflow definition."""
 import os
 import os.path as op
+
 import numpy as np
+from scipy import ndimage, signal
 import pandas as pd
-import nibabel as nib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from sklearn import decomposition as decomp
-
-
-from moss.mosaic import Mosaic
-import seaborn as sns
-
-from nipype.interfaces import io, fsl, freesurfer as fs
-from nipype import Node, MapNode, Workflow, IdentityInterface
-from nipype.interfaces.base import (BaseInterface,
-                                    BaseInterfaceInputSpec,
-                                    InputMultiPath, OutputMultiPath,
-                                    TraitedSpec, File, traits)
-from nipype.workflows.fmri.fsl import create_susan_smooth
-
-import lyman
-from lyman.tools import (SingleInFile, SingleOutFile, ManyOutFiles,
-                         SaveParameters, list_out_file)
-
-
-def create_preprocessing_workflow(name="preproc", exp_info=None):
-    """Return a Nipype workflow for fMRI preprocessing.
-
-    This mostly follows the preprocessing in FSL, although some
-    of the processing has been moved into pure Python.
-
-    Parameters
-    ----------
-    name : string
-        workflow object name
-    exp_info : dict
-        dictionary with experimental information
-
-    """
-    preproc = Workflow(name)
-
-    if exp_info is None:
-        exp_info = lyman.default_experiment_parameters()
-
-    # Define the inputs for the preprocessing workflow
-    in_fields = ["timeseries", "subject_id"]
-
-    if exp_info["whole_brain_template"]:
-        in_fields.append("whole_brain")
-
-    if exp_info["fieldmap_template"]:
-        in_fields.append("fieldmap")
-
-    inputnode = Node(IdentityInterface(in_fields), "inputs")
-
-    # Remove equilibrium frames and convert to float
-    prepare = MapNode(PrepTimeseries(), "in_file", "prep_timeseries")
-    prepare.inputs.frames_to_toss = exp_info["frames_to_toss"]
-
-    # Unwarp using fieldmap images
-    if exp_info["fieldmap_template"]:
-        unwarp = create_unwarp_workflow(fieldmap_pe=exp_info["fieldmap_pe"])
-
-    # Spatial realignment
-    realign = create_realignment_workflow()
-
-    # Temporal interpolation
-    if exp_info["temporal_interp"]:
-        slicetime = create_slicetime_workflow(
-            TR=exp_info["TR"],
-            slice_order=exp_info["slice_order"],
-            interleaved=exp_info["interleaved"],
-            )
-
-    # Estimate a registration from funtional to anatomical space
-    coregister = create_bbregister_workflow(
-        partial_brain=bool(exp_info["whole_brain_template"]),
-        init_with=exp_info["coreg_init"])
-
-    # Skullstrip the brain using the Freesurfer segmentation
-    skullstrip = create_skullstrip_workflow()
-
-    # Smooth intelligently in the volume
-    susan = create_susan_smooth()
-    susan.inputs.inputnode.fwhm = exp_info["smooth_fwhm"]
-
-    # Scale and filter the timeseries
-    filter_smooth = create_filtering_workflow("filter_smooth",
-                                              exp_info["hpf_cutoff"],
-                                              exp_info["TR"],
-                                              "smoothed_timeseries")
-
-    filter_rough = create_filtering_workflow("filter_rough",
-                                             exp_info["hpf_cutoff"],
-                                             exp_info["TR"],
-                                             "unsmoothed_timeseries")
-
-    # Automatically detect motion and intensity outliers
-    artifacts = MapNode(ArtifactDetection(),
-                        ["timeseries", "mask_file", "motion_file"],
-                        "artifacts")
-    artifacts.inputs.intensity_thresh = exp_info["intensity_threshold"]
-    artifacts.inputs.motion_thresh = exp_info["motion_threshold"]
-    artifacts.inputs.spike_thresh = exp_info["spike_threshold"]
-
-    # Extract nuisance variables from anatomical sources
-    confounds = create_confound_extraction_workflow("confounds",
-                                                    exp_info["wm_components"])
-
-    # Save the experiment info for this run
-    saveparams = MapNode(SaveParameters(exp_info=exp_info),
-                         "in_file", "saveparams")
-
-    preproc.connect([
-        (inputnode, prepare,
-            [("timeseries", "in_file")]),
-        (realign, artifacts,
-            [("outputs.motion_file", "motion_file")]),
-        (realign, coregister,
-            [("outputs.timeseries", "inputs.timeseries")]),
-        (inputnode, coregister,
-            [("subject_id", "inputs.subject_id")]),
-        (inputnode, skullstrip,
-            [("subject_id", "inputs.subject_id")]),
-        (coregister, skullstrip,
-            [("outputs.tkreg_mat", "inputs.reg_file")]),
-        (skullstrip, artifacts,
-            [("outputs.mask_file", "mask_file")]),
-        (skullstrip, susan,
-            [("outputs.mask_file", "inputnode.mask_file"),
-             ("outputs.timeseries", "inputnode.in_files")]),
-        (susan, filter_smooth,
-            [("outputnode.smoothed_files", "inputs.timeseries")]),
-        (skullstrip, filter_smooth,
-            [("outputs.mask_file", "inputs.mask_file")]),
-        (skullstrip, filter_rough,
-            [("outputs.timeseries", "inputs.timeseries")]),
-        (skullstrip, filter_rough,
-            [("outputs.mask_file", "inputs.mask_file")]),
-        (filter_rough, artifacts,
-            [("outputs.timeseries", "timeseries")]),
-        (filter_rough, confounds,
-            [("outputs.timeseries", "inputs.timeseries")]),
-        (inputnode, confounds,
-            [("subject_id", "inputs.subject_id")]),
-        (skullstrip, confounds,
-            [("outputs.mask_file", "inputs.brain_mask")]),
-        (coregister, confounds,
-            [("outputs.tkreg_mat", "inputs.reg_file")]),
-        (inputnode, saveparams,
-            [("timeseries", "in_file")]),
-        ])
-
-    # Optionally add a connection for unwarping
-    if bool(exp_info["fieldmap_template"]):
-        preproc.connect([
-            (inputnode, unwarp,
-                [("fieldmap", "inputs.fieldmap")]),
-            (prepare, unwarp,
-                [("out_file", "inputs.timeseries")]),
-            (unwarp, realign,
-                [("outputs.timeseries", "inputs.timeseries")])
-        ])
-    else:
-        preproc.connect([
-            (prepare, realign,
-                [("out_file", "inputs.timeseries")]),
-        ])
-
-    # Optionally add a connection for slice time correction
-    if exp_info["temporal_interp"]:
-        preproc.connect([
-            (realign, slicetime,
-                [("outputs.timeseries", "inputs.timeseries")]),
-            (slicetime, skullstrip,
-                [("outputs.timeseries", "inputs.timeseries")]),
-            ])
-    else:
-        preproc.connect([
-            (realign, skullstrip,
-                [("outputs.timeseries", "inputs.timeseries")]),
-        ])
-
-    # Optionally connect the whole brain template
-    if bool(exp_info["whole_brain_template"]):
-        preproc.connect([
-            (inputnode, coregister,
-                [("whole_brain_template", "inputs.whole_brain_template")])
-        ])
-
-    # Define the outputs of the top-level workflow
-    output_fields = ["smoothed_timeseries",
-                     "unsmoothed_timeseries",
-                     "example_func",
-                     "mean_func",
-                     "functional_mask",
-                     "realign_report",
-                     "mask_report",
-                     "artifact_report",
-                     "confound_file",
-                     "flirt_affine",
-                     "tkreg_affine",
-                     "coreg_report",
-                     "json_file"]
-
-    if bool(exp_info["fieldmap_template"]):
-        output_fields.append("unwarp_report")
-
-    outputnode = Node(IdentityInterface(output_fields), "outputs")
-
-    preproc.connect([
-        (realign, outputnode,
-            [("outputs.example_func", "example_func"),
-             ("outputs.report", "realign_report")]),
-        (skullstrip, outputnode,
-            [("outputs.mask_file", "functional_mask"),
-             ("outputs.report", "mask_report")]),
-        (artifacts, outputnode,
-            [("out_files", "artifact_report")]),
-        (coregister, outputnode,
-            [("outputs.tkreg_mat", "tkreg_affine"),
-             ("outputs.flirt_mat", "flirt_affine"),
-             ("outputs.report", "coreg_report")]),
-        (filter_smooth, outputnode,
-            [("outputs.timeseries", "smoothed_timeseries")]),
-        (filter_rough, outputnode,
-            [("outputs.timeseries", "unsmoothed_timeseries"),
-             ("outputs.mean_file", "mean_func")]),
-        (confounds, outputnode,
-            [("outputs.confound_file", "confound_file")]),
-        (saveparams, outputnode,
-            [("json_file", "json_file")]),
-        ])
-
-    if bool(exp_info["fieldmap_template"]):
-        preproc.connect([
-            (unwarp, outputnode,
-                [("outputs.report", "unwarp_report")]),
-        ])
-
-    return preproc, inputnode, outputnode
-
-
-# =========================================================================== #
-
-
-def create_unwarp_workflow(name="unwarp", fieldmap_pe=("y", "y-")):
-    """Unwarp functional timeseries using reverse phase-blipped images."""
-    inputnode = Node(IdentityInterface(["timeseries", "fieldmap"]), "inputs")
-
-    # Calculate the shift field
-    # Note that setting readout_times to 1 will give a fine
-    # map of the field, but the units will be off
-    # Since we don't write out the map of the field itself, it does
-    # not seem worth it to add another parameter for the readout times.
-    # (It does require that they are the same, but when wouldn't they be?)
-    topup = MapNode(fsl.TOPUP(encoding_direction=fieldmap_pe,
-                              readout_times=[1] * len(fieldmap_pe)),
-                    ["in_file"], "topup")
-
-    # Unwarp the timeseries
-    applytopup = MapNode(fsl.ApplyTOPUP(method="jac", in_index=[1]),
-                         ["in_files",
-                          "in_topup_fieldcoef",
-                          "in_topup_movpar",
-                          "encoding_file"],
-                         "applytopup")
-
-    # Make a figure summarize the unwarping
-    report = MapNode(UnwarpReport(),
-                     ["orig_file", "corrected_file"], "unwarp_report")
-
-    # Define the outputs
-    outputnode = Node(IdentityInterface(["timeseries", "report"]), "outputs")
-
-    # Define and connect the workflow
-    unwarp = Workflow(name)
-    unwarp.connect([
-        (inputnode, topup,
-            [("fieldmap", "in_file")]),
-        (inputnode, applytopup,
-            [("timeseries", "in_files")]),
-        (topup, applytopup,
-            [("out_fieldcoef", "in_topup_fieldcoef"),
-             ("out_movpar", "in_topup_movpar"),
-             ("out_enc_file", "encoding_file")]),
-        (inputnode, report,
-            [("fieldmap", "orig_file")]),
-        (topup, report,
-            [("out_corrected", "corrected_file")]),
-        (applytopup, outputnode,
-            [("out_corrected", "timeseries")]),
-        (report, outputnode,
-            [("out_file", "report")]),
-        ])
-
-    return unwarp
-
-
-def create_realignment_workflow(name="realignment"):
-    """Motion and slice-time correct the timeseries and summarize."""
-    inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
-
-    # Get the middle volume of each run for motion correction
-    extractref = MapNode(ExtractRealignmentTarget(), "in_file", "extractref")
-
-    # Motion correct to middle volume of each run
-    mcflirt = MapNode(fsl.MCFLIRT(cost="normcorr",
-                                  interpolation="spline",
-                                  save_mats=True,
-                                  save_rms=True,
-                                  save_plots=True),
-                      ["in_file", "ref_file"],
-                      "mcflirt")
-
-    # Generate a report on the motion correction
-    mcreport = MapNode(RealignmentReport(),
-                       ["target_file", "realign_params", "displace_params"],
-                       "mcreport")
-
-    # Define the outputs
-    outputnode = Node(IdentityInterface(["timeseries",
-                                         "example_func",
-                                         "report",
-                                         "motion_file"]),
-
-                      "outputs")
-
-    # Define and connect the sub workflow
-    realignment = Workflow(name)
-
-    realignment.connect([
-        (inputnode, extractref,
-            [("timeseries", "in_file")]),
-        (inputnode, mcflirt,
-            [("timeseries", "in_file")]),
-        (extractref, mcflirt,
-            [("out_file", "ref_file")]),
-        (extractref, mcreport,
-            [("out_file", "target_file")]),
-        (mcflirt, mcreport,
-            [("par_file", "realign_params"),
-             ("rms_files", "displace_params")]),
-        (mcflirt, outputnode,
-            [("out_file", "timeseries")]),
-        (extractref, outputnode,
-            [("out_file", "example_func")]),
-        (mcreport, outputnode,
-            [("realign_report", "report"),
-             ("motion_file", "motion_file")]),
-        ])
-
-    return realignment
-
-
-def create_slicetime_workflow(name="slicetime", TR=2,
-                              slice_order="up", interleaved=False):
-
-    inputnode = Node(IdentityInterface(["timeseries"]), "inputs")
-
-    if isinstance(interleaved, str) and interleaved.lower() == "siemens":
-
-        sliceorder = MapNode(SiemensSliceOrder(), "in_file", "sliceorder")
-        slicetimer_set_interleaved = False
-        slicetimer_iterfields = ["in_file", "custom_order"]
-
-    elif isinstance(interleaved, bool):
-
-        sliceorder = None
-        slicetimer_set_interleaved = interleaved
-        slicetimer_iterfields = ["in_file"]
-
-    else:
-
-        raise ValueError("interleaved must be True, False, or 'siemens'")
-
-    slicetimer = MapNode(fsl.SliceTimer(time_repetition=TR),
-                         slicetimer_iterfields,
-                         "slicetime")
-
-    if slicetimer_set_interleaved:
-        slicetimer.inputs.interleaved = True
-
-    if slice_order == "down":
-        slicetimer.inputs.index_dir = True
-    elif slice_order != "up":
-        raise ValueError("slice_order must be 'up' or 'down'")
-
-    outputnode = Node(IdentityInterface(["timeseries"]), "outputs")
-
-    slicetime = Workflow(name)
-    slicetime.connect([
-        (inputnode, slicetimer,
-            [("timeseries", "in_file")]),
-        (slicetimer, outputnode,
-            [("slice_time_corrected_file", "timeseries")]),
-        ])
-
-    if sliceorder is not None:
-        slicetime.connect([
-            (inputnode, sliceorder,
-                [("timeseries", "in_file")]),
-            (sliceorder, slicetimer,
-                [("out_file", "custom_order")]),
-            ])
-
-    return slicetime
-
-
-def create_skullstrip_workflow(name="skullstrip"):
-    """Remove non-brain voxels from the timeseries."""
-
-    # Define the workflow inputs
-    inputnode = Node(IdentityInterface(["subject_id",
-                                        "timeseries",
-                                        "reg_file"]),
-                     "inputs")
-
-    # Mean the timeseries across the fourth dimension
-    origmean = MapNode(fsl.MeanImage(), "in_file", "origmean")
-
-    # Grab the Freesurfer aparc+aseg file as an anatomical brain mask
-    getaseg = Node(io.SelectFiles({"aseg": "{subject_id}/mri/aparc+aseg.mgz"},
-                                  base_directory=os.environ["SUBJECTS_DIR"]),
-                   "getaseg")
-
-    # Threshold the aseg volume to get a boolean mask
-    makemask = Node(fs.Binarize(dilate=4, min=0.5), "makemask")
-
-    # Transform the brain mask into functional space
-    transform = MapNode(fs.ApplyVolTransform(inverse=True,
-                                             interp="nearest"),
-                        ["reg_file", "source_file"],
-                        "transform")
-
-    # Convert the mask to nifti and rename
-    convertmask = MapNode(fs.MRIConvert(out_file="functional_mask.nii.gz"),
-                          "in_file", "convertmask")
-
-    # Use the mask to skullstrip the timeseries
-    stripts = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripts")
-
-    # Use the mask to skullstrip the mean image
-    stripmean = MapNode(fs.ApplyMask(), ["in_file", "mask_file"], "stripmean")
-
-    # Generate images summarizing the skullstrip and resulting data
-    reportmask = MapNode(MaskReport(), ["mask_file", "orig_file", "mean_file"],
-                         "reportmask")
-
-    # Define the workflow outputs
-    outputnode = Node(IdentityInterface(["timeseries",
-                                         "mean_file",
-                                         "mask_file",
-                                         "report"]),
-                      "outputs")
-
-    # Define and connect the workflow
-    skullstrip = Workflow(name)
-
-    skullstrip.connect([
-        (inputnode, origmean,
-            [("timeseries", "in_file")]),
-        (inputnode, getaseg,
-            [("subject_id", "subject_id")]),
-        (origmean, transform,
+import nibabel as nib
+
+from nipype import (Workflow, Node, MapNode, JoinNode,
+                    IdentityInterface, Function, DataSink)
+from nipype.interfaces.base import traits, TraitedSpec, isdefined
+from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
+
+from .. import signals  # TODO confusingly close to scipy.signal
+from ..mosaic import Mosaic
+from ..carpetplot import CarpetPlot
+from ..graphutils import SimpleInterface
+
+
+def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
+
+    # proj_info will be a bunch or other object with data_dir, etc. fields
+
+    # sess info is a nested dictionary:
+    # outer keys are subjects
+    # inner keys are sessions
+    # inner values are lists of runs
+
+    # exp_info is a bunch or dict or other obj with experiment parameters
+
+    # --- Workflow parameterization
+
+    # TODO The iterable creation should be moved to separate functions
+    # and tested well, as the logic is fairly complicated. Also there
+    # should be a validation of the session info with informative errors
+
+    subject_iterables = [subj for subj in sess_info]
+
+    subject_source = Node(IdentityInterface(["subject"]),
+                          name="subject_source",
+                          iterables=("subject", subject_iterables))
+
+    session_iterables = {
+        subj: [(subj, sess) for sess in sess_info[subj]]
+        for subj in sess_info
+    }
+    session_source = Node(IdentityInterface(["subject", "session"]),
+                          name="session_source",
+                          itersource=("subject_source", "subject"),
+                          iterables=("session", session_iterables))
+
+    # TODO The comprehension below drives home that `sess_info` is a
+    # confusion name when the outer layer of parameterization is subject
+    # Need a new name!
+
+    run_iterables = {
+        (subj, sess): [(subj, sess, run) for run in sess_info[subj][sess]]
+        for subj in sess_info
+        for sess in sess_info[subj]
+    }
+    run_source = Node(IdentityInterface(["subject", "session", "run"]),
+                      name="run_source",
+                      itersource=("session_source", "session"),
+                      iterables=("run", run_iterables))
+
+    session_input = Node(SessionInput(base_directory=proj_info.data_dir,
+                                      fm_template=exp_info.fm_template,
+                                      phase_encoding=exp_info.phase_encoding),
+                         "session_input")
+
+    run_input = Node(RunInput(base_directory=proj_info.data_dir,
+                              sb_template=exp_info.sb_template,
+                              ts_template=exp_info.ts_template),
+                     name="run_input")
+
+    # --- Warpfield estimation using topup
+
+    # Distortion warpfield estimation
+    estimate_distortions = Node(fsl.TOPUP(config="b02b0.cnf"),
+                                "estimate_distortions")
+
+    fieldmap_qc = Node(FieldMapReport(), "fieldmap_qc")
+
+    # Average distortion-corrected spin-echo images
+    average_fm = Node(fsl.MeanImage(out_file="fm_restored.nii.gz"),
+                      "average_fm")
+
+    # Select first warpfield image from output list
+    select_warp = Node(pipeutil.Select(index=[0]), "select_warp")
+
+    # Define a mask of areas with large distortions
+    thresh_ops = "-abs -thr 4 -Tmax -binv"
+    mask_distortions = Node(fsl.ImageMaths(op_string=thresh_ops),
+                            "mask_distortions")
+
+    # --- Registration of SBRef to SE-EPI (with distortions)
+
+    sb2fm = Node(fsl.FLIRT(dof=6, interp="spline"), "sb2fm")
+
+    sb2fm_qc = Node(CoregGIF(out_file="coreg.gif"), "sb2fm_qc")
+
+    # --- Registration of SE-EPI (without distortions) to Freesurfer anatomy
+
+    fm2anat = Node(fs.BBRegister(init="fsl",
+                                 contrast_type="t2",
+                                 out_fsl_file="fm2anat_flirt.mat",
+                                 out_reg_file="fm2anat_tkreg.dat"),
+                   "fm2anat")
+
+    fm2anat_qc = Node(AnatRegReport(out_file="reg.png"), "fm2anat_qc")
+
+    # --- Definition of common cross-session space (template space)
+
+    define_template = JoinNode(DefineTemplateSpace(),
+                               name="define_template",
+                               joinsource="session_source",
+                               joinfield=["session_info",
+                                          "in_matrices",
+                                          "in_volumes"])
+
+    func2anat_qc = Node(AnatRegReport(out_file="reg.png"),
+                        "func2anat_qc")
+
+    # --- Segementation of anatomical tissue in functional space
+
+    anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
+
+    # --- Associate template-space transforms with data from correct session
+
+    # The logic here is a little complex. The template creation node collapses
+    # the session-wise iterables and returns list of files that then need
+    # to hook back into the iterable parameterization so that they can be
+    # associated with data from the correct session when they are applied.
+
+    def select_transform_func(session_info, subject, session, in_matrices):
+
+        for info, matrix in zip(session_info, in_matrices):
+            if info == (subject, session):
+                out_matrix = matrix
+        return out_matrix
+
+    select_sesswise = Node(Function(["session_info",
+                                     "subject", "session",
+                                     "in_matrices"],
+                                    "out_matrix",
+                                    select_transform_func),
+                           "select_sesswise")
+
+    select_runwise = select_sesswise.clone("select_runwise")
+
+    # --- Restore each sessions SE image in template space then average
+
+    split_fm = Node(fsl.Split(dimension="t"), "split_fm")
+
+    restore_fm = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
+                         ["in_file", "premat", "field_file"],
+                         "restore_fm")
+
+    finalize_template = JoinNode(FinalizeTemplate(),
+                                 name="finalize_template",
+                                 joinsource="session_source",
+                                 joinfield=["in_files"])
+
+    # --- Motion correction of time series to SBRef (with distortions)
+
+    ts2sb = Node(fsl.MCFLIRT(save_mats=True, save_plots=True),
+                 "ts2sb")
+
+    realign_qc = Node(RealignmentReport(), "realign_qc")
+
+    # --- Combined motion correction and unwarping of time series
+
+    # Split the timeseries into each frame
+    split_ts = Node(fsl.Split(dimension="t"), "split_ts")
+
+    # Concatenation ts2sb and sb2sfmrigid transform
+    combine_rigids = MapNode(fsl.ConvertXFM(concat_xfm=True),
+                             "in_file", "combine_rigids")
+
+    # Simultaneously apply rigid transform and nonlinear warpfield
+    restore_ts_frames = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
+                                ["in_file", "premat"],
+                                "restore_ts")
+
+    # Perform final preprocessing operations on timeseries
+    finalize_ts = Node(FinalizeTimeseries(), "finalize_ts")
+
+    # --- Workflow ouptut
+
+    output_dir = op.join(proj_info.analysis_dir, exp_info.name)
+
+    def define_timeseries_container(subject, session, run):
+        return "{}/timeseries/{}_{}".format(subject, session, run)
+
+    timeseries_container = Node(Function(["subject", "session", "run"],
+                                         "path", define_timeseries_container),
+                                "timeseries_container")
+
+    timeseries_output = Node(DataSink(base_directory=output_dir,
+                                      parameterization=False),
+                             "timeseries_output")
+
+    def define_template_container(subject):
+        return "{}/template".format(subject)
+
+    template_container = Node(Function("subject",
+                                       "path", define_template_container),
+                              "template_container")
+
+    template_output = Node(DataSink(base_directory=output_dir,
+                                    parameterization=False),
+                           "template_output")
+
+    # === Assemble pipeline
+
+    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    workflow = Workflow(name="preproc", base_dir=cache_base)
+
+    # Connect processing nodes
+
+    processing_edges = [
+
+        (subject_source, session_source,
+            [("subject", "subject")]),
+        (subject_source, run_source,
+            [("subject", "subject")]),
+        (session_source, run_source,
+            [("session", "session")]),
+        (session_source, session_input,
+            [("session", "session")]),
+        (run_source, run_input,
+            [("run", "run")]),
+
+        # --- SE-EPI fieldmap processing and template creation
+
+        # Phase-encode distortion estimation
+
+        (session_input, estimate_distortions,
+            [("fm", "in_file"),
+             ("phase_encoding", "encoding_direction"),
+             ("readout_times", "readout_times")]),
+        (estimate_distortions, select_warp,
+            [("out_warps", "inlist")]),
+        (select_warp, mask_distortions,
+            [("out", "in_file")]),
+        (estimate_distortions, average_fm,
+            [("out_corrected", "in_file")]),
+
+        # Registration of corrected SE-EPI to anatomy
+
+        (session_input, fm2anat,
+            [("subject", "subject_id")]),
+        (average_fm, fm2anat,
             [("out_file", "source_file")]),
-        (getaseg, makemask,
-            [("aseg", "in_file")]),
-        (makemask, transform,
-            [("binary_file", "target_file")]),
-        (inputnode, transform,
-            [("reg_file", "reg_file")]),
-        (transform, stripts,
-            [("transformed_file", "mask_file")]),
-        (transform, stripmean,
-            [("transformed_file", "mask_file")]),
-        (inputnode, stripts,
-            [("timeseries", "in_file")]),
-        (origmean, stripmean,
-            [("out_file", "in_file")]),
-        (stripmean, reportmask,
-            [("out_file", "mean_file")]),
-        (origmean, reportmask,
-            [("out_file", "orig_file")]),
-        (transform, reportmask,
-            [("transformed_file", "mask_file")]),
-        (transform, convertmask,
-            [("transformed_file", "in_file")]),
-        (stripts, outputnode,
-            [("out_file", "timeseries")]),
-        (stripmean, outputnode,
-            [("out_file", "mean_file")]),
-        (convertmask, outputnode,
-            [("out_file", "mask_file")]),
-        (reportmask, outputnode,
-            [("out_files", "report")]),
-        ])
 
-    return skullstrip
+        # Creation of cross-session subject-specific template
 
+        (subject_source, define_template,
+            [("subject", "subject_id")]),
+        (session_source, define_template,
+            [("session", "session_info")]),
+        (session_input, define_template,
+            [("fm", "in_volumes")]),
+        (fm2anat, define_template,
+            [("out_fsl_file", "in_matrices")]),
+        (define_template, anat_segment,
+            [("subject_id", "subject_id"),
+             ("reg_file", "reg_file"),
+             ("out_template", "template_file")]),
+        (define_template, select_sesswise,
+            [("out_matrices", "in_matrices"),
+             ("out_template", "in_templates"),
+             ("session_info", "session_info")]),
+        (session_input, select_sesswise,
+            [("subject", "subject"),
+             ("session", "session")]),
+        (session_input, split_fm,
+            [("fm", "in_file")]),
+        (split_fm, restore_fm,
+            [("out_files", "in_file")]),
+        (estimate_distortions, restore_fm,
+            [("out_mats", "premat"),
+             ("out_warps", "field_file")]),
+        (define_template, restore_fm,
+            [("out_template", "ref_file")]),
+        (select_sesswise, restore_fm,
+            [("out_matrix", "postmat")]),
+        (restore_fm, finalize_template,
+            [("out_file", "in_files")]),
+        (anat_segment, finalize_template,
+            [("mask_file", "mask_file")]),
 
-def create_bbregister_workflow(name="bbregister",
-                               contrast_type="t2",
-                               partial_brain=False,
-                               init_with="fsl"):
-    """Find a linear transformation to align the EPI file with the anatomy."""
-    in_fields = ["subject_id", "timeseries"]
-    if partial_brain:
-        in_fields.append("whole_brain_template")
-    inputnode = Node(IdentityInterface(in_fields), "inputs")
+        # --- Time series spatial processing
 
-    # Take the mean over time to get a target volume
-    meanvol = MapNode(fsl.MeanImage(), "in_file", "meanvol")
+        # Registration of each frame to SBRef image
 
-    # Do a rough skullstrip using BET
-    skullstrip = MapNode(fsl.BET(), "in_file", "bet")
+        (run_input, ts2sb,
+            [("ts", "in_file"),
+             ("sb", "ref_file")]),
+        (ts2sb, finalize_ts,
+            [("par_file", "mc_file")]),
 
-    # Estimate the registration to Freesurfer conformed space
-    func2anat = MapNode(fs.BBRegister(contrast_type=contrast_type,
-                                      init=init_with,
-                                      epi_mask=True,
-                                      registered_file=True,
-                                      out_reg_file="func2anat_tkreg.dat",
-                                      out_fsl_file="func2anat_flirt.mat"),
-                        "source_file",
-                        "func2anat")
+        # Registration of SBRef volume to SE-EPI fieldmap
 
-    # Make an image for quality control on the registration
-    report = MapNode(CoregReport(), "in_file", "coreg_report")
+        (run_input, sb2fm,
+            [("sb", "in_file")]),
+        (session_input, sb2fm,
+            [("fm", "reference")]),
+        (mask_distortions, sb2fm,
+            [("out_file", "ref_weight")]),
 
-    # Define the workflow outputs
-    outputnode = Node(IdentityInterface(["tkreg_mat", "flirt_mat", "report"]),
-                      "outputs")
+        # Single-interpolation spatial realignment and unwarping
 
-    bbregister = Workflow(name=name)
-
-    # Connect the registration
-    bbregister.connect([
-        (inputnode, func2anat,
-            [("subject_id", "subject_id")]),
-        (inputnode, report,
-            [("subject_id", "subject_id")]),
-        (inputnode, meanvol,
-            [("timeseries", "in_file")]),
-        (meanvol, skullstrip,
-            [("out_file", "in_file")]),
-        (skullstrip, func2anat,
-            [("out_file", "source_file")]),
-        (func2anat, report,
-            [("registered_file", "in_file")]),
-        (func2anat, outputnode,
-            [("out_reg_file", "tkreg_mat")]),
-        (func2anat, outputnode,
-            [("out_fsl_file", "flirt_mat")]),
-        (report, outputnode,
-            [("out_file", "report")]),
-        ])
-
-    # Possibly connect the full_fov image
-    if partial_brain:
-        bbregister.connect([
-            (inputnode, func2anat,
-                [("whole_brain_template", "intermediate_file")]),
-        ])
-
-    return bbregister
-
-
-def create_filtering_workflow(name="filter",
-                              hpf_cutoff=128,
-                              TR=2,
-                              output_name="timeseries"):
-    """Scale and high-pass filter the timeseries."""
-    inputnode = Node(IdentityInterface(["timeseries", "mask_file"]),
-                     "inputs")
-
-    # Grand-median scale within the brain mask
-    scale = MapNode(ScaleTimeseries(statistic="median", target=10000),
-                    ["in_file", "mask_file"],
-                    "scale")
-
-    # Gaussian running-line filter
-    if hpf_cutoff is None:
-        hpf_sigma = -1
-    else:
-        hpf_sigma = (hpf_cutoff / 2.0) / TR
-    filter = MapNode(fsl.TemporalFilter(highpass_sigma=hpf_sigma),
-                     "in_file",
-                     "filter")
-
-    # Possibly replace the mean
-    # (In later versions of FSL, the highpass filter removes the
-    # mean component. Put it back, but be flexible so this isn't
-    # broken on older versions of FSL).
-    replacemean = MapNode(ReplaceMean(output_name=output_name),
-                          ["orig_file", "filtered_file"],
-                          "replacemean")
-
-    # Compute a final mean functional volume
-    meanfunc = MapNode(fsl.MeanImage(out_file="mean_func.nii.gz"),
-                       "in_file", "meanfunc")
-
-    outputnode = Node(IdentityInterface(["timeseries",
-                                         "mean_file"]), "outputs")
-
-    filtering = Workflow(name)
-    filtering.connect([
-        (inputnode, scale,
-            [("timeseries", "in_file"),
+        (ts2sb, combine_rigids,
+            [("mat_file", "in_file")]),
+        (sb2fm, combine_rigids,
+            [("out_matrix_file", "in_file2")]),
+        (run_input, split_ts,
+            [("ts", "in_file")]),
+        (define_template, select_runwise,
+            [("out_matrices", "in_matrices"),
+             ("session_info", "session_info")]),
+        (run_input, select_runwise,
+            [("subject", "subject"),
+             ("session", "session")]),
+        (split_ts, restore_ts_frames,
+            [("out_files", "in_file")]),
+        (combine_rigids, restore_ts_frames,
+            [("out_file", "premat")]),
+        (select_warp, restore_ts_frames,
+            [("out", "field_file")]),
+        (define_template, restore_ts_frames,
+            [("out_template", "ref_file")]),
+        (select_runwise, restore_ts_frames,
+            [("out_matrix", "postmat")]),
+        (restore_ts_frames, finalize_ts,
+            [("out_file", "in_files")]),
+        (anat_segment, finalize_ts,
+            [("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
-        (scale, filter,
+
+        # --- Persistent data storage
+
+        # Ouputs associated with the subject-specific template
+
+        (session_input, template_container,
+            [("subject", "subject")]),
+        (template_container, template_output,
+            [("path", "container")]),
+        (finalize_template, template_output,
+            [("out_file", "@template")]),
+        (define_template, template_output,
+            [("reg_file", "@reg")]),
+        (anat_segment, template_output,
+            [("seg_file", "@seg"),
+             ("mask_file", "@mask"),
+             ("anat_file", "@anat"),
+             ("surf_file", "@surf")]),
+
+        # Ouputs associated with each scanner run
+
+        (run_input, timeseries_container,
+            [("subject", "subject"),
+             ("session", "session"),
+             ("run", "run")]),
+        (timeseries_container, timeseries_output,
+            [("path", "container")]),
+        (finalize_ts, timeseries_output,
+            [("out_file", "@func"),
+             ("mean_file", "@mean"),
+             ("tsnr_file", "@tsnr"),
+             ("noise_file", "@noise"),
+             ("mc_file", "@mc")]),
+
+    ]
+    workflow.connect(processing_edges)
+
+    # Optionally connect QC nodes
+
+    qc_edges = [
+
+        # Phase-encode distortion estimation
+
+        (session_input, fieldmap_qc,
+            [("fm", "orig_file"),
+             ("session", "session"),
+             ("phase_encoding", "phase_encoding")]),
+        (estimate_distortions, fieldmap_qc,
+            [("out_corrected", "corr_file")]),
+
+        # Registration of corrected SE-EPI to anatomy
+
+        (session_input, fm2anat_qc,
+            [("subject", "subject_id"),
+             ("session", "session")]),
+        (average_fm, fm2anat_qc,
             [("out_file", "in_file")]),
-        (scale, replacemean,
-            [("out_file", "orig_file")]),
-        (filter, replacemean,
-            [("out_file", "filtered_file")]),
-        (replacemean, meanfunc,
+        (fm2anat, fm2anat_qc,
+            [("out_reg_file", "reg_file"),
+             ("min_cost_file", "cost_file")]),
+
+        # Creation of cross-session subject-specific template
+
+        (session_input, func2anat_qc,
+            [("subject", "subject_id")]),
+        (define_template, func2anat_qc,
+            [("reg_file", "reg_file")]),
+        (finalize_template, func2anat_qc,
             [("out_file", "in_file")]),
-        (replacemean, outputnode,
-            [("out_file", "timeseries")]),
-        (meanfunc, outputnode,
-            [("out_file", "mean_file")]),
-        ])
 
-    return filtering
+        # Registration of each frame to SBRef image
 
+        (run_input, realign_qc,
+            [("sb", "target_file")]),
+        (ts2sb, realign_qc,
+            [("par_file", "realign_params")]),
 
-def create_confound_extraction_workflow(name="confounds", wm_components=6):
-    """Extract nuisance variables from anatomical sources."""
-    inputnode = Node(IdentityInterface(["timeseries",
-                                        "brain_mask",
-                                        "reg_file",
-                                        "subject_id"]),
-                     "inputs")
+        # Registration of SBRef volume to SE-EPI fieldmap
 
-    # Find the subject's Freesurfer segmentation
-    # Grab the Freesurfer aparc+aseg file as an anatomical brain mask
-    getaseg = Node(io.SelectFiles({"aseg": "{subject_id}/mri/aseg.mgz"},
-                                  base_directory=os.environ["SUBJECTS_DIR"]),
-                   "getaseg")
+        (sb2fm, sb2fm_qc,
+            [("out_file", "in_file")]),
+        (session_input, sb2fm_qc,
+            [("fm", "ref_file")]),
 
-    # Select and erode the white matter to get deep voxels
-    selectwm = Node(fs.Binarize(erode=3, wm=True), "selectwm")
+        # Ouputs associated with the subject-specific template
 
-    # Transform the mask into functional space
-    transform = MapNode(fs.ApplyVolTransform(inverse=True,
-                                             interp="nearest"),
-                        ["reg_file", "source_file"],
-                        "transform")
+        (anat_segment, template_output,
+            [("seg_plot", "qc.@seg_plot"),
+             ("mask_plot", "qc.@mask_plot"),
+             ("anat_plot", "qc.@anat_plot"),
+             ("surf_plot", "qc.@surf_plot")]),
+        (func2anat_qc, template_output,
+            [("out_file", "qc.@func2anat_plot")]),
+        (finalize_template, template_output,
+            [("out_png", "qc.@template_png"),
+             ("out_gif", "qc.@template_gif")]),
+        (fieldmap_qc, template_output,
+            [("out_file", "qc.sessions.@unwarp_gif")]),
+        (fm2anat_qc, template_output,
+            [("out_file", "qc.sessions.@fm2anat_plot")]),
 
-    # Extract eigenvariates of the timeseries from WM and whole brain
-    extract = MapNode(ExtractConfounds(n_components=wm_components),
-                      ["timeseries", "brain_mask", "wm_mask"],
-                      "extract")
+        # Ouputs associated with each scanner run
 
-    outputnode = Node(IdentityInterface(["confound_file"]), "outputs")
+        (run_input, timeseries_output,
+            [("ts_plot", "qc.@raw_gif")]),
+        (sb2fm_qc, timeseries_output,
+            [("out_file", "qc.@sb2fm_gif")]),
+        (realign_qc, timeseries_output,
+            [("params_plot", "qc.@params_plot"),
+             ("target_plot", "qc.@target_plot")]),
+        (finalize_ts, timeseries_output,
+            [("out_gif", "qc.@ts_gif"),
+             ("out_png", "qc.@ts_png"),
+             ("mean_plot", "qc.@ts_mean_plot"),
+             ("tsnr_plot", "qc.@ts_tsnr_plot"),
+             ("noise_plot", "qc.@noise_plot")]),
 
-    confounds = Workflow(name)
-    confounds.connect([
-        (inputnode, getaseg,
-            [("subject_id", "subject_id")]),
-        (getaseg, selectwm,
-            [("aseg", "in_file")]),
-        (selectwm, transform,
-            [("binary_file", "target_file")]),
-        (inputnode, transform,
-            [("reg_file", "reg_file"),
-             ("timeseries", "source_file")]),
-        (transform, extract,
-            [("transformed_file", "wm_mask")]),
-        (inputnode, extract,
-            [("timeseries", "timeseries"),
-             ("brain_mask", "brain_mask")]),
-        (extract, outputnode,
-            [("out_file", "confound_file")]),
-        ])
+    ]
 
-    return confounds
+    if qc:
+        workflow.connect(qc_edges)
+
+    return workflow
 
 
 # =========================================================================== #
+# Custom processing nodes
+# =========================================================================== #
 
+# ---- Quality control mixins
 
-class PrepTimeseriesInput(BaseInterfaceInputSpec):
+class TimeSeriesGIF(object):
 
-    in_file = File(exists=True)
-    frames_to_toss = traits.Int()
+    def write_time_series_gif(self, runtime, img, fname):
 
+        os.mkdir("png")
 
-class PrepTimeseries(BaseInterface):
+        nx, ny, nz, nt = img.shape
+        tr = img.header.get_zooms()[3]
+        delay = tr * 1000 / 75
 
-    input_spec = PrepTimeseriesInput
-    output_spec = SingleOutFile
+        width = 5
+        height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
 
-    def _run_interface(self, runtime):
-
-        # Load the input timeseries
-        img = nib.load(self.inputs.in_file)
-        data = img.get_data()
-        aff = img.get_affine()
-        hdr = img.get_header()
-
-        # Trim off the equilibrium TRs
-        data = self.trim_timeseries(data)
-
-        # Save the output timeseries as float32
-        hdr.set_data_dtype(np.float32)
-        new_img = nib.Nifti1Image(data, aff, hdr)
-        new_img.to_filename("timeseries.nii.gz")
-
-        return runtime
-
-    def trim_timeseries(self, data):
-        """Remove frames from beginning of timeseries."""
-        return data[..., self.inputs.frames_to_toss:]
-
-    _list_outputs = list_out_file("timeseries.nii.gz")
-
-
-class UnwarpReportInput(BaseInterfaceInputSpec):
-
-    orig_file = File(exists=True)
-    corrected_file = File(exists=True)
-
-
-class UnwarpReport(BaseInterface):
-
-    input_spec = UnwarpReportInput
-    output_spec = SingleOutFile
-
-    def _run_interface(self, runtime):
-
-        # Make a discrete colormap
-        cmap = mpl.colors.ListedColormap(["black", "#d65f5f", "white"])
-
-        # Initialize the figure
-        f, axes = plt.subplots(1, 2, figsize=(9, 2.75),
-                               facecolor="black", edgecolor="black")
-
-        for ax, fname in zip(axes, [self.inputs.orig_file,
-                                    self.inputs.corrected_file]):
-
-            # Combine the frames from this image and plot
-            img = nib.load(fname)
-            ax.imshow(self.combine_frames(img), cmap=cmap, vmin=0, vmax=2)
+        f, axes = plt.subplots(ncols=3, figsize=(width, height))
+        for ax in axes:
             ax.set_axis_off()
 
-        # Save the figure and close
+        data = img.get_data()
+        vmin, vmax = np.percentile(data, [2, 98])
+
+        kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
+        im_x = axes[0].imshow(np.zeros((nz, ny)), **kws)
+        im_y = axes[1].imshow(np.zeros((nz, nx)), **kws)
+        im_z = axes[2].imshow(np.zeros((ny, nx)), **kws)
+
         f.subplots_adjust(0, 0, 1, 1, 0, 0)
-        f.savefig("unwarping.png", facecolor="black", edgecolor="black")
-        plt.close(f)
 
-        return runtime
+        x, y, z = nx // 2, ny // 2, nz // 2
 
-    def combine_frames(self, img):
+        text = f.text(0.02, 0.02, "",
+                      size=10, ha="left", va="bottom",
+                      color="w", backgroundcolor="0")
 
-        # Find a value to loosely segment the brain
-        d = img.get_data()
-        counts, bins = np.histogram(d[d > 0], 50)
-        thresh = bins[np.diff(counts) > 0][0]
+        pngs = []
 
-        # Show the middle slice
-        middle = d.shape[0] // 2
+        for t in range(nt):
 
-        # Combine a binary mask for each phase direction
-        a = np.rot90(d[middle, ..., 0] > thresh)
-        b = np.rot90(d[middle, ..., 1] > thresh)
+            vol = data[..., t]
 
-        # Make an image showing overlap and divergence
-        c = np.zeros_like(a, int)
-        c[a ^ b] = 1
-        c[a & b] = 2
+            im_x.set_data(np.rot90(vol[x, :, :]))
+            im_y.set_data(np.rot90(vol[:, y, :]))
+            im_z.set_data(np.rot90(vol[:, :, z]))
 
-        return c
+            if not t % 10:
+                text.set_text("T: {:d}".format(t))
 
-    _list_outputs = list_out_file("unwarping.png")
+            frame_png = "png/{:04d}.png".format(t)
+            pngs.append(frame_png)
+            f.savefig(frame_png,
+                      facecolor="0", edgecolor="0")
 
+        cmdline = ["convert", "-loop", "0", "-delay", str(delay)]
+        cmdline.extend(pngs)
+        cmdline.append(fname)
 
-class ExtractRealignmentTarget(BaseInterface):
-
-    input_spec = SingleInFile
-    output_spec = SingleOutFile
-
-    def _run_interface(self, runtime):
-
-        # Load the input timeseries
-        img = nib.load(self.inputs.in_file)
-
-        # Extract the target volume
-        targ = self.extract_target(img)
-
-        # Save a new 3D image
-        targ_img = nib.Nifti1Image(targ,
-                                   img.get_affine(),
-                                   img.get_header())
-        targ_img.to_filename("example_func.nii.gz")
-
-        return runtime
-
-    def extract_target(self, img):
-        """Return a 3D array with data from the middle TR."""
-        middle_vol = img.shape[-1] // 2
-        targ = np.empty(img.shape[:-1])
-        targ[:] = img.dataobj[..., middle_vol]
-
-        return targ
-
-    _list_outputs = list_out_file("example_func.nii.gz")
+        self.submit_cmdline(runtime, cmdline)
 
 
-class RealignmentReportInput(BaseInterfaceInputSpec):
-
-    target_file = File(exists=True)
-    realign_params = File(exists=True)
-    displace_params = InputMultiPath(File(exists=True))
+# ---- Data input and pre-preprocessing
 
 
-class RealignmentReportOutput(TraitedSpec):
+class SessionInput(SimpleInterface):
 
-    realign_report = OutputMultiPath(File(exists=True))
-    motion_file = File(exists=True)
+    class input_spec(TraitedSpec):
+        session = traits.Tuple()
+        base_directory = traits.Str()
+        fm_template = traits.Str()
+        phase_encoding = traits.Str()
 
-
-class RealignmentReport(BaseInterface):
-
-    input_spec = RealignmentReportInput
-    output_spec = RealignmentReportOutput
+    class output_spec(TraitedSpec):
+        fm = traits.File(exists=True)
+        phase_encoding = traits.List(traits.Str())
+        readout_times = traits.List(traits.Float())
+        session_key = traits.Tuple()
+        subject = traits.Str()
+        session = traits.Str()
 
     def _run_interface(self, runtime):
 
-        self.out_files = []
+        # Determine the phase encoding directions
+        pe = self.inputs.phase_encoding
+        if pe == "ap":
+            pos_pe, neg_pe = "ap", "pa"
+        elif pe == "pa":
+            pos_pe, neg_pe = "pa", "ap"
+        else:
+            raise ValueError("Phase encoding must be 'ap' or 'pa'")
+
+        # Determine the parameters
+        subject, session = self.inputs.session
+        self._results["session_key"] = self.inputs.session
+        self._results["subject"] = str(subject)
+        self._results["session"] = str(session)
+
+        # Spec out full paths to the pair of fieldmap files
+        keys = dict(subject=subject, session=session)
+        template = self.inputs.fm_template
+        pos_fname = op.join(self.inputs.base_directory,
+                            template.format(encoding=pos_pe, **keys))
+        neg_fname = op.join(self.inputs.base_directory,
+                            template.format(encoding=neg_pe, **keys))
+
+        # Load the two images in canonical orientation
+        pos_img = nib.as_closest_canonical(nib.load(pos_fname))
+        neg_img = nib.as_closest_canonical(nib.load(neg_fname))
+        affine, header = pos_img.affine, pos_img.header
+
+        # Concatenate the images into a single volume
+        pos_data = pos_img.get_data()
+        neg_data = neg_img.get_data()
+        data = np.concatenate([pos_data, neg_data], axis=-1)
+        assert len(data.shape) == 4
+
+        # Convert image datatype to float
+        header.set_data_dtype(np.float32)
+
+        # Write out a 4D file
+        fname = self.define_output("fm", "fieldmap.nii.gz")
+        img = nib.Nifti1Image(data, affine, header)
+        img.to_filename(fname)
+
+        # Define phase encoding and readout times for TOPUP
+        pe_dir = ["y"] * pos_img.shape[-1] + ["y-"] * neg_img.shape[-1]
+        readout_times = [1 for _ in pe_dir]
+        self._results["phase_encoding"] = pe_dir
+        self._results["readout_times"] = readout_times
+
+        return runtime
+
+
+class RunInput(SimpleInterface, TimeSeriesGIF):
+
+    class input_spec(TraitedSpec):
+        run = traits.Tuple()
+        base_directory = traits.Str()
+        sb_template = traits.Str()
+        ts_template = traits.Str()
+        crop_frames = traits.Int(0, usedefault=True)
+
+    class output_spec(TraitedSpec):
+        sb = traits.File(exists=True)
+        ts = traits.File(exists=True)
+        ts_plot = traits.File(exists=True)
+        subject = traits.Str()
+        session = traits.Str()
+        run = traits.Str()
+
+    def _run_interface(self, runtime):
+
+        # Determine the parameters
+        subject, session, run = self.inputs.run
+        self._results["subject"] = subject
+        self._results["session"] = session
+        self._results["run"] = run
+
+        # Spec out paths to the input files
+        keys = dict(subject=subject, session=session, run=run)
+        sb_fname = op.join(self.inputs.base_directory,
+                           self.inputs.sb_template.format(**keys))
+        ts_fname = op.join(self.inputs.base_directory,
+                           self.inputs.ts_template.format(**keys))
+
+        # Load the input images in canonical orientation
+        sb_img = nib.as_closest_canonical(nib.load(sb_fname))
+        ts_img = nib.as_closest_canonical(nib.load(ts_fname))
+
+        # Convert image datatypes to float
+        sb_img.set_data_dtype(np.float32)
+        ts_img.set_data_dtype(np.float32)
+
+        # Optionally crop the first n frames of the timeseries
+        if self.inputs.crop_frames > 0:
+            ts_data = ts_img.get_data()
+            ts_data = ts_data[..., self.inputs.crop_frames:]
+            ts_img = nib.Nifti1Image(ts_data, ts_img.affine, ts_img.header)
+
+        # Write out the new images
+        self.save_image(sb_img, "sb", "sb.nii.gz")
+        self.save_image(ts_img, "ts", "ts.nii.gz")
+
+        # Make a GIF movie of the raw timeseries
+        out_plot = self.define_output("ts_plot", "raw.gif")
+        self.write_time_series_gif(runtime, ts_img, out_plot)
+
+        return runtime
+
+
+# --- Preprocessing operations
+
+
+class FinalizeTemplate(SimpleInterface, TimeSeriesGIF):
+
+    class input_spec(TraitedSpec):
+        in_files = traits.List(traits.List(traits.File(exists=True)))
+        mask_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+        out_gif = traits.File(exists=True)
+        out_png = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Load the mask image
+        mask_img = nib.load(self.inputs.mask_file)
+        mask = mask_img.get_data().astype(bool)
+
+        # Load each frame and scale to a common mean
+        template_imgs = []
+        for sess_files in self.inputs.in_files:
+            for fname in sess_files:
+                img = nib.load(fname)
+                data = img.get_data()
+
+                target = 10000
+                scale_value = target / data[mask].mean()
+                data = data * scale_value
+
+                img = nib.Nifti1Image(data, img.affine, img.header)
+                template_imgs.append(img)
+
+        # Take the temporal mean over all template frames
+        frame_img = nib.concat_images(template_imgs)
+        template_data = frame_img.get_data().mean(axis=-1)
+
+        # Apply the mask to skullstrip
+        template_data[~mask] = 0
+
+        # Write out the 3D template image
+        affine, header = frame_img.affine, frame_img.header
+        out_file = self.define_output("out_file", "func.nii.gz")
+        out_img = nib.Nifti1Image(template_data, affine, header)
+        out_img.to_filename(out_file)
+
+        # Make a GIF movie of the template_frames
+        out_gif = self.define_output("out_gif", "func.gif")
+        self.write_time_series_gif(runtime, frame_img, out_gif)
+
+        # Make a static png of the final template
+        out_png = self.define_output("out_png", "func.png")
+        m = Mosaic(out_img, mask=mask_img)
+        m.savefig(out_png)
+        m.close()
+
+        return runtime
+
+
+class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
+
+    class input_spec(TraitedSpec):
+        in_files = traits.List(traits.File(exists=True))
+        seg_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        mc_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+        out_gif = traits.File(exists=True)
+        out_png = traits.File(exists=True)
+        mean_file = traits.File(exists=True)
+        mean_plot = traits.File(exists=True)
+        tsnr_file = traits.File(exists=True)
+        tsnr_plot = traits.File(exists=True)
+        noise_file = traits.File(exists=True)
+        noise_plot = traits.File(exists=True)
+        mc_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Concatenate timeseries frames into 4D image
+        img = nib.concat_images(self.inputs.in_files)
+        affine, header = img.affine, img.header
+        data = img.get_data()
+
+        # Load the brain mask and seg images
+        seg_img = nib.load(self.inputs.seg_file)
+        seg = seg_img.get_data()
+
+        mask_img = nib.load(self.inputs.mask_file)
+        mask = mask_img.get_data().astype(np.bool)
+
+        # Zero-out data outside the mask
+        data[~mask] = 0
+
+        # Scale the timeseries for cross-run intensity normalization
+        target = 10000
+        scale_value = target / data[mask].mean()
+        data = data * scale_value
+
+        # Remove linear but not constant trend
+        mean = data.mean(axis=-1, keepdims=True)
+        data[mask] = signal.detrend(data[mask])
+        data += mean
+
+        # Save out the final time series
+        out_file = self.define_output("out_file", "func.nii.gz")
+        out_img = nib.Nifti1Image(data, affine, header)
+        out_img.to_filename(out_file)
+
+        # Generate the temporal mean and SNR images
+        mean = data.mean(axis=-1)
+        sd = data.std(axis=-1)
+        with np.errstate(all="ignore"):
+            tsnr = mean / sd
+            tsnr[~mask] = 0
+
+        mean_file = self.define_output("mean_file", "mean.nii.gz")
+        mean_img = nib.Nifti1Image(mean, affine, header)
+        mean_img.to_filename(mean_file)
+
+        tsnr_file = self.define_output("tsnr_file", "tsnr.nii.gz")
+        tsnr_img = nib.Nifti1Image(tsnr, affine, header)
+        tsnr_img.to_filename(tsnr_file)
+
+        # Identify unusually noisy voxels
+        noise_file = self.define_output("noise_file", "noise.nii.gz")
+        gray_mask = (0 < seg) & (seg < 5)
+        gray_img = nib.Nifti1Image(gray_mask, img.affine, img.header)
+        noise_img = signals.identify_noisy_voxels(
+            out_img, gray_img, neighborhood=5, threshold=1.5, detrend=False
+        )
+        noise_img.to_filename(noise_file)
+
+        # Load the motion correction params and convert to CSV with header
+        mc_file = self.define_output("mc_file", "mc.csv")
+        mc_data = np.loadtxt(self.inputs.mc_file)
+        cols = ["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"]
+        mc_data = pd.DataFrame(mc_data, columns=cols)
+        mc_data.to_csv(mc_file, index=False)
+
+        # Make a carpet plot of the final timeseries
+        out_png = self.define_output("out_png", "func.png")
+        p = CarpetPlot(out_img, seg_img, mc_data)
+        p.savefig(out_png)
+        p.close()
+
+        # Make a GIF movie of the final timeseries
+        out_gif = self.define_output("out_gif", "func.gif")
+        self.write_time_series_gif(runtime, out_img, out_gif)
+
+        # Make a mosaic of the temporal mean normalized to mean cortical signal
+        mean_plot = self.define_output("mean_plot", "mean.png")
+        norm_mean = mean / mean[seg == 1].mean()
+        mean_m = Mosaic(mean_img, norm_mean, mask_img, show_mask=False)
+        mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=1, fmt="d")
+        mean_m.savefig(mean_plot)
+        mean_m.close()
+
+        # Make a mosaic of the tSNR
+        tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
+        tsnr_m = Mosaic(tsnr_img, tsnr_img, mask_img, show_mask=False)
+        tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
+        tsnr_m.savefig(tsnr_plot)
+        tsnr_m.close()
+
+        # Make a mosaic of the noisy voxels
+        noise_plot = self.define_output("noise_plot", "noise.png")
+        m = Mosaic(mean_img, noise_img, mask_img, show_mask=False)
+        m.plot_mask(alpha=1)
+        m.savefig(noise_plot)
+        m.close()
+
+        return runtime
+
+
+class AnatomicalSegmentation(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        subject_id = traits.Str()
+        template_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        seg_file = traits.File(exists=True)
+        seg_plot = traits.File(exists=True)
+        anat_file = traits.File(exists=True)
+        anat_plot = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        mask_plot = traits.File(exists=True)
+        surf_file = traits.File(exists=True)
+        surf_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Define the template space geometry
+
+        template_img = nib.load(self.inputs.template_file)
+        affine, header = template_img.affine, template_img.header
+
+        # --- Coarse segmentation into anatomical components
+
+        # Transform the wmparc image into functional space
+
+        fs_fname = "wmparc.nii.gz"
+        cmdline = ["mri_vol2vol",
+                   "--nearest",
+                   "--inv",
+                   "--mov", self.inputs.template_file,
+                   "--fstarg", "wmparc.mgz",
+                   "--reg", self.inputs.reg_file,
+                   "--o", fs_fname]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # Load the template-space wmparc and reclassify voxels
+
+        fs_img = nib.load(fs_fname)
+        fs_data = fs_img.get_data()
+
+        seg_data = np.zeros_like(fs_data)
+
+        seg_ids = [
+            np.arange(1000, 3000),  # Cortical gray matter
+            [10, 11, 12, 13, 17, 18, 49, 50, 51, 52, 53, 54],  # Subcortical
+            [16, 28, 60],  # Brain stem and ventral diencephalon
+            [8, 47],  # Cerebellar gray matter
+            np.arange(3000, 5000),  # Superficial ("cortical") white matter
+            [5001, 5002],  # Deep white matter
+            [7, 46],  # Cerebellar white matter
+            [4, 43, 31, 63],  # Lateral ventricle CSF
+        ]
+
+        for seg_val, id_vals in enumerate(seg_ids, 1):
+            mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
+            seg_data[mask] = seg_val
+
+        seg_file = self.define_output("seg_file", "seg.nii.gz")
+        seg_img = nib.Nifti1Image(seg_data, affine, header)
+        seg_img.to_filename(seg_file)
+
+        # --- Whole brain mask
+
+        # Binarize the segmentation and dilate to generate a brain mask
+
+        brainmask = seg_data > 0
+        brainmask = ndimage.binary_dilation(brainmask, iterations=2)
+        brainmask = ndimage.binary_erosion(brainmask)
+        brainmask = ndimage.binary_fill_holes(brainmask)
+
+        mask_file = self.define_output("mask_file", "mask.nii.gz")
+        mask_img = nib.Nifti1Image(brainmask, affine, header)
+        mask_img.to_filename(mask_file)
+
+        # --- T1w anatomical image in functional space
+
+        anat_file = self.define_output("anat_file", "anat.nii.gz")
+        cmdline = ["mri_vol2vol",
+                   "--cubic",
+                   "--inv",
+                   "--mov", self.inputs.template_file,
+                   "--fstarg", "brain.finalsurfs.mgz",
+                   "--reg", self.inputs.reg_file,
+                   "--o", anat_file]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # --- Surface vertex mapping
+
+        hemi_files = []
+        for hemi in ["lh", "rh"]:
+            hemi_mask = "{}.ribbon.nii.gz".format(hemi)
+            hemi_file = "{}.surf.nii.gz".format(hemi)
+            cmdline = ["mri_surf2vol",
+                       "--template", self.inputs.template_file,
+                       "--reg", self.inputs.reg_file,
+                       "--surf", "graymid",
+                       "--hemi", hemi,
+                       "--mkmask",
+                       "--o", hemi_mask,
+                       "--vtxvol", hemi_file]
+
+            self.submit_cmdline(runtime, cmdline)
+            hemi_files.append(hemi_file)
+
+        hemi_data = [nib.load(f).get_data() for f in hemi_files]
+        surf = np.stack(hemi_data, axis=-1)
+
+        surf_file = self.define_output("surf_file", "surf.nii.gz")
+        surf_img = nib.Nifti1Image(surf, affine, header)
+        surf_img.to_filename(surf_file)
+
+        # --- Generate QC mosaics
+
+        # Anatomical segmentation
+
+        seg_plot = self.define_output("seg_plot", "seg.png")
+        seg_cmap = mpl.colors.ListedColormap(
+            ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
+             '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
+         )
+        m_seg = Mosaic(template_img, seg_img, mask_img,
+                       step=2, tight=True, show_mask=False)
+        m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
+        m_seg.savefig(seg_plot)
+        m_seg.close()
+
+        # Brain mask
+
+        mask_plot = self.define_output("mask_plot", "mask.png")
+        m_mask = Mosaic(template_img, mask_img, mask_img,
+                        step=2, tight=True, show_mask=False)
+        m_mask.plot_mask()
+        m_mask.savefig(mask_plot)
+        m_mask.close()
+
+        # Anatomical image
+
+        anat_plot = self.define_output("anat_plot", "anat.png")
+        m_mask = Mosaic(anat_file, mask=mask_img,
+                        step=2, tight=True, show_mask=False)
+        m_mask.savefig(anat_plot)
+        m_mask.close()
+
+        # Surface ribbon
+
+        surf_plot = self.define_output("surf_plot", "surf.png")
+        ribbon = np.zeros(template_img.shape)
+        ribbon[surf[..., 0] > 0] = 1
+        ribbon[surf[..., 1] > 0] = 2
+        ribbon_cmap = mpl.colors.ListedColormap(["#5ebe82", "#ec966f"])
+        m_surf = Mosaic(template_img, ribbon, mask_img,
+                        step=2, tight=True, show_mask=False)
+        m_surf.plot_overlay(ribbon_cmap, 1, 2, thresh=.5, fmt=None)
+        m_surf.savefig(surf_plot)
+        m_surf.close()
+
+        return runtime
+
+
+class DefineTemplateSpace(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        subject_id = traits.Str()
+        session_info = traits.List(traits.Tuple())
+        in_matrices = traits.List(traits.File(exists=True))
+        in_volumes = traits.List(traits.File(exists=True))
+
+    class output_spec(TraitedSpec):
+        subject_id = traits.Str()
+        session_info = traits.List(traits.Tuple())
+        out_template = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        out_matrices = traits.List(traits.File(exists=True))
+
+    def _run_interface(self, runtime):
+
+        subjects_dir = os.environ["SUBJECTS_DIR"]
+
+        assert all([s == self.inputs.subject_id
+                    for s, _ in self.inputs.session_info])
+        subj = self.inputs.subject_id
+
+        self._results["subject_id"] = subj
+        self._results["session_info"] = self.inputs.session_info
+
+        # -- Convert the anatomical image to nifti
+        anat_file = "orig.nii.gz"
+        cmdline = ["mri_convert",
+                   op.join(subjects_dir, subj, "mri/orig.mgz"),
+                   anat_file]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # -- Compute the intermediate transform
+        midtrans_file = "anat2func.mat"
+        cmdline = ["midtrans",
+                   "--template=" + anat_file,
+                   "--separate=se2template_",
+                   "--out=" + midtrans_file]
+        cmdline.extend(self.inputs.in_matrices)
+        out_matrices = [
+            op.abspath("se2template_{:04d}.mat".format(i))
+            for i, _ in enumerate(self.inputs.in_matrices, 1)
+        ]
+
+        self.submit_cmdline(runtime, cmdline, out_matrices=out_matrices)
+
+        # -- Invert the anat2temp transformation
+        flirt_file = "func2anat.mat"
+        cmdline = ["convert_xfm",
+                   "-omat", flirt_file,
+                   "-inverse",
+                   midtrans_file]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # -- Tansform first fieldmap info template space to get geometry
+        out_template = self.define_output("out_template", "space.nii.gz")
+
+        cmdline = ["flirt",
+                   "-in", self.inputs.in_volumes[0],
+                   "-ref", self.inputs.in_volumes[0],
+                   "-init", out_matrices[0],
+                   "-out", out_template,
+                   "-applyxfm"]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # -- Average frames of fieldmap image in template space
+        cmdline = ["fslmaths", out_template, "-Tmean", out_template]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        # -- Convert the FSL matrices to tkreg matrix format
+        reg_file = self.define_output("reg_file", "reg.dat")
+        cmdline = ["tkregister2",
+                   "--s", subj,
+                   "--mov", out_template,
+                   "--fsl", flirt_file,
+                   "--reg", reg_file,
+                   "--noedit"]
+
+        self.submit_cmdline(runtime, cmdline)
+
+        return runtime
+
+
+# --- Preprocessing quality control
+
+
+class RealignmentReport(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        target_file = traits.File(exists=True)
+        realign_params = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        params_plot = traits.File(exists=True)
+        target_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
 
         # Load the realignment parameters
-        rot = ["rot_" + dim for dim in ["x", "y", "z"]]
-        trans = ["trans_" + dim for dim in ["x", "y", "z"]]
-        df = pd.DataFrame(np.loadtxt(self.inputs.realign_params),
-                          columns=rot + trans)
-
-        # Load the RMS displacement parameters
-        abs, rel = self.inputs.displace_params
-        df["displace_abs"] = np.loadtxt(abs)
-        df["displace_rel"] = pd.Series(np.loadtxt(rel), index=df.index[1:])
-        df.loc[0, "displace_rel"] = 0
-
-        # Write the motion file to csv
-        self.motion_file = op.abspath("realignment_params.csv")
-        df.to_csv(self.motion_file)
+        params = np.loadtxt(self.inputs.realign_params)
+        cols = ["rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z"]
+        df = pd.DataFrame(params, columns=cols)
 
         # Plot the motion timeseries
+        params_plot = self.define_output("params_plot", "mc_params.png")
         f = self.plot_motion(df)
-        self.plot_file = op.abspath("realignment_plots.png")
-        f.savefig(self.plot_file, dpi=100)
+        f.savefig(params_plot, dpi=100)
         plt.close(f)
 
         # Plot the target image
+        target_plot = self.define_output("target_plot", "mc_target.png")
         m = self.plot_target()
-        self.target_file = op.abspath("example_func.png")
-        m.savefig(self.target_file)
+        m.savefig(target_plot)
         m.close()
 
         return runtime
 
     def plot_motion(self, df):
         """Plot the timecourses of realignment parameters."""
-        with sns.axes_style("whitegrid"):
-            fig, axes = plt.subplots(3, 1, figsize=(9, 5), sharex=True)
+        fig, axes = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
 
         # Trim off all but the axis name
         def axis(s):
             return s[-1]
 
         # Plot rotations
-        pal = sns.color_palette("Reds_d", 3)
-        rot_df = np.rad2deg(df.filter(like="rot")).rename(columns=axis)
-        rot_df.plot(ax=axes[0], color=pal, lw=1.5)
+        rot_pal = ["#8b312d", "#e33029", "#f06855"]
+        rot_df = df.filter(like="rot").apply(np.rad2deg).rename(columns=axis)
+        rot_df.plot(ax=axes[0], color=rot_pal, lw=1.5)
 
         # Plot translations
-        pal = sns.color_palette("Blues_d", 3)
+        trans_pal = ["#355d9a", "#3787c0", "#72acd3"]
         trans_df = df.filter(like="trans").rename(columns=axis)
-        trans_df.plot(ax=axes[1], color=pal, lw=1.5)
-
-        # Plot displacement
-        def ref(s):
-            return s[-3:]
-        pal = sns.color_palette("Greens_d", 2)
-        disp_df = df.filter(like="displace").rename(columns=ref)
-        disp_df.plot(ax=axes[2], color=pal, lw=1.5)
+        trans_df.plot(ax=axes[1], color=trans_pal, lw=1.5)
 
         # Label the graphs
         axes[0].set_xlim(0, len(df) - 1)
@@ -894,410 +1146,237 @@ class RealignmentReport(BaseInterface):
         axes[1].axhline(0, c=".4", ls="--", zorder=1)
 
         for ax in axes:
-            ax.legend(frameon=True, ncol=3, loc="best")
-            ax.legend_.get_frame().set_color("white")
+            ax.legend(ncol=3, loc="best")
 
         axes[0].set_ylabel("Rotations (degrees)")
         axes[1].set_ylabel("Translations (mm)")
-        axes[2].set_ylabel("Displacement (mm)")
         fig.tight_layout()
         return fig
 
     def plot_target(self):
         """Plot a mosaic of the motion correction target image."""
-        m = Mosaic(self.inputs.target_file, step=1)
-        return m
-
-    def _list_outputs(self):
-
-        outputs = self._outputs().get()
-        outputs["realign_report"] = [self.target_file,
-                                     self.motion_file,
-                                     self.plot_file]
-        outputs["motion_file"] = self.motion_file
-        return outputs
+        return Mosaic(self.inputs.target_file, step=2)
 
 
-class SiemensSliceOrder(BaseInterface):
+class AnatRegReport(SimpleInterface):
 
-    input_spec = SingleInFile
-    output_spec = SingleOutFile
+    class input_spec(TraitedSpec):
+        subject_id = traits.Str()
+        session = traits.Str()
+        in_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        cost_file = traits.File(exists=True)
+        out_file = traits.File()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        fname = self.inputs.in_file
+        # Use the registration to transform the input file
+        registered_file = "func_in_anat.nii.gz"
+        cmdline = ["mri_vol2vol",
+                   "--mov", self.inputs.in_file,
+                   "--reg", self.inputs.reg_file,
+                   "--o", registered_file,
+                   "--fstarg",
+                   "--cubic"]
 
-        # Determine number of slices
-        # Assumes slice selection is on z axis. Usually true -- but always?
-        n_slices = nib.load(fname).shape[2]
-        slices = np.arange(1, n_slices + 1)
-        if n_slices % 2:
-            # Odd slice number starts with odd slices
-            slice_order = np.r_[slices[::2], slices[1::2]]
+        self.submit_cmdline(runtime, cmdline)
+
+        # Load the WM segmentation and a brain mask
+        mri_dir = op.join(os.environ["SUBJECTS_DIR"],
+                          self.inputs.subject_id, "mri")
+
+        wm_file = op.join(mri_dir, "wm.mgz")
+        wm_data = (nib.load(wm_file).get_data() > 0).astype(int)
+
+        aseg_file = op.join(mri_dir, "aseg.mgz")
+        mask = (nib.load(aseg_file).get_data() > 0).astype(int)
+
+        # Read the final registration cost
+        if isdefined(self.inputs.cost_file):
+            cost = np.loadtxt(self.inputs.cost_file)[0]
         else:
-            # Even slice number starts with even slices
-            slice_order = np.r_[slices[1::2], slices[::2]]
+            cost = None
 
-        np.savetxt("slice_order.txt", slice_order, fmt="%d")
+        # Make a mosaic of the registration from func to wm seg
+        # TODO this should be an OrthoMosaic when that is implemented
+        if isdefined(self.inputs.session):
+            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
+        else:
+            fname = self.inputs.out_file
+        out_file = self.define_output("out_file", fname)
 
-        return runtime
-
-    _list_outputs = list_out_file("slice_order.txt")
-
-
-class CoregReportInput(BaseInterfaceInputSpec):
-
-    in_file = File(exists=True)
-    subject_id = traits.Str()
-
-
-class CoregReport(BaseInterface):
-
-    input_spec = CoregReportInput
-    output_spec = SingleOutFile
-
-    def _run_interface(self, runtime):
-
-        subjects_dir = os.environ["SUBJECTS_DIR"]
-        wm_file = op.join(subjects_dir, self.inputs.subject_id, "mri/wm.mgz")
-        wm_data = nib.load(wm_file).get_data().astype(bool).astype(int)
-
-        m = Mosaic(self.inputs.in_file, wm_data, step=3)
-        m.plot_contours(["#DD2222"])
-        m.savefig("func2anat.png")
+        m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
+        m.plot_mask_edges()
+        if cost is not None:
+            m.fig.suptitle("Final cost: {:.2f}".format(cost),
+                           size=10, color="white")
+        m.savefig(out_file)
         m.close()
 
         return runtime
 
-    _list_outputs = list_out_file("func2anat.png")
 
+class FieldMapReport(SimpleInterface):
 
-class MaskReportInput(BaseInterfaceInputSpec):
+    class input_spec(TraitedSpec):
+        orig_file = traits.File(exists=True)
+        corr_file = traits.File(exists=True)
+        phase_encoding = traits.List(traits.Str)
+        session = traits.Str()
 
-    mask_file = File(exists=True)
-    orig_file = File(exists=True)
-    mean_file = File(exsits=True)
-
-
-class MaskReport(BaseInterface):
-
-    input_spec = MaskReportInput
-    output_spec = ManyOutFiles
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        self.out_files = []
-        self.plot_mean_image()
-        self.plot_mask_image()
+        vol_data = dict(orig=nib.load(self.inputs.orig_file).get_data(),
+                        corr=nib.load(self.inputs.corr_file).get_data())
+
+        pe_data = dict(orig=[], corr=[])
+        pe = np.array(self.inputs.phase_encoding)
+        for enc in np.unique(pe):
+            enc_trs = pe == enc
+            for scan in ["orig", "corr"]:
+                enc_data = vol_data[scan][..., enc_trs].mean(axis=-1)
+                pe_data[scan].append(enc_data)
+
+        r_vals = dict()
+        for scan, (scan_pos, scan_neg) in pe_data.items():
+            r_vals[scan] = np.corrcoef(scan_pos.flat, scan_neg.flat)[0, 1]
+
+        nx, ny, nz, _ = vol_data["orig"].shape
+        x_slc = (np.linspace(.2, .8, 8) * nx).astype(np.int)
+
+        vmin, vmax = np.percentile(vol_data["orig"].flat, [2, 98])
+        kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
+
+        width = len(x_slc)
+        height = (nz / ny) * 2.75
+
+        png_fnames = []
+        for i, enc in enumerate(["pos", "neg"]):
+
+            f = plt.figure(figsize=(width, height))
+            gs = dict(
+                orig=plt.GridSpec(1, len(x_slc), 0, .5, 1, .95, 0, 0),
+                corr=plt.GridSpec(1, len(x_slc), 0, 0, 1, .45, 0, 0)
+            )
+
+            text_kws = dict(size=7, color="w", backgroundcolor="0",
+                            ha="center", va="bottom")
+            f.text(.5, .93,
+                   "Original similarity: {:.2f}".format(r_vals["orig"]),
+                   **text_kws)
+            f.text(.5, .43,
+                   "Corrected similarity: {:.2f}".format(r_vals["corr"]),
+                   **text_kws)
+
+            for scan in ["orig", "corr"]:
+                axes = [f.add_subplot(pos) for pos in gs[scan]]
+                vol = pe_data[scan][i]
+
+                for ax, x in zip(axes, x_slc):
+                    slice = np.rot90(vol[x])
+                    ax.imshow(slice, **kws)
+                    ax.set_axis_off()
+
+                png_fname = "frame{}.png".format(i)
+                png_fnames.append(png_fname)
+                f.savefig(png_fname, facecolor="0", edgecolor="0")
+                plt.close(f)
+
+        out_fname = "{}_unwarp.gif".format(self.inputs.session)
+        out_file = self.define_output("out_file", out_fname)
+        cmdline = ["convert", "-loop", "0", "-delay", "100"]
+        cmdline.extend(png_fnames)
+        cmdline.append(out_file)
+
+        self.submit_cmdline(runtime, cmdline)
 
         return runtime
 
-    def plot_mean_image(self):
 
-        cmap = sns.cubehelix_palette(as_cmap=True, reverse=True,
-                                     light=1, dark=0)
-        m = Mosaic(self.inputs.mean_file, self.inputs.mean_file,
-                   self.inputs.mask_file, step=1)
-        m.plot_overlay(vmin=0, cmap=cmap, fmt="%d")
-        m.savefig("mean_func.png")
-        m.close()
+class CoregGIF(SimpleInterface):
 
-    def plot_mask_image(self):
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        ref_file = traits.File(exists=True)
+        out_file = traits.File()
 
-        m = Mosaic(self.inputs.orig_file, self.inputs.mask_file,
-                   self.inputs.mask_file, show_mask=False, step=1)
-        m.plot_mask()
-        m.savefig("functional_mask.png")
-        m.close()
-
-    def _list_outputs(self):
-
-        outputs = self._outputs().get()
-        outputs["out_files"] = [op.abspath("mean_func.png"),
-                                op.abspath("functional_mask.png")]
-        return outputs
-
-
-class ArtifactDetectionInput(BaseInterfaceInputSpec):
-
-    timeseries = File(exists=True)
-    mask_file = File(exists=True)
-    motion_file = File(exists=True)
-    intensity_thresh = traits.Float()
-    motion_thresh = traits.Float()
-    spike_thresh = traits.Either(traits.Float(), None)
-
-
-class ArtifactDetection(BaseInterface):
-
-    input_spec = ArtifactDetectionInput
-    output_spec = ManyOutFiles
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        # Load the timeseries and mask files
-        ts = nib.load(self.inputs.timeseries).get_data()
-        mask = nib.load(self.inputs.mask_file).get_data().astype(bool)
+        in_img = nib.load(self.inputs.in_file)
+        ref_img = nib.load(self.inputs.ref_file)
+        out_fname = self.define_output("out_file", self.inputs.out_file)
 
-        # Normalize the timeseries using robust statistics
-        norm_ts = self.normalize_timeseries(ts, mask)
+        if len(ref_img.shape) > 3:
+            ref_data = ref_img.get_data()[..., 0]
+            ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
 
-        # Find the intensity artifacts
-        art_intensity = np.abs(norm_ts) > self.inputs.intensity_thresh
-
-        # Load the motion files and find motion artifacts
-        df = pd.read_csv(self.inputs.motion_file)
-        rel_motion = df["displace_rel"].values
-        art_motion = rel_motion > self.inputs.motion_thresh
-
-        # Extract the residual timeseries from each slice
-        slices = self.slice_timeseries(ts, mask)
-        spike_thresh = self.inputs.spike_thresh
-        if spike_thresh is None:
-            art_spike = np.zeros_like(art_motion)
-        else:
-            # Spike threshold is unidirectional
-            if spike_thresh < 0:
-                art_spike = (slices < spike_thresh).any(axis=0)
-            else:
-                art_spike = (slices > spike_thresh).any(axis=0)
-
-        # Make a DataFrame of the artifacts
-        art_df = pd.DataFrame(dict(intensity=art_intensity,
-                                   motion=art_motion,
-                                   spikes=art_spike)).astype(int)
-        art_df.to_csv("artifacts.csv", index=False)
-
-        # Plot the artifact data
-        art_fig = self.plot_artifacts(norm_ts, slices, rel_motion, art_df)
-        art_fig.savefig("artifact_detection.png", dpi=100)
-        plt.close(art_fig)
+        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname)
 
         return runtime
 
-    def normalize_timeseries(self, ts, mask):
-        """Compute a robust zscore using median and MAD."""
-        brain_ts = ts[mask]
-        med_ts = np.median(brain_ts, axis=0)
-        mad = np.median(np.abs(med_ts - np.median(brain_ts)))
-        norm_ts = (med_ts - np.median(brain_ts)) / mad
+    def write_mosaic_gif(self, runtime, img1, img2, fname, **kws):
 
-        return norm_ts
+        m1 = Mosaic(img1, **kws)
+        m1.savefig("img1.png")
+        m1.close()
 
-    def plot_artifacts(self, norm, slices, rel, art):
+        m2 = Mosaic(img2, **kws)
+        m2.savefig("img2.png")
+        m2.close()
 
-        b, g, r, p, y, c = sns.color_palette("deep")
-        with sns.axes_style("whitegrid"):
-            f, axes = plt.subplots(3, 1, sharex=True, figsize=(9, 5.5))
+        cmdline = ["convert", "-loop", "0", "-delay", "100",
+                   "img1.png", "img2.png", fname]
 
-        # Plot the main timeseries
-        axes[0].plot(norm, color=p, zorder=3)
-
-        palette = sns.color_palette("GnBu_d", len(slices))
-        for slice_ts, color in zip(slices, palette):
-            axes[1].plot(slice_ts, linewidth=.75, color=color, zorder=3)
-
-        axes[2].plot(rel, color=b, zorder=3)
-        axes[0].set_xlim(0, len(norm))
-
-        # Plot the artifacts
-        art_kws = dict(color=r, linewidth=2, alpha=.8)
-        for t in np.flatnonzero(art["intensity"]):
-            axes[0].axvline(t, **art_kws)
-        for t in np.flatnonzero(art["spikes"]):
-            axes[1].axvline(t, color=r, linewidth=2, alpha=.8)
-        for t in np.flatnonzero(art["motion"]):
-            axes[2].axvline(t, **art_kws)
-
-        # Plot the thresholds
-        thresh_kws = dict(color=".6", linestyle="--")
-        axes[0].axhline(self.inputs.intensity_thresh, **thresh_kws)
-        axes[0].axhline(-self.inputs.intensity_thresh, **thresh_kws)
-        if self.inputs.spike_thresh is not None:
-            axes[1].axhline(self.inputs.spike_thresh, **thresh_kws)
-        axes[2].axhline(self.inputs.motion_thresh, **thresh_kws)
-
-        # Label the axes
-        axes[0].set_ylabel("Normalized Intensity")
-        axes[1].set_ylabel("Normalized Intensity")
-        axes[2].set_ylabel("Relative Motion (mm)")
-
-        f.tight_layout()
-        return f
-
-    def slice_timeseries(self, ts, mask):
-        """Get the residual timeseries within the mask from each slice."""
-        med_ts = np.median(ts[mask], axis=0)
-
-        slices = []
-        for k in range(mask.shape[-1]):
-            if not mask[..., k].any():
-                continue
-            slice_ts = np.median(ts[:, :, k, :][mask[:, :, k]], axis=0)
-            slice_ts = slice_ts - med_ts
-
-            slice_med = np.median(slice_ts)
-            slice_mad = np.median(np.abs(slice_ts - slice_med))
-
-            norm_ts = (slice_ts - slice_med) / slice_mad
-            slices.append(norm_ts)
-        slices = np.asarray(slices)
-
-        return slices
-
-    def _list_outputs(self):
-
-        outputs = self._outputs().get()
-        outputs["out_files"] = [op.abspath("artifacts.csv"),
-                                op.abspath("artifact_detection.png")]
-        return outputs
+        self.submit_cmdline(runtime, cmdline)
 
 
-class ScaleTimeseriesInput(BaseInterfaceInputSpec):
+class FrameGIF(SimpleInterface):
 
-    in_file = File(exists=True)
-    mask_file = File(exists=True)
-    statistic = traits.Str()
-    target = traits.Float()
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        out_file = traits.File()
+        delay = traits.Int(100, usedefault=True)
 
-
-class ScaleTimeseries(BaseInterface):
-
-    input_spec = ScaleTimeseriesInput
-    output_spec = SingleOutFile
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        ts_img = nib.load(self.inputs.in_file)
-        ts_data = ts_img.get_data()
-        mask = nib.load(self.inputs.mask_file).get_data().astype(bool)
+        img = nib.load(self.inputs.in_file)
+        data = img.get_data()
 
-        # Flexibly get the statistic value.
-        # This has to be stringly-typed because nipype
-        # can't pass around functions
-        stat_func = getattr(np, self.inputs.statistic)
+        lims = 0, np.percentile(data, 98)
 
-        # Do the scaling
-        scaled_ts = self.scale_timeseries(stat_func, ts_data,
-                                          mask, self.inputs.target)
+        assert len(img.shape) == 4
+        n_frames = img.shape[-1]
 
-        # Save the resulting image
-        scaled_img = nib.Nifti1Image(scaled_ts,
-                                     ts_img.get_affine(),
-                                     ts_img.get_header())
-        scaled_img.to_filename("timeseries_scaled.nii.gz")
+        frame_pngs = []
 
-        return runtime
+        for i in range(n_frames):
 
-    def scale_timeseries(self, stat_func, data, mask, target):
-        """Make scale timeseries across four dimensions to a target."""
-        stat_value = stat_func(data[mask])
-        scale_value = target / stat_value
-        scaled_data = data * scale_value
-        return scaled_data
+            png_fname = "frame{:02d}.png".format(i)
+            frame_pngs.append(png_fname)
 
-    _list_outputs = list_out_file("timeseries_scaled.nii.gz")
+            vol_data = data[..., i]
+            vol = nib.Nifti1Image(vol_data, img.affine, img.header)
+            m = Mosaic(vol, tight=False, step=2, anat_lims=lims)
+            m.savefig(png_fname)
+            m.close()
 
+        out_file = self.define_output("out_file", self.inputs.out_file)
+        cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
+        cmdline.extend(frame_pngs)
+        cmdline.append(out_file)
 
-class ReplaceMeanInput(BaseInterfaceInputSpec):
-
-    orig_file = File(exists=True)
-    filtered_file = File(exists=True)
-    output_name = traits.String()
-
-
-class ReplaceMean(BaseInterface):
-    """Ensure that filtered timeseries mean is same as before filtering.
-
-    This works around some changes in later version of FSL (as of 11/2014)
-    that return a de-meaned timeseries from the FSL highpass filter.
-    In FEAT, the mean is replaced, and the rest of the processing carries
-    on as usual. Because I don't want to break compatability with older
-    versions of FSL, this adds back in the mean but only if it looks
-    like the filtered timeseries has been de-meaned.
-
-    """
-    input_spec = ReplaceMeanInput
-    output_spec = SingleOutFile
-
-    def _run_interface(self, runtime):
-
-        # Load the original and filtered timeseries data
-        orig_img = nib.load(self.inputs.orig_file)
-        orig_mean = orig_img.get_data().mean(axis=-1)
-
-        filtered_img = nib.load(self.inputs.filtered_file)
-        filtered_data = filtered_img.get_data()
-        filtered_mean = filtered_data.mean(axis=-1)
-
-        # Simple heuristic: if the maximum value in the mean image
-        # is less than 1, it looks like this timeseries has been
-        # de-meaned. In practice these values seem to be around
-        # 1e-5, so this should be safe.
-        if filtered_mean.max() < 1:
-            replacement = orig_mean
-        else:
-            replacement = np.zeros_like(orig_mean)
-        replacement = replacement[..., np.newaxis]
-
-        # Add back in what is needed and write out the image
-        new_data = filtered_data + replacement
-        new_img = nib.Nifti1Image(new_data,
-                                  filtered_img.get_affine(),
-                                  filtered_img.get_header())
-        out_fname = "{}.nii.gz".format(self.inputs.output_name)
-        new_img.to_filename(out_fname)
+        self.submit_cmdline(runtime, cmdline)
 
         return runtime
-
-    def _list_outputs(self):
-
-        outputs = self._outputs().get()
-        out_fname = "{}.nii.gz".format(self.inputs.output_name)
-        outputs["out_file"] = op.abspath(out_fname)
-        return outputs
-
-
-class ExtractConfoundsInput(BaseInterfaceInputSpec):
-
-    timeseries = File(Exists=True)
-    wm_mask = File(Exists=True)
-    brain_mask = File(Exists=True)
-    n_components = traits.Int()
-
-
-class ExtractConfounds(BaseInterface):
-    """Extract nuisance variables from anatomical sources."""
-    input_spec = ExtractConfoundsInput
-    output_spec = SingleOutFile
-
-    def _run_interface(self, runtime):
-
-        # Load the brain images
-        ts_data = nib.load(self.inputs.timeseries).get_data()
-        wm_mask = nib.load(self.inputs.wm_mask).get_data()
-        brain_mask = nib.load(self.inputs.brain_mask).get_data()
-
-        # Set up the output dataframe
-        wm_cols = ["wm_{:d}".format(i)
-                   for i in range(self.inputs.n_components)]
-        cols = wm_cols + ["brain"]
-        index = np.arange(ts_data.shape[-1])
-        out_df = pd.DataFrame(index=index, columns=cols, dtype=np.float)
-
-        # Extract eigenvariates of the white matter timeseries
-        wm_ts = ts_data[wm_mask.astype(bool)].T
-        wm_pca = decomp.PCA(self.inputs.n_components)
-        wm_comp = wm_pca.fit_transform(wm_ts)
-        out_df[wm_cols] = wm_comp
-
-        # Extract the mean whole-brain timeseries
-        brain_ts = ts_data[brain_mask.astype(bool)].mean(axis=0)
-        out_df["brain"] = brain_ts
-
-        # Write out the resulting data to disk
-        out_df.to_csv("nuisance_variables.csv", index=False)
-
-        return runtime
-
-    _list_outputs = list_out_file("nuisance_variables.csv")

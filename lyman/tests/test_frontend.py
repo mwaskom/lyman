@@ -19,4 +19,6 @@ def test_determine_engine():
         yield assert_equal, plugin, plugin_str
 
         if arg == "multiproc":
+            yield assert_equal, plugin_args, dict(n_procs=4)
+        elif arg == "PBS":
             yield assert_equal, plugin_args, dict(n_procs=4, qsub_args="")

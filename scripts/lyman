@@ -1,0 +1,66 @@
+#! /usr/bin/env python
+import argparse
+
+import matplotlib
+matplotlib.use("Agg")
+
+from lyman.frontend import execute_workflow
+
+
+def add_subject(parser):
+    parser.add_argument("-s", "--subject",
+                        nargs="*",
+                        metavar="id",
+                        help="subject id(s)")
+
+
+def add_experiment(parser):
+    parser.add_argument("-e", "--experiment",
+                        metavar="name",
+                        help="experiment name")
+
+
+def add_execution(parser):
+    parser.add_argument("-p", "--plugin",
+                        help="nipype execution plugin")
+    parser.add_argument("-n", "--nprocs",
+                        type=int,
+                        help="size of multiprocessing pool")
+    parser.add_argument("-g", "--graph",
+                        action="store_true",  # TODO make this take a filename
+                        help="write graph instead of executing")
+    parser.add_argument("--no-qc",
+                        dest="qc", action="store_false",
+                        help="don't connect qc nodes")
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(prog="lyman")
+    subparsers = parser.add_subparsers(help="processing stage",
+                                       dest="stage")
+
+    # ---
+
+    preproc = subparsers.add_parser("preproc",
+                                    help="functional preprocessing")
+    add_subject(preproc)
+    add_experiment(preproc)
+    add_execution(preproc)
+
+    # ---
+
+    model = subparsers.add_parser("model",
+                                  help="univariate glm")
+    add_subject(model)
+    add_experiment(model)
+    model.add_argument("-m", "--model",
+                       metavar="name",
+                       help="model name")
+    add_execution(model)
+
+    # ---
+
+    args = parser.parse_args()
+
+    execute_workflow(args)

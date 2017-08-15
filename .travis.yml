@@ -26,11 +26,12 @@ install:
   - pip install .
 
 before_script:
-  - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then
-      pip install pep8==1.5;
-      pip install https://github.com/dcramer/pyflakes/tarball/master;
-      make lint;
-    fi
+  # TODO Skip linting while things are in flux; also need to move to flake8
+  # - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then
+  #    pip install pep8==1.5;
+  #    pip install https://github.com/dcramer/pyflakes/tarball/master;
+  #    make lint;
+  #  fi
 
 script:
     - make test

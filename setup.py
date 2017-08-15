@@ -14,7 +14,7 @@ MAINTAINER_EMAIL = 'mwaskom@nyu.edu'
 LICENSE = 'BSD (3-clause)'
 URL = 'http://www.cns.nyu.edu/~mwaskom/software/lyman/'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
-VERSION = '1.0'
+VERSION = '2.0.0.dev'
 
 def check_dependencies():
 
@@ -64,7 +64,8 @@ if __name__ == "__main__":
                   'lyman.workflows.tests',
                   'lyman.tools',
                   'lyman.tools.tests'],
-        scripts=['scripts/run_fmri.py',
+        scripts=['scripts/lyman',
+                 'scripts/run_fmri.py',
                  'scripts/run_group.py',
                  'scripts/run_warp.py',
                  'scripts/setup_project.py',
