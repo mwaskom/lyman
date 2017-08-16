@@ -10,7 +10,7 @@ import nibabel as nib
 from nipype import (Workflow, Node, MapNode, JoinNode,
                     IdentityInterface, Function, DataSink)
 from nipype.interfaces.base import traits, TraitedSpec, isdefined
-from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
+from nipype.interfaces import fsl, freesurfer as fs
 
 from .preproc import TimeSeriesGIF  # TODO Put this somewhere independent
 from ..mosaic import Mosaic
@@ -53,18 +53,21 @@ def define_template_workflow(proj_info, subjects, qc=True):
     average_fm = Node(fsl.MeanImage(out_file="fm_restored.nii.gz"),
                       "average_fm")
 
-    # Select first warpfield image from output list
-    select_warp = Node(pipeutil.Select(index=[0]), "select_warp")
+    # TODO we also need to write out the raw fieldmap image for each session
+
+    # Select the relevant warp image to apply to time series data
+    # TODO maybe also save out the jacobian here
+    finalize_warp = Node(FinalizeWarp(), "finalize_warp")
 
     # --- Registration of SE-EPI (without distortions) to Freesurfer anatomy
 
     fm2anat = Node(fs.BBRegister(init="fsl",
                                  contrast_type="t2",
-                                 out_fsl_file="fm2anat_flirt.mat",
-                                 out_reg_file="fm2anat_tkreg.dat"),
+                                 out_fsl_file="reg.mat",
+                                 out_reg_file="reg.dat"),
                    "fm2anat")
 
-    fm2anat_qc = Node(AnatRegReport(out_file="reg.png"), "fm2anat_qc")
+    fm2anat_qc = Node(AnatRegReport(), "fm2anat_qc")
 
     # --- Definition of common cross-session space (template space)
 
@@ -75,8 +78,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
                                           "in_matrices",
                                           "in_volumes"])
 
-    func2anat_qc = Node(AnatRegReport(out_file="reg.png"),
-                        "func2anat_qc")
+    func2anat_qc = Node(AnatRegReport(), "func2anat_qc")
 
     # --- Segementation of anatomical tissue in functional space
 
@@ -118,19 +120,27 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     # --- Workflow ouptut
 
-    output_dir = op.join(proj_info.analysis_dir)
-
-    def define_template_container(subject):
+    def define_common_container(subject):
         return "{}/template".format(subject)
 
-    template_container = Node(Function("subject",
-                                       "path",
-                                       define_template_container),
-                              "template_container")
+    common_container = Node(Function("subject", "path",
+                                     define_common_container),
+                            "common_container")
 
-    template_output = Node(DataSink(base_directory=output_dir,
-                                    parameterization=False),
-                           "template_output")
+    common_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                                  parameterization=False),
+                         "common_output")
+
+    def define_session_container(subject, session):
+        return "{}/template/{}".format(subject, session)
+
+    session_container = Node(Function(["subject", "session"], "path",
+                                      define_session_container),
+                             "session_container")
+
+    session_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                                   parameterization=False),
+                          "session_output")
 
     # === Assemble pipeline
 
@@ -151,8 +161,10 @@ def define_template_workflow(proj_info, subjects, qc=True):
             [("fm", "in_file"),
              ("phase_encoding", "encoding_direction"),
              ("readout_times", "readout_times")]),
-        (estimate_distortions, select_warp,
-            [("out_warps", "inlist")]),
+        (session_input, finalize_warp,
+            [("fm", "fieldmap_file")]),
+        (estimate_distortions, finalize_warp,
+            [("out_warps", "warp_files")]),
         (estimate_distortions, average_fm,
             [("out_corrected", "in_file")]),
 
@@ -204,19 +216,32 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
         # Ouputs associated with the subject-specific template
 
-        (session_input, template_container,
+        (session_input, common_container,
             [("subject", "subject")]),
-        (template_container, template_output,
+        (common_container, common_output,
             [("path", "container")]),
-        (finalize_template, template_output,
+        (finalize_template, common_output,
             [("out_file", "@template")]),
-        (define_template, template_output,
+        (define_template, common_output,
             [("reg_file", "@reg")]),
-        (anat_segment, template_output,
+        (anat_segment, common_output,
             [("seg_file", "@seg"),
              ("mask_file", "@mask"),
              ("anat_file", "@anat"),
              ("surf_file", "@surf")]),
+
+        # Ouputs associated with each session
+
+        (session_input, session_container,
+            [("subject", "subject"),
+             ("session", "session")]),
+        (session_container, session_output,
+            [("path", "container")]),
+        (finalize_warp, session_output,
+            [("out_raw", "@raw"),
+             ("out_warp", "@warp")]),
+        (fm2anat, session_output,
+            [("out_reg_file", "@reg")]),
 
     ]
     workflow.connect(processing_edges)
@@ -237,8 +262,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
         # Registration of corrected SE-EPI to anatomy
 
         (session_input, fm2anat_qc,
-            [("subject", "subject_id"),
-             ("session", "session")]),
+            [("subject", "subject_id")]),
         (average_fm, fm2anat_qc,
             [("out_file", "in_file")]),
         (fm2anat, fm2anat_qc,
@@ -256,20 +280,25 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
         # Ouputs associated with the subject-specific template
 
-        (anat_segment, template_output,
+        (anat_segment, common_output,
             [("seg_plot", "qc.@seg_plot"),
              ("mask_plot", "qc.@mask_plot"),
              ("anat_plot", "qc.@anat_plot"),
              ("surf_plot", "qc.@surf_plot")]),
-        (func2anat_qc, template_output,
+        (func2anat_qc, common_output,
             [("out_file", "qc.@func2anat_plot")]),
-        (finalize_template, template_output,
+        (finalize_template, common_output,
             [("out_png", "qc.@template_png"),
              ("out_gif", "qc.@template_gif")]),
-        (fieldmap_qc, template_output,
-            [("out_file", "qc.sessions.@unwarp_gif")]),
-        (fm2anat_qc, template_output,
-            [("out_file", "qc.sessions.@fm2anat_plot")]),
+
+        # Outputs associated with individual sessions
+
+        (finalize_warp, session_output,
+            [("out_plot", "qc.@warp_plot")]),
+        (fieldmap_qc, session_output,
+            [("out_file", "qc.@unwarp_gif")]),
+        (fm2anat_qc, session_output,
+            [("out_file", "qc.@fm2anat_plot")]),
 
     ]
 
@@ -505,6 +534,59 @@ class FinalizeTemplate(SimpleInterface, TimeSeriesGIF):
         return runtime
 
 
+class FinalizeWarp(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        fieldmap_file = traits.File(exists=True)
+        warp_files = traits.List(traits.File(exists=True))
+
+    class output_spec(TraitedSpec):
+        out_raw = traits.File(exists=True)
+        out_warp = traits.File(exists=True)
+        out_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Select the first frame of the 4D fieldmap image
+        fieldmap_img_4d = nib.load(self.inputs.fieldmap_file)
+        fieldmap_img = nib.four_to_three(fieldmap_img_4d)[0]
+
+        # Write out the raw image to serve as a registration target
+        out_raw = self.define_output("out_raw", "raw.nii.gz")
+        fieldmap_img.to_filename(out_raw)
+
+        # Select the first warpfield image
+        # We combine the two fieldmap images so that the first one has
+        # a phase encoding that matches the time series data.
+        # Also note that when the fieldmap images have multiple frames,
+        # the warps corresponding to those frames are identical.
+        warp_file = self.inputs.warp_files[0]
+
+        # Load in the the warp file and save out with the correct affin
+        # (topup doesn't save the header geometry correctly for some reason)
+        out_warp = self.define_output("out_warp", "warp.nii.gz")
+        affine, header = fieldmap_img.affine, fieldmap_img.header
+        warp_data = nib.load(warp_file).get_data()
+        warp_img = nib.Nifti1Image(warp_data, affine, header)
+        warp_img.to_filename(out_warp)
+
+        # Select the warp along the phase encode direction
+        # Note: we elsewhere currently require phase encoding to be AP or PA
+        # so because the input note transforms the fieldmap to canonical
+        # orientation this will work. But in the future we might want to ne
+        # more flexible with what we accept and will need to change this.
+        warp_data_y = warp_data[..., 1]
+
+        # Generate a QC image of the warpfield
+        out_plot = self.define_output("out_plot", "warp.png")
+        m = Mosaic(fieldmap_img, warp_data_y)
+        m.plot_overlay("coolwarm", vmin=-6, vmax=6, alpha=.75)
+        m.savefig(out_plot)
+        m.close()
+
+        return runtime
+
+
 class AnatomicalSegmentation(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -676,7 +758,6 @@ class AnatRegReport(SimpleInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
-        session = traits.Str()
         in_file = traits.File(exists=True)
         reg_file = traits.File(exists=True)
         cost_file = traits.File(exists=True)
@@ -716,11 +797,7 @@ class AnatRegReport(SimpleInterface):
 
         # Make a mosaic of the registration from func to wm seg
         # TODO this should be an OrthoMosaic when that is implemented
-        if isdefined(self.inputs.session):
-            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
-        else:
-            fname = self.inputs.out_file
-        out_file = self.define_output("out_file", fname)
+        out_file = self.define_output("out_file", "reg.png")
 
         m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
         m.plot_mask_edges()
@@ -802,8 +879,7 @@ class FieldMapReport(SimpleInterface):
                 f.savefig(png_fname, facecolor="0", edgecolor="0")
                 plt.close(f)
 
-        out_fname = "{}_unwarp.gif".format(self.inputs.session)
-        out_file = self.define_output("out_file", out_fname)
+        out_file = self.define_output("out_file", "unwarp.gif")
         cmdline = ["convert", "-loop", "0", "-delay", "100"]
         cmdline.extend(png_fnames)
         cmdline.append(out_file)

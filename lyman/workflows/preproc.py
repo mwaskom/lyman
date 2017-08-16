@@ -79,6 +79,7 @@ def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
                      name="run_input")
 
     # Define a mask of areas with large distortions
+    # TODO this is unconnected, do we still want to do it?
     thresh_ops = "-abs -thr 4 -Tmax -binv"
     mask_distortions = Node(fsl.ImageMaths(op_string=thresh_ops),
                             "mask_distortions")
