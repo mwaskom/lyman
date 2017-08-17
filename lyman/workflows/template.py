@@ -1,5 +1,6 @@
 import os
 import os.path as op
+import shutil
 
 import numpy as np
 from scipy import ndimage
@@ -63,8 +64,8 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     fm2anat = Node(fs.BBRegister(init="fsl",
                                  contrast_type="t2",
-                                 out_fsl_file="reg.mat",
-                                 out_reg_file="reg.dat"),
+                                 out_fsl_file="sess2anat.mat",
+                                 out_reg_file="sess2anat.dat"),
                    "fm2anat")
 
     fm2anat_qc = Node(AnatRegReport(), "fm2anat_qc")
@@ -207,6 +208,8 @@ def define_template_workflow(proj_info, subjects, qc=True):
             [("out_template", "ref_file")]),
         (select_sesswise, restore_fm,
             [("out_matrix", "postmat")]),
+        (select_sesswise, finalize_warp,
+            [("out_matrix", "reg_file")]),
         (restore_fm, finalize_template,
             [("out_file", "in_files")]),
         (anat_segment, finalize_template,
@@ -239,9 +242,10 @@ def define_template_workflow(proj_info, subjects, qc=True):
             [("path", "container")]),
         (finalize_warp, session_output,
             [("out_raw", "@raw"),
+             ("out_reg", "@sess2temp_reg"),
              ("out_warp", "@warp")]),
         (fm2anat, session_output,
-            [("out_reg_file", "@reg")]),
+            [("out_reg_file", "@sess2anat_reg")]),
 
     ]
     workflow.connect(processing_edges)
@@ -446,7 +450,9 @@ class DefineTemplateSpace(SimpleInterface):
 
         self.submit_cmdline(runtime, cmdline)
 
-        # -- Tansform first fieldmap info template space to get geometry
+        # -- Transform first fieldmap info template space to get geometry
+        # (Note that we don't write out this image as the template because
+        # we separately generate the final file with a single interpolation)
         out_template = self.define_output("out_template", "space.nii.gz")
 
         cmdline = ["flirt",
@@ -538,14 +544,20 @@ class FinalizeWarp(SimpleInterface):
 
     class input_spec(TraitedSpec):
         fieldmap_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
         warp_files = traits.List(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
+        out_reg = traits.File(exists=True)
         out_raw = traits.File(exists=True)
         out_warp = traits.File(exists=True)
         out_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
+
+        # Copy the session -> template matrix to its output name
+        out_reg = self.define_output("out_reg", "sess2temp.mat")
+        shutil.copyfile(self.inputs.reg_file, out_reg)
 
         # Select the first frame of the 4D fieldmap image
         fieldmap_img_4d = nib.load(self.inputs.fieldmap_file)
@@ -562,7 +574,7 @@ class FinalizeWarp(SimpleInterface):
         # the warps corresponding to those frames are identical.
         warp_file = self.inputs.warp_files[0]
 
-        # Load in the the warp file and save out with the correct affin
+        # Load in the the warp file and save out with the correct affine
         # (topup doesn't save the header geometry correctly for some reason)
         out_warp = self.define_output("out_warp", "warp.nii.gz")
         affine, header = fieldmap_img.affine, fieldmap_img.header
