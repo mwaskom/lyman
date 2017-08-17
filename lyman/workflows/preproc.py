@@ -52,10 +52,6 @@ def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
                           itersource=("subject_source", "subject"),
                           iterables=("session", session_iterables))
 
-    # TODO The comprehension below drives home that `sess_info` is a
-    # confusion name when the outer layer of parameterization is subject
-    # Need a new name!
-
     run_iterables = {
         (subj, sess): [(subj, sess, run)
                        for run in scan_info[subj][sess][exp_info.name]]
@@ -68,50 +64,25 @@ def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
                       itersource=("session_source", "session"),
                       iterables=("run", run_iterables))
 
-    session_input = Node(SessionInput(base_directory=proj_info.data_dir,
-                                      fm_template=proj_info.fm_template,
-                                      phase_encoding=proj_info.phase_encoding),
+    session_input = Node(SessionInput(analysis_dir=proj_info.analysis_dir),
                          "session_input")
 
-    run_input = Node(RunInput(base_directory=proj_info.data_dir,
+    run_input = Node(RunInput(experiment=exp_info.name,
+                              data_dir=proj_info.data_dir,
                               sb_template=proj_info.sb_template,
                               ts_template=proj_info.ts_template),
                      name="run_input")
 
+    # --- Registration of SBRef to SE-EPI (with distortions)
+
     # Define a mask of areas with large distortions
-    # TODO this is unconnected, do we still want to do it?
     thresh_ops = "-abs -thr 4 -Tmax -binv"
     mask_distortions = Node(fsl.ImageMaths(op_string=thresh_ops),
                             "mask_distortions")
 
-    # --- Registration of SBRef to SE-EPI (with distortions)
-
     sb2fm = Node(fsl.FLIRT(dof=6, interp="spline"), "sb2fm")
 
     sb2fm_qc = Node(CoregGIF(out_file="coreg.gif"), "sb2fm_qc")
-
-    # --- Associate template-space transforms with data from correct session
-
-    # The logic here is a little complex. The template creation node collapses
-    # the session-wise iterables and returns list of files that then need
-    # to hook back into the iterable parameterization so that they can be
-    # associated with data from the correct session when they are applied.
-
-    def select_transform_func(session_info, subject, session, in_matrices):
-
-        for info, matrix in zip(session_info, in_matrices):
-            if info == (subject, session):
-                out_matrix = matrix
-        return out_matrix
-
-    select_sesswise = Node(Function(["session_info",
-                                     "subject", "session",
-                                     "in_matrices"],
-                                    "out_matrix",
-                                    select_transform_func),
-                           "select_sesswise")
-
-    select_runwise = select_sesswise.clone("select_runwise")
 
     # --- Motion correction of time series to SBRef (with distortions)
 
@@ -139,16 +110,17 @@ def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
 
     # --- Workflow ouptut
 
-    output_dir = op.join(proj_info.analysis_dir, exp_info.name)
+    def define_timeseries_container(subject, experiment, session, run):
+        return "{}/{}/timeseries/{}_{}".format(subject, experiment,
+                                               session, run)
 
-    def define_timeseries_container(subject, session, run):
-        return "{}/timeseries/{}_{}".format(subject, session, run)
-
-    timeseries_container = Node(Function(["subject", "session", "run"],
+    timeseries_container = Node(Function(["subject", "experiment",
+                                          "session", "run"],
                                          "path", define_timeseries_container),
                                 "timeseries_container")
+    timeseries_container.inputs.experiment = exp_info.name
 
-    timeseries_output = Node(DataSink(base_directory=output_dir,
+    timeseries_output = Node(DataSink(base_directory=proj_info.analysis_dir,
                                       parameterization=False),
                              "timeseries_output")
 
@@ -187,7 +159,9 @@ def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
         (run_input, sb2fm,
             [("sb", "in_file")]),
         (session_input, sb2fm,
-            [("fm", "reference")]),
+            [("raw_file", "reference")]),
+        (session_input, mask_distortions,
+            [("warp_file", "in_file")]),
         (mask_distortions, sb2fm,
             [("out_file", "ref_weight")]),
 
@@ -199,15 +173,16 @@ def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
             [("out_matrix_file", "in_file2")]),
         (run_input, split_ts,
             [("ts", "in_file")]),
-        (run_input, select_runwise,
-            [("subject", "subject"),
-             ("session", "session")]),
         (split_ts, restore_ts_frames,
             [("out_files", "in_file")]),
         (combine_rigids, restore_ts_frames,
             [("out_file", "premat")]),
-        (select_runwise, restore_ts_frames,
-            [("out_matrix", "postmat")]),
+        (session_input, restore_ts_frames,
+            [("template_file", "ref_file"),
+             ("reg_file", "postmat")]),
+        (session_input, finalize_ts,
+            [("seg_file", "seg_file"),
+             ("mask_file", "mask_file")]),
         (restore_ts_frames, finalize_ts,
             [("out_file", "in_files")]),
 
@@ -247,7 +222,7 @@ def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
         (sb2fm, sb2fm_qc,
             [("out_file", "in_file")]),
         (session_input, sb2fm_qc,
-            [("fm", "ref_file")]),
+            [("raw_file", "ref_file")]),
 
         # Ouputs associated with each scanner run
 
@@ -344,28 +319,21 @@ class SessionInput(SimpleInterface):
 
     class input_spec(TraitedSpec):
         session = traits.Tuple()
-        base_directory = traits.Str()
-        fm_template = traits.Str()
-        phase_encoding = traits.Str()
+        analysis_dir = traits.Directory(exists=True)
 
     class output_spec(TraitedSpec):
-        fm = traits.File(exists=True)
-        phase_encoding = traits.List(traits.Str())
-        readout_times = traits.List(traits.Float())
+
+        raw_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        seg_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        warp_file = traits.File(exists=True)
+        template_file = traits.File(exists=True)
         session_key = traits.Tuple()
         subject = traits.Str()
         session = traits.Str()
 
     def _run_interface(self, runtime):
-
-        # Determine the phase encoding directions
-        pe = self.inputs.phase_encoding
-        if pe == "ap":
-            pos_pe, neg_pe = "ap", "pa"
-        elif pe == "pa":
-            pos_pe, neg_pe = "pa", "ap"
-        else:
-            raise ValueError("Phase encoding must be 'ap' or 'pa'")
 
         # Determine the parameters
         subject, session = self.inputs.session
@@ -373,38 +341,22 @@ class SessionInput(SimpleInterface):
         self._results["subject"] = str(subject)
         self._results["session"] = str(session)
 
-        # Spec out full paths to the pair of fieldmap files
-        keys = dict(subject=subject, session=session)
-        template = self.inputs.fm_template
-        pos_fname = op.join(self.inputs.base_directory,
-                            template.format(encoding=pos_pe, **keys))
-        neg_fname = op.join(self.inputs.base_directory,
-                            template.format(encoding=neg_pe, **keys))
+        # Find the template-space files in the analysis hierarchy
+        template_path = op.join(self.inputs.analysis_dir, subject, "template")
+        session_path = op.join(template_path, session)
 
-        # Load the two images in canonical orientation
-        pos_img = nib.as_closest_canonical(nib.load(pos_fname))
-        neg_img = nib.as_closest_canonical(nib.load(neg_fname))
-        affine, header = pos_img.affine, pos_img.header
+        results = dict(
 
-        # Concatenate the images into a single volume
-        pos_data = pos_img.get_data()
-        neg_data = neg_img.get_data()
-        data = np.concatenate([pos_data, neg_data], axis=-1)
-        assert len(data.shape) == 4
+            seg_file=op.join(template_path, "seg.nii.gz"),
+            mask_file=op.join(template_path, "mask.nii.gz"),
+            template_file=op.join(template_path, "func.nii.gz"),
 
-        # Convert image datatype to float
-        header.set_data_dtype(np.float32)
+            reg_file=op.join(session_path, "sess2temp.mat"),
+            raw_file=op.join(session_path, "raw.nii.gz"),
+            warp_file=op.join(session_path, "warp.nii.gz"),
 
-        # Write out a 4D file
-        fname = self.define_output("fm", "fieldmap.nii.gz")
-        img = nib.Nifti1Image(data, affine, header)
-        img.to_filename(fname)
-
-        # Define phase encoding and readout times for TOPUP
-        pe_dir = ["y"] * pos_img.shape[-1] + ["y-"] * neg_img.shape[-1]
-        readout_times = [1 for _ in pe_dir]
-        self._results["phase_encoding"] = pe_dir
-        self._results["readout_times"] = readout_times
+        )
+        self._results.update(results)
 
         return runtime
 
@@ -413,9 +365,12 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         run = traits.Tuple()
-        base_directory = traits.Str()
+        data_dir = traits.Directory()
+        experiment = traits.Str()
         sb_template = traits.Str()
         ts_template = traits.Str()
+
+        # TODO this default should be defined at the project/experiment level
         crop_frames = traits.Int(0, usedefault=True)
 
     class output_spec(TraitedSpec):
@@ -429,16 +384,18 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
     def _run_interface(self, runtime):
 
         # Determine the parameters
+        experiment = self.inputs.experiment
         subject, session, run = self.inputs.run
         self._results["subject"] = subject
         self._results["session"] = session
         self._results["run"] = run
 
         # Spec out paths to the input files
-        keys = dict(subject=subject, session=session, run=run)
-        sb_fname = op.join(self.inputs.base_directory,
+        keys = dict(subject=subject, experiment=experiment,
+                    session=session, run=run)
+        sb_fname = op.join(self.inputs.data_dir, subject, "func",
                            self.inputs.sb_template.format(**keys))
-        ts_fname = op.join(self.inputs.base_directory,
+        ts_fname = op.join(self.inputs.data_dir, subject, "func",
                            self.inputs.ts_template.format(**keys))
 
         # Load the input images in canonical orientation
