@@ -54,8 +54,6 @@ def define_template_workflow(proj_info, subjects, qc=True):
     average_fm = Node(fsl.MeanImage(out_file="fm_restored.nii.gz"),
                       "average_fm")
 
-    # TODO we also need to write out the raw fieldmap image for each session
-
     # Select the relevant warp image to apply to time series data
     # TODO maybe also save out the jacobian here
     finalize_warp = Node(FinalizeWarp(), "finalize_warp")
@@ -107,8 +105,6 @@ def define_template_workflow(proj_info, subjects, qc=True):
                            "select_sesswise")
 
     # --- Restore each sessions SE image in template space then average
-
-    split_fm = Node(fsl.Split(dimension="t"), "split_fm")
 
     restore_fm = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
                          ["in_file", "premat", "field_file"],
@@ -197,10 +193,8 @@ def define_template_workflow(proj_info, subjects, qc=True):
         (session_input, select_sesswise,
             [("subject", "subject"),
              ("session", "session")]),
-        (session_input, split_fm,
-            [("fm", "in_file")]),
-        (split_fm, restore_fm,
-            [("out_files", "in_file")]),
+        (session_input, restore_fm,
+            [("fm_frames", "in_file")]),
         (estimate_distortions, restore_fm,
             [("out_mats", "premat"),
              ("out_warps", "field_file")]),
@@ -330,6 +324,7 @@ class SessionInput(SimpleInterface):
 
     class output_spec(TraitedSpec):
         fm = traits.File(exists=True)
+        fm_frames = traits.List(traits.File(exists=True))
         phase_encoding = traits.List(traits.Str())
         readout_times = traits.List(traits.Float())
         session_key = traits.Tuple()
@@ -380,6 +375,15 @@ class SessionInput(SimpleInterface):
         fname = self.define_output("fm", "fieldmap.nii.gz")
         img = nib.Nifti1Image(data, affine, header)
         img.to_filename(fname)
+
+        # Write out a set of 3D files for each frame
+        fm_frames = []
+        frames = nib.four_to_three(img)
+        for i, frame in enumerate(frames):
+            fname = op.abspath("fieldmap_{:02d}.nii.gz".format(i))
+            fm_frames.append(fname)
+            frame.to_filename(fname)
+        self._results["fm_frames"] = fm_frames
 
         # Define phase encoding and readout times for TOPUP
         pe_dir = ["y"] * pos_img.shape[-1] + ["y-"] * neg_img.shape[-1]
