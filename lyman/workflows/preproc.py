@@ -2,16 +2,15 @@ import os
 import os.path as op
 
 import numpy as np
-from scipy import ndimage, signal
+from scipy import signal
 import pandas as pd
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import nibabel as nib
 
-from nipype import (Workflow, Node, MapNode, JoinNode,
+from nipype import (Workflow, Node, MapNode,
                     IdentityInterface, Function, DataSink)
-from nipype.interfaces.base import traits, TraitedSpec, isdefined
-from nipype.interfaces import fsl, freesurfer as fs, utility as pipeutil
+from nipype.interfaces.base import traits, TraitedSpec
+from nipype.interfaces import fsl
 
 from .. import signals  # TODO confusingly close to scipy.signal
 from ..mosaic import Mosaic
@@ -19,7 +18,7 @@ from ..carpetplot import CarpetPlot
 from ..graphutils import SimpleInterface
 
 
-def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
+def define_preproc_workflow(proj_info, subjects, exp_info, qc=True):
 
     # proj_info will be a bunch or other object with data_dir, etc. fields
 
@@ -35,133 +34,55 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
     # TODO The iterable creation should be moved to separate functions
     # and tested well, as the logic is fairly complicated. Also there
     # should be a validation of the session info with informative errors
+    scan_info = proj_info.scan_info
 
-    subject_iterables = [subj for subj in sess_info]
+    subject_iterables = subjects
 
     subject_source = Node(IdentityInterface(["subject"]),
                           name="subject_source",
                           iterables=("subject", subject_iterables))
 
     session_iterables = {
-        subj: [(subj, sess) for sess in sess_info[subj]]
-        for subj in sess_info
+        subj: [(subj, sess) for sess in scan_info[subj]
+               if exp_info.name in scan_info[subj][sess]]
+        for subj in subjects
     }
     session_source = Node(IdentityInterface(["subject", "session"]),
                           name="session_source",
                           itersource=("subject_source", "subject"),
                           iterables=("session", session_iterables))
 
-    # TODO The comprehension below drives home that `sess_info` is a
-    # confusion name when the outer layer of parameterization is subject
-    # Need a new name!
-
     run_iterables = {
-        (subj, sess): [(subj, sess, run) for run in sess_info[subj][sess]]
-        for subj in sess_info
-        for sess in sess_info[subj]
+        (subj, sess): [(subj, sess, run)
+                       for run in scan_info[subj][sess][exp_info.name]]
+        for subj in subjects
+        for sess in scan_info[subj]
+        if exp_info.name in scan_info[subj][sess]
     }
     run_source = Node(IdentityInterface(["subject", "session", "run"]),
                       name="run_source",
                       itersource=("session_source", "session"),
                       iterables=("run", run_iterables))
 
-    session_input = Node(SessionInput(base_directory=proj_info.data_dir,
-                                      fm_template=exp_info.fm_template,
-                                      phase_encoding=exp_info.phase_encoding),
+    session_input = Node(SessionInput(analysis_dir=proj_info.analysis_dir),
                          "session_input")
 
-    run_input = Node(RunInput(base_directory=proj_info.data_dir,
-                              sb_template=exp_info.sb_template,
-                              ts_template=exp_info.ts_template),
+    run_input = Node(RunInput(experiment=exp_info.name,
+                              data_dir=proj_info.data_dir,
+                              sb_template=proj_info.sb_template,
+                              ts_template=proj_info.ts_template),
                      name="run_input")
 
-    # --- Warpfield estimation using topup
-
-    # Distortion warpfield estimation
-    estimate_distortions = Node(fsl.TOPUP(config="b02b0.cnf"),
-                                "estimate_distortions")
-
-    fieldmap_qc = Node(FieldMapReport(), "fieldmap_qc")
-
-    # Average distortion-corrected spin-echo images
-    average_fm = Node(fsl.MeanImage(out_file="fm_restored.nii.gz"),
-                      "average_fm")
-
-    # Select first warpfield image from output list
-    select_warp = Node(pipeutil.Select(index=[0]), "select_warp")
+    # --- Registration of SBRef to SE-EPI (with distortions)
 
     # Define a mask of areas with large distortions
     thresh_ops = "-abs -thr 4 -Tmax -binv"
     mask_distortions = Node(fsl.ImageMaths(op_string=thresh_ops),
                             "mask_distortions")
 
-    # --- Registration of SBRef to SE-EPI (with distortions)
-
     sb2fm = Node(fsl.FLIRT(dof=6, interp="spline"), "sb2fm")
 
     sb2fm_qc = Node(CoregGIF(out_file="coreg.gif"), "sb2fm_qc")
-
-    # --- Registration of SE-EPI (without distortions) to Freesurfer anatomy
-
-    fm2anat = Node(fs.BBRegister(init="fsl",
-                                 contrast_type="t2",
-                                 out_fsl_file="fm2anat_flirt.mat",
-                                 out_reg_file="fm2anat_tkreg.dat"),
-                   "fm2anat")
-
-    fm2anat_qc = Node(AnatRegReport(out_file="reg.png"), "fm2anat_qc")
-
-    # --- Definition of common cross-session space (template space)
-
-    define_template = JoinNode(DefineTemplateSpace(),
-                               name="define_template",
-                               joinsource="session_source",
-                               joinfield=["session_info",
-                                          "in_matrices",
-                                          "in_volumes"])
-
-    func2anat_qc = Node(AnatRegReport(out_file="reg.png"),
-                        "func2anat_qc")
-
-    # --- Segementation of anatomical tissue in functional space
-
-    anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
-
-    # --- Associate template-space transforms with data from correct session
-
-    # The logic here is a little complex. The template creation node collapses
-    # the session-wise iterables and returns list of files that then need
-    # to hook back into the iterable parameterization so that they can be
-    # associated with data from the correct session when they are applied.
-
-    def select_transform_func(session_info, subject, session, in_matrices):
-
-        for info, matrix in zip(session_info, in_matrices):
-            if info == (subject, session):
-                out_matrix = matrix
-        return out_matrix
-
-    select_sesswise = Node(Function(["session_info",
-                                     "subject", "session",
-                                     "in_matrices"],
-                                    "out_matrix",
-                                    select_transform_func),
-                           "select_sesswise")
-
-    select_runwise = select_sesswise.clone("select_runwise")
-
-    # --- Restore each sessions SE image in template space then average
-
-    split_fm = Node(fsl.Split(dimension="t"), "split_fm")
-
-    restore_fm = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
-                         ["in_file", "premat", "field_file"],
-                         "restore_fm")
-
-    finalize_template = JoinNode(FinalizeTemplate(),
-                                 name="finalize_template",
-                                 joinsource="session_source",
-                                 joinfield=["in_files"])
 
     # --- Motion correction of time series to SBRef (with distortions)
 
@@ -189,29 +110,19 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
     # --- Workflow ouptut
 
-    output_dir = op.join(proj_info.analysis_dir, exp_info.name)
+    def define_timeseries_container(subject, experiment, session, run):
+        return "{}/{}/timeseries/{}_{}".format(subject, experiment,
+                                               session, run)
 
-    def define_timeseries_container(subject, session, run):
-        return "{}/timeseries/{}_{}".format(subject, session, run)
-
-    timeseries_container = Node(Function(["subject", "session", "run"],
+    timeseries_container = Node(Function(["subject", "experiment",
+                                          "session", "run"],
                                          "path", define_timeseries_container),
                                 "timeseries_container")
+    timeseries_container.inputs.experiment = exp_info.name
 
-    timeseries_output = Node(DataSink(base_directory=output_dir,
+    timeseries_output = Node(DataSink(base_directory=proj_info.analysis_dir,
                                       parameterization=False),
                              "timeseries_output")
-
-    def define_template_container(subject):
-        return "{}/template".format(subject)
-
-    template_container = Node(Function("subject",
-                                       "path", define_template_container),
-                              "template_container")
-
-    template_output = Node(DataSink(base_directory=output_dir,
-                                    parameterization=False),
-                           "template_output")
 
     # === Assemble pipeline
 
@@ -233,65 +144,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (run_source, run_input,
             [("run", "run")]),
 
-        # --- SE-EPI fieldmap processing and template creation
-
-        # Phase-encode distortion estimation
-
-        (session_input, estimate_distortions,
-            [("fm", "in_file"),
-             ("phase_encoding", "encoding_direction"),
-             ("readout_times", "readout_times")]),
-        (estimate_distortions, select_warp,
-            [("out_warps", "inlist")]),
-        (select_warp, mask_distortions,
-            [("out", "in_file")]),
-        (estimate_distortions, average_fm,
-            [("out_corrected", "in_file")]),
-
-        # Registration of corrected SE-EPI to anatomy
-
-        (session_input, fm2anat,
-            [("subject", "subject_id")]),
-        (average_fm, fm2anat,
-            [("out_file", "source_file")]),
-
-        # Creation of cross-session subject-specific template
-
-        (subject_source, define_template,
-            [("subject", "subject_id")]),
-        (session_source, define_template,
-            [("session", "session_info")]),
-        (session_input, define_template,
-            [("fm", "in_volumes")]),
-        (fm2anat, define_template,
-            [("out_fsl_file", "in_matrices")]),
-        (define_template, anat_segment,
-            [("subject_id", "subject_id"),
-             ("reg_file", "reg_file"),
-             ("out_template", "template_file")]),
-        (define_template, select_sesswise,
-            [("out_matrices", "in_matrices"),
-             ("out_template", "in_templates"),
-             ("session_info", "session_info")]),
-        (session_input, select_sesswise,
-            [("subject", "subject"),
-             ("session", "session")]),
-        (session_input, split_fm,
-            [("fm", "in_file")]),
-        (split_fm, restore_fm,
-            [("out_files", "in_file")]),
-        (estimate_distortions, restore_fm,
-            [("out_mats", "premat"),
-             ("out_warps", "field_file")]),
-        (define_template, restore_fm,
-            [("out_template", "ref_file")]),
-        (select_sesswise, restore_fm,
-            [("out_matrix", "postmat")]),
-        (restore_fm, finalize_template,
-            [("out_file", "in_files")]),
-        (anat_segment, finalize_template,
-            [("mask_file", "mask_file")]),
-
         # --- Time series spatial processing
 
         # Registration of each frame to SBRef image
@@ -307,7 +159,9 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (run_input, sb2fm,
             [("sb", "in_file")]),
         (session_input, sb2fm,
-            [("fm", "reference")]),
+            [("raw_file", "reference")]),
+        (session_input, mask_distortions,
+            [("warp_file", "in_file")]),
         (mask_distortions, sb2fm,
             [("out_file", "ref_weight")]),
 
@@ -319,45 +173,20 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
             [("out_matrix_file", "in_file2")]),
         (run_input, split_ts,
             [("ts", "in_file")]),
-        (define_template, select_runwise,
-            [("out_matrices", "in_matrices"),
-             ("session_info", "session_info")]),
-        (run_input, select_runwise,
-            [("subject", "subject"),
-             ("session", "session")]),
         (split_ts, restore_ts_frames,
             [("out_files", "in_file")]),
         (combine_rigids, restore_ts_frames,
             [("out_file", "premat")]),
-        (select_warp, restore_ts_frames,
-            [("out", "field_file")]),
-        (define_template, restore_ts_frames,
-            [("out_template", "ref_file")]),
-        (select_runwise, restore_ts_frames,
-            [("out_matrix", "postmat")]),
-        (restore_ts_frames, finalize_ts,
-            [("out_file", "in_files")]),
-        (anat_segment, finalize_ts,
+        (session_input, restore_ts_frames,
+            [("template_file", "ref_file"),
+             ("reg_file", "postmat")]),
+        (session_input, finalize_ts,
             [("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
+        (restore_ts_frames, finalize_ts,
+            [("out_file", "in_files")]),
 
         # --- Persistent data storage
-
-        # Ouputs associated with the subject-specific template
-
-        (session_input, template_container,
-            [("subject", "subject")]),
-        (template_container, template_output,
-            [("path", "container")]),
-        (finalize_template, template_output,
-            [("out_file", "@template")]),
-        (define_template, template_output,
-            [("reg_file", "@reg")]),
-        (anat_segment, template_output,
-            [("seg_file", "@seg"),
-             ("mask_file", "@mask"),
-             ("anat_file", "@anat"),
-             ("surf_file", "@surf")]),
 
         # Ouputs associated with each scanner run
 
@@ -381,35 +210,6 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
 
     qc_edges = [
 
-        # Phase-encode distortion estimation
-
-        (session_input, fieldmap_qc,
-            [("fm", "orig_file"),
-             ("session", "session"),
-             ("phase_encoding", "phase_encoding")]),
-        (estimate_distortions, fieldmap_qc,
-            [("out_corrected", "corr_file")]),
-
-        # Registration of corrected SE-EPI to anatomy
-
-        (session_input, fm2anat_qc,
-            [("subject", "subject_id"),
-             ("session", "session")]),
-        (average_fm, fm2anat_qc,
-            [("out_file", "in_file")]),
-        (fm2anat, fm2anat_qc,
-            [("out_reg_file", "reg_file"),
-             ("min_cost_file", "cost_file")]),
-
-        # Creation of cross-session subject-specific template
-
-        (session_input, func2anat_qc,
-            [("subject", "subject_id")]),
-        (define_template, func2anat_qc,
-            [("reg_file", "reg_file")]),
-        (finalize_template, func2anat_qc,
-            [("out_file", "in_file")]),
-
         # Registration of each frame to SBRef image
 
         (run_input, realign_qc,
@@ -422,24 +222,7 @@ def define_preproc_workflow(proj_info, sess_info, exp_info, qc=True):
         (sb2fm, sb2fm_qc,
             [("out_file", "in_file")]),
         (session_input, sb2fm_qc,
-            [("fm", "ref_file")]),
-
-        # Ouputs associated with the subject-specific template
-
-        (anat_segment, template_output,
-            [("seg_plot", "qc.@seg_plot"),
-             ("mask_plot", "qc.@mask_plot"),
-             ("anat_plot", "qc.@anat_plot"),
-             ("surf_plot", "qc.@surf_plot")]),
-        (func2anat_qc, template_output,
-            [("out_file", "qc.@func2anat_plot")]),
-        (finalize_template, template_output,
-            [("out_png", "qc.@template_png"),
-             ("out_gif", "qc.@template_gif")]),
-        (fieldmap_qc, template_output,
-            [("out_file", "qc.sessions.@unwarp_gif")]),
-        (fm2anat_qc, template_output,
-            [("out_file", "qc.sessions.@fm2anat_plot")]),
+            [("raw_file", "ref_file")]),
 
         # Ouputs associated with each scanner run
 
@@ -536,28 +319,21 @@ class SessionInput(SimpleInterface):
 
     class input_spec(TraitedSpec):
         session = traits.Tuple()
-        base_directory = traits.Str()
-        fm_template = traits.Str()
-        phase_encoding = traits.Str()
+        analysis_dir = traits.Directory(exists=True)
 
     class output_spec(TraitedSpec):
-        fm = traits.File(exists=True)
-        phase_encoding = traits.List(traits.Str())
-        readout_times = traits.List(traits.Float())
+
+        raw_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        seg_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        warp_file = traits.File(exists=True)
+        template_file = traits.File(exists=True)
         session_key = traits.Tuple()
         subject = traits.Str()
         session = traits.Str()
 
     def _run_interface(self, runtime):
-
-        # Determine the phase encoding directions
-        pe = self.inputs.phase_encoding
-        if pe == "ap":
-            pos_pe, neg_pe = "ap", "pa"
-        elif pe == "pa":
-            pos_pe, neg_pe = "pa", "ap"
-        else:
-            raise ValueError("Phase encoding must be 'ap' or 'pa'")
 
         # Determine the parameters
         subject, session = self.inputs.session
@@ -565,38 +341,22 @@ class SessionInput(SimpleInterface):
         self._results["subject"] = str(subject)
         self._results["session"] = str(session)
 
-        # Spec out full paths to the pair of fieldmap files
-        keys = dict(subject=subject, session=session)
-        template = self.inputs.fm_template
-        pos_fname = op.join(self.inputs.base_directory,
-                            template.format(encoding=pos_pe, **keys))
-        neg_fname = op.join(self.inputs.base_directory,
-                            template.format(encoding=neg_pe, **keys))
+        # Find the template-space files in the analysis hierarchy
+        template_path = op.join(self.inputs.analysis_dir, subject, "template")
+        session_path = op.join(template_path, session)
 
-        # Load the two images in canonical orientation
-        pos_img = nib.as_closest_canonical(nib.load(pos_fname))
-        neg_img = nib.as_closest_canonical(nib.load(neg_fname))
-        affine, header = pos_img.affine, pos_img.header
+        results = dict(
 
-        # Concatenate the images into a single volume
-        pos_data = pos_img.get_data()
-        neg_data = neg_img.get_data()
-        data = np.concatenate([pos_data, neg_data], axis=-1)
-        assert len(data.shape) == 4
+            seg_file=op.join(template_path, "seg.nii.gz"),
+            mask_file=op.join(template_path, "mask.nii.gz"),
+            template_file=op.join(template_path, "func.nii.gz"),
 
-        # Convert image datatype to float
-        header.set_data_dtype(np.float32)
+            reg_file=op.join(session_path, "sess2temp.mat"),
+            raw_file=op.join(session_path, "raw.nii.gz"),
+            warp_file=op.join(session_path, "warp.nii.gz"),
 
-        # Write out a 4D file
-        fname = self.define_output("fm", "fieldmap.nii.gz")
-        img = nib.Nifti1Image(data, affine, header)
-        img.to_filename(fname)
-
-        # Define phase encoding and readout times for TOPUP
-        pe_dir = ["y"] * pos_img.shape[-1] + ["y-"] * neg_img.shape[-1]
-        readout_times = [1 for _ in pe_dir]
-        self._results["phase_encoding"] = pe_dir
-        self._results["readout_times"] = readout_times
+        )
+        self._results.update(results)
 
         return runtime
 
@@ -605,9 +365,12 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         run = traits.Tuple()
-        base_directory = traits.Str()
+        data_dir = traits.Directory()
+        experiment = traits.Str()
         sb_template = traits.Str()
         ts_template = traits.Str()
+
+        # TODO this default should be defined at the project/experiment level
         crop_frames = traits.Int(0, usedefault=True)
 
     class output_spec(TraitedSpec):
@@ -621,16 +384,18 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
     def _run_interface(self, runtime):
 
         # Determine the parameters
+        experiment = self.inputs.experiment
         subject, session, run = self.inputs.run
         self._results["subject"] = subject
         self._results["session"] = session
         self._results["run"] = run
 
         # Spec out paths to the input files
-        keys = dict(subject=subject, session=session, run=run)
-        sb_fname = op.join(self.inputs.base_directory,
+        keys = dict(subject=subject, experiment=experiment,
+                    session=session, run=run)
+        sb_fname = op.join(self.inputs.data_dir, subject, "func",
                            self.inputs.sb_template.format(**keys))
-        ts_fname = op.join(self.inputs.base_directory,
+        ts_fname = op.join(self.inputs.data_dir, subject, "func",
                            self.inputs.ts_template.format(**keys))
 
         # Load the input images in canonical orientation
@@ -659,63 +424,6 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
 
 
 # --- Preprocessing operations
-
-
-class FinalizeTemplate(SimpleInterface, TimeSeriesGIF):
-
-    class input_spec(TraitedSpec):
-        in_files = traits.List(traits.List(traits.File(exists=True)))
-        mask_file = traits.File(exists=True)
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-        out_gif = traits.File(exists=True)
-        out_png = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        # Load the mask image
-        mask_img = nib.load(self.inputs.mask_file)
-        mask = mask_img.get_data().astype(bool)
-
-        # Load each frame and scale to a common mean
-        template_imgs = []
-        for sess_files in self.inputs.in_files:
-            for fname in sess_files:
-                img = nib.load(fname)
-                data = img.get_data()
-
-                target = 10000
-                scale_value = target / data[mask].mean()
-                data = data * scale_value
-
-                img = nib.Nifti1Image(data, img.affine, img.header)
-                template_imgs.append(img)
-
-        # Take the temporal mean over all template frames
-        frame_img = nib.concat_images(template_imgs)
-        template_data = frame_img.get_data().mean(axis=-1)
-
-        # Apply the mask to skullstrip
-        template_data[~mask] = 0
-
-        # Write out the 3D template image
-        affine, header = frame_img.affine, frame_img.header
-        out_file = self.define_output("out_file", "func.nii.gz")
-        out_img = nib.Nifti1Image(template_data, affine, header)
-        out_img.to_filename(out_file)
-
-        # Make a GIF movie of the template_frames
-        out_gif = self.define_output("out_gif", "func.gif")
-        self.write_time_series_gif(runtime, frame_img, out_gif)
-
-        # Make a static png of the final template
-        out_png = self.define_output("out_png", "func.png")
-        m = Mosaic(out_img, mask=mask_img)
-        m.savefig(out_png)
-        m.close()
-
-        return runtime
 
 
 class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
@@ -836,258 +544,6 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         return runtime
 
 
-class AnatomicalSegmentation(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        subject_id = traits.Str()
-        template_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
-
-    class output_spec(TraitedSpec):
-        seg_file = traits.File(exists=True)
-        seg_plot = traits.File(exists=True)
-        anat_file = traits.File(exists=True)
-        anat_plot = traits.File(exists=True)
-        mask_file = traits.File(exists=True)
-        mask_plot = traits.File(exists=True)
-        surf_file = traits.File(exists=True)
-        surf_plot = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        # Define the template space geometry
-
-        template_img = nib.load(self.inputs.template_file)
-        affine, header = template_img.affine, template_img.header
-
-        # --- Coarse segmentation into anatomical components
-
-        # Transform the wmparc image into functional space
-
-        fs_fname = "wmparc.nii.gz"
-        cmdline = ["mri_vol2vol",
-                   "--nearest",
-                   "--inv",
-                   "--mov", self.inputs.template_file,
-                   "--fstarg", "wmparc.mgz",
-                   "--reg", self.inputs.reg_file,
-                   "--o", fs_fname]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # Load the template-space wmparc and reclassify voxels
-
-        fs_img = nib.load(fs_fname)
-        fs_data = fs_img.get_data()
-
-        seg_data = np.zeros_like(fs_data)
-
-        seg_ids = [
-            np.arange(1000, 3000),  # Cortical gray matter
-            [10, 11, 12, 13, 17, 18, 49, 50, 51, 52, 53, 54],  # Subcortical
-            [16, 28, 60],  # Brain stem and ventral diencephalon
-            [8, 47],  # Cerebellar gray matter
-            np.arange(3000, 5000),  # Superficial ("cortical") white matter
-            [5001, 5002],  # Deep white matter
-            [7, 46],  # Cerebellar white matter
-            [4, 43, 31, 63],  # Lateral ventricle CSF
-        ]
-
-        for seg_val, id_vals in enumerate(seg_ids, 1):
-            mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
-            seg_data[mask] = seg_val
-
-        seg_file = self.define_output("seg_file", "seg.nii.gz")
-        seg_img = nib.Nifti1Image(seg_data, affine, header)
-        seg_img.to_filename(seg_file)
-
-        # --- Whole brain mask
-
-        # Binarize the segmentation and dilate to generate a brain mask
-
-        brainmask = seg_data > 0
-        brainmask = ndimage.binary_dilation(brainmask, iterations=2)
-        brainmask = ndimage.binary_erosion(brainmask)
-        brainmask = ndimage.binary_fill_holes(brainmask)
-
-        mask_file = self.define_output("mask_file", "mask.nii.gz")
-        mask_img = nib.Nifti1Image(brainmask, affine, header)
-        mask_img.to_filename(mask_file)
-
-        # --- T1w anatomical image in functional space
-
-        anat_file = self.define_output("anat_file", "anat.nii.gz")
-        cmdline = ["mri_vol2vol",
-                   "--cubic",
-                   "--inv",
-                   "--mov", self.inputs.template_file,
-                   "--fstarg", "brain.finalsurfs.mgz",
-                   "--reg", self.inputs.reg_file,
-                   "--o", anat_file]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # --- Surface vertex mapping
-
-        hemi_files = []
-        for hemi in ["lh", "rh"]:
-            hemi_mask = "{}.ribbon.nii.gz".format(hemi)
-            hemi_file = "{}.surf.nii.gz".format(hemi)
-            cmdline = ["mri_surf2vol",
-                       "--template", self.inputs.template_file,
-                       "--reg", self.inputs.reg_file,
-                       "--surf", "graymid",
-                       "--hemi", hemi,
-                       "--mkmask",
-                       "--o", hemi_mask,
-                       "--vtxvol", hemi_file]
-
-            self.submit_cmdline(runtime, cmdline)
-            hemi_files.append(hemi_file)
-
-        hemi_data = [nib.load(f).get_data() for f in hemi_files]
-        surf = np.stack(hemi_data, axis=-1)
-
-        surf_file = self.define_output("surf_file", "surf.nii.gz")
-        surf_img = nib.Nifti1Image(surf, affine, header)
-        surf_img.to_filename(surf_file)
-
-        # --- Generate QC mosaics
-
-        # Anatomical segmentation
-
-        seg_plot = self.define_output("seg_plot", "seg.png")
-        seg_cmap = mpl.colors.ListedColormap(
-            ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
-             '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
-         )
-        m_seg = Mosaic(template_img, seg_img, mask_img,
-                       step=2, tight=True, show_mask=False)
-        m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
-        m_seg.savefig(seg_plot)
-        m_seg.close()
-
-        # Brain mask
-
-        mask_plot = self.define_output("mask_plot", "mask.png")
-        m_mask = Mosaic(template_img, mask_img, mask_img,
-                        step=2, tight=True, show_mask=False)
-        m_mask.plot_mask()
-        m_mask.savefig(mask_plot)
-        m_mask.close()
-
-        # Anatomical image
-
-        anat_plot = self.define_output("anat_plot", "anat.png")
-        m_mask = Mosaic(anat_file, mask=mask_img,
-                        step=2, tight=True, show_mask=False)
-        m_mask.savefig(anat_plot)
-        m_mask.close()
-
-        # Surface ribbon
-
-        surf_plot = self.define_output("surf_plot", "surf.png")
-        ribbon = np.zeros(template_img.shape)
-        ribbon[surf[..., 0] > 0] = 1
-        ribbon[surf[..., 1] > 0] = 2
-        ribbon_cmap = mpl.colors.ListedColormap(["#5ebe82", "#ec966f"])
-        m_surf = Mosaic(template_img, ribbon, mask_img,
-                        step=2, tight=True, show_mask=False)
-        m_surf.plot_overlay(ribbon_cmap, 1, 2, thresh=.5, fmt=None)
-        m_surf.savefig(surf_plot)
-        m_surf.close()
-
-        return runtime
-
-
-class DefineTemplateSpace(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        subject_id = traits.Str()
-        session_info = traits.List(traits.Tuple())
-        in_matrices = traits.List(traits.File(exists=True))
-        in_volumes = traits.List(traits.File(exists=True))
-
-    class output_spec(TraitedSpec):
-        subject_id = traits.Str()
-        session_info = traits.List(traits.Tuple())
-        out_template = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
-        out_matrices = traits.List(traits.File(exists=True))
-
-    def _run_interface(self, runtime):
-
-        subjects_dir = os.environ["SUBJECTS_DIR"]
-
-        assert all([s == self.inputs.subject_id
-                    for s, _ in self.inputs.session_info])
-        subj = self.inputs.subject_id
-
-        self._results["subject_id"] = subj
-        self._results["session_info"] = self.inputs.session_info
-
-        # -- Convert the anatomical image to nifti
-        anat_file = "orig.nii.gz"
-        cmdline = ["mri_convert",
-                   op.join(subjects_dir, subj, "mri/orig.mgz"),
-                   anat_file]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # -- Compute the intermediate transform
-        midtrans_file = "anat2func.mat"
-        cmdline = ["midtrans",
-                   "--template=" + anat_file,
-                   "--separate=se2template_",
-                   "--out=" + midtrans_file]
-        cmdline.extend(self.inputs.in_matrices)
-        out_matrices = [
-            op.abspath("se2template_{:04d}.mat".format(i))
-            for i, _ in enumerate(self.inputs.in_matrices, 1)
-        ]
-
-        self.submit_cmdline(runtime, cmdline, out_matrices=out_matrices)
-
-        # -- Invert the anat2temp transformation
-        flirt_file = "func2anat.mat"
-        cmdline = ["convert_xfm",
-                   "-omat", flirt_file,
-                   "-inverse",
-                   midtrans_file]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # -- Tansform first fieldmap info template space to get geometry
-        out_template = self.define_output("out_template", "space.nii.gz")
-
-        cmdline = ["flirt",
-                   "-in", self.inputs.in_volumes[0],
-                   "-ref", self.inputs.in_volumes[0],
-                   "-init", out_matrices[0],
-                   "-out", out_template,
-                   "-applyxfm"]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # -- Average frames of fieldmap image in template space
-        cmdline = ["fslmaths", out_template, "-Tmean", out_template]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # -- Convert the FSL matrices to tkreg matrix format
-        reg_file = self.define_output("reg_file", "reg.dat")
-        cmdline = ["tkregister2",
-                   "--s", subj,
-                   "--mov", out_template,
-                   "--fsl", flirt_file,
-                   "--reg", reg_file,
-                   "--noedit"]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        return runtime
-
-
 # --- Preprocessing quality control
 
 
@@ -1158,147 +614,6 @@ class RealignmentReport(SimpleInterface):
         return Mosaic(self.inputs.target_file, step=2)
 
 
-class AnatRegReport(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        subject_id = traits.Str()
-        session = traits.Str()
-        in_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
-        cost_file = traits.File(exists=True)
-        out_file = traits.File()
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        # Use the registration to transform the input file
-        registered_file = "func_in_anat.nii.gz"
-        cmdline = ["mri_vol2vol",
-                   "--mov", self.inputs.in_file,
-                   "--reg", self.inputs.reg_file,
-                   "--o", registered_file,
-                   "--fstarg",
-                   "--cubic"]
-
-        self.submit_cmdline(runtime, cmdline)
-
-        # Load the WM segmentation and a brain mask
-        mri_dir = op.join(os.environ["SUBJECTS_DIR"],
-                          self.inputs.subject_id, "mri")
-
-        wm_file = op.join(mri_dir, "wm.mgz")
-        wm_data = (nib.load(wm_file).get_data() > 0).astype(int)
-
-        aseg_file = op.join(mri_dir, "aseg.mgz")
-        mask = (nib.load(aseg_file).get_data() > 0).astype(int)
-
-        # Read the final registration cost
-        if isdefined(self.inputs.cost_file):
-            cost = np.loadtxt(self.inputs.cost_file)[0]
-        else:
-            cost = None
-
-        # Make a mosaic of the registration from func to wm seg
-        # TODO this should be an OrthoMosaic when that is implemented
-        if isdefined(self.inputs.session):
-            fname = "{}_{}".format(self.inputs.session, self.inputs.out_file)
-        else:
-            fname = self.inputs.out_file
-        out_file = self.define_output("out_file", fname)
-
-        m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
-        m.plot_mask_edges()
-        if cost is not None:
-            m.fig.suptitle("Final cost: {:.2f}".format(cost),
-                           size=10, color="white")
-        m.savefig(out_file)
-        m.close()
-
-        return runtime
-
-
-class FieldMapReport(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        orig_file = traits.File(exists=True)
-        corr_file = traits.File(exists=True)
-        phase_encoding = traits.List(traits.Str)
-        session = traits.Str()
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        vol_data = dict(orig=nib.load(self.inputs.orig_file).get_data(),
-                        corr=nib.load(self.inputs.corr_file).get_data())
-
-        pe_data = dict(orig=[], corr=[])
-        pe = np.array(self.inputs.phase_encoding)
-        for enc in np.unique(pe):
-            enc_trs = pe == enc
-            for scan in ["orig", "corr"]:
-                enc_data = vol_data[scan][..., enc_trs].mean(axis=-1)
-                pe_data[scan].append(enc_data)
-
-        r_vals = dict()
-        for scan, (scan_pos, scan_neg) in pe_data.items():
-            r_vals[scan] = np.corrcoef(scan_pos.flat, scan_neg.flat)[0, 1]
-
-        nx, ny, nz, _ = vol_data["orig"].shape
-        x_slc = (np.linspace(.2, .8, 8) * nx).astype(np.int)
-
-        vmin, vmax = np.percentile(vol_data["orig"].flat, [2, 98])
-        kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
-
-        width = len(x_slc)
-        height = (nz / ny) * 2.75
-
-        png_fnames = []
-        for i, enc in enumerate(["pos", "neg"]):
-
-            f = plt.figure(figsize=(width, height))
-            gs = dict(
-                orig=plt.GridSpec(1, len(x_slc), 0, .5, 1, .95, 0, 0),
-                corr=plt.GridSpec(1, len(x_slc), 0, 0, 1, .45, 0, 0)
-            )
-
-            text_kws = dict(size=7, color="w", backgroundcolor="0",
-                            ha="center", va="bottom")
-            f.text(.5, .93,
-                   "Original similarity: {:.2f}".format(r_vals["orig"]),
-                   **text_kws)
-            f.text(.5, .43,
-                   "Corrected similarity: {:.2f}".format(r_vals["corr"]),
-                   **text_kws)
-
-            for scan in ["orig", "corr"]:
-                axes = [f.add_subplot(pos) for pos in gs[scan]]
-                vol = pe_data[scan][i]
-
-                for ax, x in zip(axes, x_slc):
-                    slice = np.rot90(vol[x])
-                    ax.imshow(slice, **kws)
-                    ax.set_axis_off()
-
-                png_fname = "frame{}.png".format(i)
-                png_fnames.append(png_fname)
-                f.savefig(png_fname, facecolor="0", edgecolor="0")
-                plt.close(f)
-
-        out_fname = "{}_unwarp.gif".format(self.inputs.session)
-        out_file = self.define_output("out_file", out_fname)
-        cmdline = ["convert", "-loop", "0", "-delay", "100"]
-        cmdline.extend(png_fnames)
-        cmdline.append(out_file)
-
-        self.submit_cmdline(runtime, cmdline)
-
-        return runtime
-
-
 class CoregGIF(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -1337,46 +652,3 @@ class CoregGIF(SimpleInterface):
                    "img1.png", "img2.png", fname]
 
         self.submit_cmdline(runtime, cmdline)
-
-
-class FrameGIF(SimpleInterface):
-
-    class input_spec(TraitedSpec):
-        in_file = traits.File(exists=True)
-        out_file = traits.File()
-        delay = traits.Int(100, usedefault=True)
-
-    class output_spec(TraitedSpec):
-        out_file = traits.File(exists=True)
-
-    def _run_interface(self, runtime):
-
-        img = nib.load(self.inputs.in_file)
-        data = img.get_data()
-
-        lims = 0, np.percentile(data, 98)
-
-        assert len(img.shape) == 4
-        n_frames = img.shape[-1]
-
-        frame_pngs = []
-
-        for i in range(n_frames):
-
-            png_fname = "frame{:02d}.png".format(i)
-            frame_pngs.append(png_fname)
-
-            vol_data = data[..., i]
-            vol = nib.Nifti1Image(vol_data, img.affine, img.header)
-            m = Mosaic(vol, tight=False, step=2, anat_lims=lims)
-            m.savefig(png_fname)
-            m.close()
-
-        out_file = self.define_output("out_file", self.inputs.out_file)
-        cmdline = ["convert", "-loop", "0", "-delay", str(self.inputs.delay)]
-        cmdline.extend(frame_pngs)
-        cmdline.append(out_file)
-
-        self.submit_cmdline(runtime, cmdline)
-
-        return runtime

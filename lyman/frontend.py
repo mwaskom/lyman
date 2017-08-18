@@ -8,8 +8,11 @@ import yaml
 
 import numpy as np
 
+# TODO put this locally, not in moss
 from moss import Bunch
 
+# TODO mayne defer imports?
+from .workflows.template import define_template_workflow
 from .workflows.preproc import define_preproc_workflow
 
 
@@ -27,14 +30,19 @@ def gather_project_info(lyman_dir=None):
         project = imp.load_source("project", proj_file)
 
     project_dict = dict()
-    for dir in ["data", "analysis", "cache", "crash"]:
+    for dir in ["data", "analysis", "cache"]:
         path = op.abspath(op.join(lyman_dir, getattr(project, dir + "_dir")))
         project_dict[dir + "_dir"] = path
 
-    sess_fname = op.join(lyman_dir, "session_info.yaml")
-    with open(sess_fname) as fid:
-        sess_info = yaml.load(fid)
-    project_dict["session_info"] = sess_info
+    for scan in ["fm", "ts", "sb"]:
+        project_dict[scan + "_template"] = getattr(project, scan + "_template")
+
+    scan_fname = op.join(lyman_dir, "scan_info.yaml")
+    with open(scan_fname) as fid:
+        scan_info = yaml.load(fid)
+    project_dict["scan_info"] = scan_info
+
+    project_dict["phase_encoding"] = getattr(project, "phase_encoding")
 
     return Bunch(project_dict)
 
@@ -207,15 +215,6 @@ def run_workflow(wf, args=None):
         wf.run(plugin, plugin_args)
 
 
-def gather_session_info(project, experiment, subjects):
-
-    sess_info = project["session_info"][experiment]
-    sess_info = {subj: subj_info
-                 for subj, subj_info in sess_info.items()
-                 if subj in subjects}
-    return sess_info
-
-
 def execute_workflow(args):
 
     stage = args.stage
@@ -223,13 +222,16 @@ def execute_workflow(args):
     proj_info = gather_project_info()
 
     subjects = determine_subjects(args.subject)
-    sess_info = gather_session_info(proj_info, args.experiment, subjects)
-    exp_info = gather_experiment_info(args.experiment)
     qc = args.qc
 
+    if stage == "template":
+        wf = define_template_workflow(proj_info, subjects, qc)
     if stage == "preproc":
-        wf = define_preproc_workflow(proj_info, sess_info, exp_info, qc)
+        exp_info = gather_experiment_info(args.experiment)
+        wf = define_preproc_workflow(proj_info, subjects, exp_info, qc)
 
-    wf.config["crashdump_dir"] = os.path.abspath(proj_info["crash_dir"])
+    # TODO just default to putting this in the cache dir
+    crash_dir = op.join(proj_info.cache_dir, "crashdumps")
+    wf.config["crashdump_dir"] = crash_dir
 
     run_workflow(wf, args)
