@@ -171,6 +171,8 @@ def define_template_workflow(proj_info, subjects, qc=True):
             [("subject", "subject_id")]),
         (average_fm, fm2anat,
             [("out_file", "source_file")]),
+        (average_fm, finalize_warp,
+            [("out_file", "func_file")]),
 
         # Creation of cross-session subject-specific template
 
@@ -236,6 +238,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
             [("path", "container")]),
         (finalize_warp, session_output,
             [("out_raw", "@raw"),
+             ("out_func", "@func"),
              ("out_reg", "@sess2temp_reg"),
              ("out_warp", "@warp")]),
         (fm2anat, session_output,
@@ -548,12 +551,14 @@ class FinalizeWarp(SimpleInterface):
 
     class input_spec(TraitedSpec):
         fieldmap_file = traits.File(exists=True)
+        func_file = traits.File(exists=True)
         reg_file = traits.File(exists=True)
         warp_files = traits.List(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
         out_reg = traits.File(exists=True)
         out_raw = traits.File(exists=True)
+        out_func = traits.File(exists=True)
         out_warp = traits.File(exists=True)
         out_plot = traits.File(exists=True)
 
@@ -592,6 +597,10 @@ class FinalizeWarp(SimpleInterface):
         # orientation this will work. But in the future we might want to ne
         # more flexible with what we accept and will need to change this.
         warp_data_y = warp_data[..., 1]
+
+        # Copy the corrected functional image to the output
+        out_func = self.define_output("out_func", "func.nii.gz")
+        shutil.copyfile(self.inputs.func_file, out_func)
 
         # Generate a QC image of the warpfield
         out_plot = self.define_output("out_plot", "warp.png")
