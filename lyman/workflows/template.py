@@ -61,6 +61,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
             [("path", "container")]),
         (define_template, template_output,
             [("t1w_file", "@t1w"),
+             ("t2w_file", "@t2w"),
              ("func2anat_mat", "@func2anat"),
              ("anat2func_mat", "@anat2func")]),
         (anat_segment, template_output,
@@ -76,7 +77,8 @@ def define_template_workflow(proj_info, subjects, qc=True):
     qc_edges = [
 
         (define_template, template_output,
-            [("t1w_plot", "qc.@t1w_plot")]),
+            [("t1w_plot", "qc.@t1w_plot"),
+             ("t2w_plot", "qc.@t2w_plot")]),
         (anat_segment, template_output,
             [("seg_plot", "qc.@seg_plot"),
              ("mask_plot", "qc.@mask_plot"),
@@ -104,10 +106,12 @@ class DefineTemplateSpace(SimpleInterface):
                                   traits.Float())
 
     class output_spec(TraitedSpec):
-        t1w_file = traits.File(exists=True)
-        t1w_plot = traits.File(exists=True)
         anat2func_mat = traits.File(exists=True)
         func2anat_mat = traits.File(exists=True)
+        t1w_file = traits.File(exists=True)
+        t1w_plot = traits.File(exists=True)
+        t2w_file = traits.File()
+        t2w_plot = traits.File()
 
     def _run_interface(self, runtime):
 
@@ -119,7 +123,13 @@ class DefineTemplateSpace(SimpleInterface):
                                         "t1w_file", "T1w.nii.gz")
 
         # Transform the T2w image into template space
-        # TODO -- what if we don't have one?
+        # TODO if we use the HCP recon enhancements instead of
+        # recon-all -T2pial (which doesn't work well!)
+        # this file won't get made
+        have_t2w = op.exists(op.join(self.mri_dir, "T2w.norm.mgz"))
+        if have_t2w:
+            t2w_file = self.transform_image(runtime, "T2w.norm.mgz",
+                                            "t2w_file", "T2w.nii.gz")
 
         # Generate an anat -> func and inverse registration matrices
         anat2func_mat = self.define_output("anat2func_mat", "anat2func.dat")
@@ -148,11 +158,17 @@ class DefineTemplateSpace(SimpleInterface):
         m.savefig(t1w_plot)
         m.close()
 
+        if have_t2w:
+            t2w_plot = self.define_output("t2w_plot", "T2w.png")
+            m = Mosaic(t2w_file)
+            m.savefig(t2w_plot)
+            m.close()
+
         return runtime
 
     def transform_image(self, runtime, in_fname, out_field, out_fname):
 
-        fstem = in_fname.strip(".mgz")
+        fstem, _ = op.splitext(in_fname)
 
         # Crop the image using the aseg
         cropped_fname = fstem + "_crop.nii.gz"
