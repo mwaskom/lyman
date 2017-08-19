@@ -42,10 +42,10 @@ if __name__ == "__main__":
 
     # ---
 
-    preproc = subparsers.add_parser("template",
-                                    help="functional template definition")
-    add_subject(preproc)
-    add_execution(preproc)
+    template = subparsers.add_parser("template",
+                                     help="functional template definition")
+    add_subject(template)
+    add_execution(template)
 
     # ---
 

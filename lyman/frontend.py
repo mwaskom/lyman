@@ -232,6 +232,6 @@ def execute_workflow(args):
 
     # TODO just default to putting this in the cache dir
     crash_dir = op.join(proj_info.cache_dir, "crashdumps")
-    wf.config["crashdump_dir"] = crash_dir
+    wf.config["execution"]["crashdump_dir"] = crash_dir
 
     run_workflow(wf, args)
