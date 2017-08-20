@@ -14,6 +14,13 @@ def add_subject(parser):
                         help="subject id(s)")
 
 
+def add_session(parser):
+    parser.add_argument("--session",
+                        nargs="*",
+                        metavar="sess",
+                        help="scanning session(s) for single subject")
+
+
 def add_experiment(parser):
     parser.add_argument("-e", "--experiment",
                         metavar="name",
@@ -34,6 +41,9 @@ def add_execution(parser):
                         help="don't connect qc nodes")
 
 
+# TODO add debug mode that preserves cache directory and uneccessary outputs
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog="lyman")
@@ -52,6 +62,7 @@ if __name__ == "__main__":
     preproc = subparsers.add_parser("preproc",
                                     help="functional preprocessing")
     add_subject(preproc)
+    add_session(preproc)
     add_experiment(preproc)
     add_execution(preproc)
 

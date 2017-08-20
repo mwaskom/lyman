@@ -53,7 +53,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
         (subject_source, define_template,
             [("subject", "subject")]),
         (define_template, anat_segment,
-            [("func2anat_mat", "reg_file"),
+            [("func2anat_dat", "reg_file"),
              ("t1w_file", "template_file")]),
         (subject_source, template_container,
             [("subject", "subject")]),
@@ -62,8 +62,10 @@ def define_template_workflow(proj_info, subjects, qc=True):
         (define_template, template_output,
             [("t1w_file", "@t1w"),
              ("t2w_file", "@t2w"),
-             ("func2anat_mat", "@func2anat"),
-             ("anat2func_mat", "@anat2func")]),
+             ("func2anat_dat", "@func2anat_dat"),
+             ("anat2func_dat", "@anat2func_dat"),
+             ("func2anat_mat", "@func2anat_mat"),
+             ("anat2func_mat", "@anat2func_mat")]),
         (anat_segment, template_output,
             [("seg_file", "@seg"),
              ("mask_file", "@mask"),
@@ -106,6 +108,8 @@ class DefineTemplateSpace(SimpleInterface):
                                   traits.Float())
 
     class output_spec(TraitedSpec):
+        anat2func_dat = traits.File(exists=True)
+        func2anat_dat = traits.File(exists=True)
         anat2func_mat = traits.File(exists=True)
         func2anat_mat = traits.File(exists=True)
         t1w_file = traits.File(exists=True)
@@ -132,23 +136,27 @@ class DefineTemplateSpace(SimpleInterface):
                                             "t2w_file", "T2w.nii.gz")
 
         # Generate an anat -> func and inverse registration matrices
-        anat2func_mat = self.define_output("anat2func_mat", "anat2func.dat")
+        anat2func_dat = self.define_output("anat2func_dat", "anat2func.dat")
+        anat2func_mat = self.define_output("anat2func_mat", "anat2func.mat")
         cmdline = ["tkregister2",
                    "--mov", op.join(self.mri_dir, "norm.mgz"),
                    "--targ", t1w_file,
                    "--s", self.inputs.subject,
                    "--regheader",
-                   "--reg", anat2func_mat,
+                   "--reg", anat2func_dat,
+                   "--fslregout", anat2func_mat,
                    "--noedit"]
         self.submit_cmdline(runtime, cmdline)
 
-        func2anat_mat = self.define_output("func2anat_mat", "func2anat.dat")
+        func2anat_dat = self.define_output("func2anat_dat", "func2anat.dat")
+        func2anat_mat = self.define_output("func2anat_mat", "func2anat.mat")
         cmdline = ["tkregister2",
                    "--mov", t1w_file,
                    "--targ", op.join(self.mri_dir, "norm.mgz"),
                    "--s", self.inputs.subject,
                    "--regheader",
-                   "--reg", func2anat_mat,
+                   "--reg", func2anat_dat,
+                   "--fslregout", func2anat_mat,
                    "--noedit"]
         self.submit_cmdline(runtime, cmdline)
 
@@ -216,7 +224,6 @@ class AnatomicalSegmentation(SimpleInterface):
         # Define the template space geometry
 
         template_img = nib.load(self.inputs.template_file)
-        affine, header = template_img.affine, template_img.header
 
         # --- Coarse segmentation into anatomical components
 
@@ -225,6 +232,7 @@ class AnatomicalSegmentation(SimpleInterface):
         fs_fname = "wmparc.nii.gz"
         cmdline = ["mri_vol2vol",
                    "--nearest",
+                   "--keep-precision",
                    "--inv",
                    "--mov", self.inputs.template_file,
                    "--fstarg", "wmparc.mgz",
@@ -237,6 +245,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         fs_img = nib.load(fs_fname)
         fs_data = fs_img.get_data()
+        affine, header = fs_img.affine, fs_img.header
 
         seg_data = np.zeros_like(fs_data)
 
