@@ -110,37 +110,54 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
     ts2sb_qc = Node(RealignmentReport(), "ts2sb_qc")
 
-    # --- Combined motion correction and unwarping of time series
+    # --- Combined motion correction, unwarping, and template registration
 
-    # Combine pre-and post-warp linaer transforms
-    combine_rigids = MapNode(CombineLinearTransforms(),
-                             "ts2sb_file", "combine_rigids")
+    # Combine pre-and post-warp linear transforms
+    combine_premats = MapNode(fsl.ConvertXFM(concat_xfm=True),
+                              "in_file", "combine_premats")
 
-    # Split the timeseries into each frame
-    split_ts = Node(fsl.Split(dimension="t"), "split_ts")
+    combine_postmats = Node(fsl.ConvertXFM(concat_xfm=True),
+                            "combine_postmats")
 
-    # Simultaneously apply rigid transforms and nonlinear warpfield
-    restore_ts_frames = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
-                                ["in_file", "premat", "postmat"],
-                                "restore_ts")
+    # Apply rigid transforms and nonlinear warpfield to time series frames
+    restore_timeseries = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
+                                 ["in_file", "premat"],
+                                 "restore_timeseries")
+
+    # Apply rigid transforms and nonlinear warpfield to template frames
+    restore_template = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
+                               ["in_file", "premat", "field_file"],
+                               "restore_template")
 
     # Perform final preprocessing operations on timeseries
-    # TODO do jacobian modulation here?
-    finalize_ts = Node(FinalizeTimeseries(), "finalize_ts")
+    finalize_timeseries = Node(FinalizeTimeseries(), "finalize_timeseries")
 
-    # --- TODO Combined motion correction and unwarping of template
+    # Perform final preprocessing operations on template
+    finalize_template = Node(FinalizeTemplate(), "finalize_template")
 
     # --- Workflow ouptut
 
-    def define_timeseries_container(subject, experiment, session, run):
+    def define_template_path(subject, experiment, session):
+        return "{}/{}/template/{}".format(subject, experiment, session)
+
+    template_path = Node(Function(["subject", "experiment", "session"],
+                                  "path", define_template_path),
+                         "template_path")
+    template_path.inputs.experiment = exp_info.name
+
+    template_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                                    parameterization=False),
+                           "template_output")
+
+    def define_timeseries_path(subject, experiment, session, run):
         return "{}/{}/timeseries/{}_{}".format(subject, experiment,
                                                session, run)
 
-    timeseries_container = Node(Function(["subject", "experiment",
-                                          "session", "run"],
-                                         "path", define_timeseries_container),
-                                "timeseries_container")
-    timeseries_container.inputs.experiment = exp_info.name
+    timeseries_path = Node(Function(["subject", "experiment",
+                                     "session", "run"],
+                                    "path", define_timeseries_path),
+                           "timeseries_path")
+    timeseries_path.inputs.experiment = exp_info.name
 
     timeseries_output = Node(DataSink(base_directory=proj_info.analysis_dir,
                                       parameterization=False),
@@ -166,8 +183,6 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (run_source, run_input,
             [("run", "run")]),
 
-        # --- SE-EPI fieldmap processing and anatomical registration
-
         # Phase-encode distortion estimation
 
         (session_input, estimate_distortions,
@@ -189,14 +204,12 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (finalize_unwarping, fm2anat,
             [("corrected_file", "source_file")]),
 
-        # --- Time series spatial processing
-
         # Registration of each frame to SBRef image
 
         (run_input, ts2sb,
             [("ts", "in_file"),
              ("sb", "ref_file")]),
-        (ts2sb, finalize_ts,
+        (ts2sb, finalize_timeseries,
             [("par_file", "mc_file")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
@@ -209,45 +222,69 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
         # Single-interpolation spatial realignment and unwarping
 
-        (ts2sb, combine_rigids,
-            [("mat_file", "ts2sb_file")]),
-        (sb2fm, combine_rigids,
-            [("out_matrix_file", "sb2fm_file")]),
-        (fm2anat, combine_rigids,
-            [("out_fsl_file", "fm2anat_file")]),
-        (session_input, combine_rigids,
-            [("reg_file", "anat2temp_file")]),
-        (run_input, split_ts,
-            [("ts", "in_file")]),
-        (split_ts, restore_ts_frames,
-            [("out_files", "in_file")]),
-        (combine_rigids, restore_ts_frames,
-            [("ts2fm_file", "premat"),
-             ("fm2temp_file", "postmat")]),
-        (session_input, restore_ts_frames,
+        (ts2sb, combine_premats,
+            [("mat_file", "in_file")]),
+        (sb2fm, combine_premats,
+            [("out_matrix_file", "in_file2")]),
+        (fm2anat, combine_postmats,
+            [("out_fsl_file", "in_file")]),
+        (session_input, combine_postmats,
+            [("reg_file", "in_file2")]),
+
+        (run_input, restore_timeseries,
+            [("ts_frames", "in_file")]),
+        (session_input, restore_timeseries,
             [("seg_file", "ref_file")]),
-        (session_input, finalize_ts,
+        (combine_premats, restore_timeseries,
+            [("out_file", "premat")]),
+        (combine_postmats, restore_timeseries,
+            [("out_file", "postmat")]),
+        (session_input, finalize_timeseries,
             [("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
-        (restore_ts_frames, finalize_ts,
+        (restore_timeseries, finalize_timeseries,
+            [("out_file", "in_files")]),
+
+        (session_input, restore_template,
+            [("fm_frames", "in_file"),
+             ("seg_file", "ref_file")]),
+        (estimate_distortions, restore_template,
+            [("out_mats", "premat"),
+             ("out_warps", "field_file")]),
+        (combine_postmats, restore_template,
+            [("out_file", "postmat")]),
+        (session_input, finalize_template,
+            [("seg_file", "seg_file"),
+             ("mask_file", "mask_file")]),
+        (restore_template, finalize_template,
             [("out_file", "in_files")]),
 
         # --- Persistent data storage
 
         # Ouputs associated with each scanner run
 
-        (run_input, timeseries_container,
+        (run_input, timeseries_path,
             [("subject", "subject"),
              ("session", "session"),
              ("run", "run")]),
-        (timeseries_container, timeseries_output,
+        (timeseries_path, timeseries_output,
             [("path", "container")]),
-        (finalize_ts, timeseries_output,
+        (finalize_timeseries, timeseries_output,
             [("out_file", "@func"),
              ("mean_file", "@mean"),
              ("tsnr_file", "@tsnr"),
              ("noise_file", "@noise"),
              ("mc_file", "@mc")]),
+
+        # Ouputs associated with the session template
+
+        (session_input, template_path,
+            [("subject", "subject"),
+             ("session", "session")]),
+        (template_path, template_output,
+            [("path", "container")]),
+        (finalize_template, template_output,
+            [("out_file", "@func")]),
 
     ]
     workflow.connect(processing_edges)
@@ -289,12 +326,19 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (ts2sb_qc, timeseries_output,
             [("params_plot", "qc.@params_plot"),
              ("target_plot", "qc.@target_plot")]),
-        (finalize_ts, timeseries_output,
+        (finalize_timeseries, timeseries_output,
             [("out_gif", "qc.@ts_gif"),
              ("out_png", "qc.@ts_png"),
              ("mean_plot", "qc.@ts_mean_plot"),
              ("tsnr_plot", "qc.@ts_tsnr_plot"),
              ("noise_plot", "qc.@noise_plot")]),
+
+        # Outputs associated with the session template
+
+        (fm2anat_qc, template_output,
+            [("out_file", "qc.@reg_png")]),
+        (finalize_template, template_output,
+            [("out_plot", "qc.@func_png")]),
 
     ]
 
@@ -482,6 +526,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         run = traits.Str()
         sb = traits.File(exists=True)
         ts = traits.File(exists=True)
+        ts_frames = traits.List(traits.File(exists=True))
         ts_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
@@ -518,6 +563,15 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         # Write out the new images
         self.save_image(sb_img, "sb", "sb.nii.gz")
         self.save_image(ts_img, "ts", "ts.nii.gz")
+
+        # Write out each frame of the timeseries
+        ts_frames = []
+        ts_frame_imgs = nib.four_to_three(ts_img)
+        for i, frame_img in enumerate(ts_frame_imgs):
+            frame_fname = op.abspath("ts{:04d}.nii.gz")
+            ts_frames.append(frame_fname)
+            frame_img.to_filename(frame_fname)
+        self._results["ts_frames"] = ts_frames
 
         # Make a GIF movie of the raw timeseries
         out_plot = self.define_output("ts_plot", "raw.gif")
@@ -765,6 +819,8 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         # Zero-out data outside the mask
         data[~mask] = 0
 
+        # TODO Jacobian modulate?
+
         # Scale the timeseries for cross-run intensity normalization
         target = 10000
         scale_value = target / data[mask].mean()
@@ -842,6 +898,58 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         m = Mosaic(mean_img, noise_img, mask_img, show_mask=False)
         m.plot_mask(alpha=1)
         m.savefig(noise_plot)
+        m.close()
+
+        return runtime
+
+
+class FinalizeTemplate(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        in_files = traits.List(traits.File(exists=True))
+        seg_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+        out_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # TODO This is copied from finalize timeseries .. maybe inherit?
+        # Concatenate timeseries frames into 4D image
+        img = nib.concat_images(self.inputs.in_files)
+        affine, header = img.affine, img.header
+        data = img.get_data()
+
+        # Load the brain maskimage
+        mask_img = nib.load(self.inputs.mask_file)
+        mask = mask_img.get_data().astype(np.bool)
+
+        # Zero-out data outside the mask
+        data[~mask] = 0
+
+        # TODO Jacobian modulate
+
+        # Scale each frame to a common mean value
+        target = 10000
+        scale_value = target / data[mask].mean(axis=0, keepdims=True)
+        data = data * scale_value
+
+        # Average over the frames of the template
+        data = data.mean(axis=-1)
+
+        # Save out the final template image
+        out_file = self.define_output("out_file", "func.nii.gz")
+        out_img = nib.Nifti1Image(data, affine, header)
+        out_img.to_filename(out_file)
+
+        # TODO compute and write session-wise mask?
+
+        # Write static mosaic image
+        out_plot = self.define_output("out_plot", "func.png")
+        m = Mosaic(out_img)
+        m.savefig(out_plot)
         m.close()
 
         return runtime

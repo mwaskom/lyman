@@ -33,12 +33,12 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     # --- Workflow ouptut
 
-    def define_template_container(subject):
+    def define_template_path(subject):
         return "{}/template".format(subject)
 
-    template_container = Node(Function("subject", "path",
-                                       define_template_container),
-                              "common_container")
+    template_path = Node(Function("subject", "path",
+                                  define_template_path),
+                         "common_path")
 
     template_output = Node(DataSink(base_directory=proj_info.analysis_dir,
                                     parameterization=False),
@@ -55,9 +55,9 @@ def define_template_workflow(proj_info, subjects, qc=True):
         (define_template, anat_segment,
             [("func2anat_dat", "reg_file"),
              ("t1w_file", "template_file")]),
-        (subject_source, template_container,
+        (subject_source, template_path,
             [("subject", "subject")]),
-        (template_container, template_output,
+        (template_path, template_output,
             [("path", "container")]),
         (define_template, template_output,
             [("t1w_file", "@t1w"),
