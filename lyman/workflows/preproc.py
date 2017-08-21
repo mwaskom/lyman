@@ -237,6 +237,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
             [("seg_file", "ref_file")]),
         (combine_premats, restore_timeseries,
             [("out_file", "premat")]),
+        (finalize_unwarping, restore_timeseries,
+            [("warp_file", "field_file")]),
         (combine_postmats, restore_timeseries,
             [("out_file", "postmat")]),
         (session_input, finalize_timeseries,
@@ -565,10 +567,11 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         self.save_image(ts_img, "ts", "ts.nii.gz")
 
         # Write out each frame of the timeseries
+        os.mkdir("frames")
         ts_frames = []
         ts_frame_imgs = nib.four_to_three(ts_img)
         for i, frame_img in enumerate(ts_frame_imgs):
-            frame_fname = op.abspath("ts{:04d}.nii.gz")
+            frame_fname = op.abspath("frames/frame{:04d}.nii.gz".format(i))
             ts_frames.append(frame_fname)
             frame_img.to_filename(frame_fname)
         self._results["ts_frames"] = ts_frames
@@ -805,6 +808,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
     def _run_interface(self, runtime):
 
         # Concatenate timeseries frames into 4D image
+        # TODO We need to get the TR information into the header somehow
         img = nib.concat_images(self.inputs.in_files)
         affine, header = img.affine, img.header
         data = img.get_data()
@@ -882,7 +886,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         mean_plot = self.define_output("mean_plot", "mean.png")
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(mean_img, norm_mean, mask_img, show_mask=False)
-        mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=1, fmt="d")
+        mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
         mean_m.savefig(mean_plot)
         mean_m.close()
 
