@@ -74,6 +74,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
     run_input = Node(RunInput(experiment=exp_info.name,
                               data_dir=proj_info.data_dir,
+                              analysis_dir=proj_info.analysis_dir,
                               sb_template=proj_info.sb_template,
                               ts_template=proj_info.ts_template),
                      name="run_input")
@@ -131,6 +132,9 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
     # Perform final preprocessing operations on timeseries
     finalize_timeseries = Node(FinalizeTimeseries(), "finalize_timeseries")
+
+    # TODO JoinNode to take intersection of run-wise masks and save out
+    # at the session-level in the template hierarchy?
 
     # Perform final preprocessing operations on template
     finalize_template = Node(FinalizeTemplate(), "finalize_template")
@@ -233,15 +237,15 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
         (run_input, restore_timeseries,
             [("ts_frames", "in_file")]),
-        (session_input, restore_timeseries,
-            [("seg_file", "ref_file")]),
+        (run_input, restore_timeseries,
+            [("anat_file", "ref_file")]),
         (combine_premats, restore_timeseries,
             [("out_file", "premat")]),
         (finalize_unwarping, restore_timeseries,
             [("warp_file", "field_file")]),
         (combine_postmats, restore_timeseries,
             [("out_file", "postmat")]),
-        (session_input, finalize_timeseries,
+        (run_input, finalize_timeseries,
             [("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
         (restore_timeseries, finalize_timeseries,
@@ -249,15 +253,14 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
         (session_input, restore_template,
             [("fm_frames", "in_file"),
-             ("seg_file", "ref_file")]),
+             ("anat_file", "ref_file")]),
         (estimate_distortions, restore_template,
             [("out_mats", "premat"),
              ("out_warps", "field_file")]),
         (combine_postmats, restore_template,
             [("out_file", "postmat")]),
         (session_input, finalize_template,
-            [("seg_file", "seg_file"),
-             ("mask_file", "mask_file")]),
+            [("mask_file", "mask_file")]),
         (restore_template, finalize_template,
             [("out_file", "in_files")]),
 
@@ -363,8 +366,7 @@ class TimeSeriesGIF(object):
         os.mkdir("png")
 
         nx, ny, nz, nt = img.shape
-        tr = img.header.get_zooms()[3]
-        delay = tr * 1000 / 75
+        delay = 10
 
         width = 5
         height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
@@ -433,7 +435,7 @@ class SessionInput(SimpleInterface):
         fm = traits.File(exists=True)
         fm_frames = traits.List(traits.File(exists=True))
         reg_file = traits.File(exists=True)
-        seg_file = traits.File(exists=True)
+        anat_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         phase_encoding = traits.List(traits.Str())
         readout_times = traits.List(traits.Float())
@@ -502,7 +504,7 @@ class SessionInput(SimpleInterface):
         template_path = op.join(self.inputs.analysis_dir, subject, "template")
         results = dict(
             reg_file=op.join(template_path, "anat2func.mat"),
-            seg_file=op.join(template_path, "seg.nii.gz"),
+            anat_file=op.join(template_path, "anat.nii.gz"),
             mask_file=op.join(template_path, "mask.nii.gz"),
         )
         self._results.update(results)
@@ -515,6 +517,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
     class input_spec(TraitedSpec):
         run = traits.Tuple()
         data_dir = traits.Directory(exists=True)
+        analysis_dir = traits.Directory(exists=True)
         experiment = traits.Str()
         sb_template = traits.Str()
         ts_template = traits.Str()
@@ -530,6 +533,10 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         ts = traits.File(exists=True)
         ts_frames = traits.List(traits.File(exists=True))
         ts_plot = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
+        seg_file = traits.File(exists=True)
+        anat_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -579,6 +586,16 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         # Make a GIF movie of the raw timeseries
         out_plot = self.define_output("ts_plot", "raw.gif")
         self.write_time_series_gif(runtime, ts_img, out_plot)
+
+        # Load files from the template directory
+        template_path = op.join(self.inputs.analysis_dir, subject, "template")
+        results = dict(
+            reg_file=op.join(template_path, "anat2func.mat"),
+            seg_file=op.join(template_path, "seg.nii.gz"),
+            anat_file=op.join(template_path, "anat.nii.gz"),
+            mask_file=op.join(template_path, "mask.nii.gz"),
+        )
+        self._results.update(results)
 
         return runtime
 
@@ -820,6 +837,8 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         mask_img = nib.load(self.inputs.mask_file)
         mask = mask_img.get_data().astype(np.bool)
 
+        # TODO compute a run-specfic mask that ignores voxels outside the FOV
+
         # Zero-out data outside the mask
         data[~mask] = 0
 
@@ -911,7 +930,6 @@ class FinalizeTemplate(SimpleInterface):
 
     class input_spec(TraitedSpec):
         in_files = traits.List(traits.File(exists=True))
-        seg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):

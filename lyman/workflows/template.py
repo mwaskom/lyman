@@ -1,12 +1,13 @@
 import os
 import os.path as op
+import shutil
 
 import numpy as np
 from scipy import ndimage
 import matplotlib as mpl
 import nibabel as nib
 
-from nipype import (Workflow, Node, IdentityInterface, Function, DataSink)
+from nipype import Workflow, Node, IdentityInterface, Function, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 
 from ..mosaic import Mosaic
@@ -38,7 +39,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     template_path = Node(Function("subject", "path",
                                   define_template_path),
-                         "common_path")
+                         "template_path")
 
     template_output = Node(DataSink(base_directory=proj_info.analysis_dir,
                                     parameterization=False),
@@ -60,7 +61,8 @@ def define_template_workflow(proj_info, subjects, qc=True):
         (template_path, template_output,
             [("path", "container")]),
         (define_template, template_output,
-            [("t1w_file", "@t1w"),
+            [("anat_file", "@anat"),
+             ("t1w_file", "@t1w"),
              ("t2w_file", "@t2w"),
              ("func2anat_dat", "@func2anat_dat"),
              ("anat2func_dat", "@anat2func_dat"),
@@ -112,6 +114,7 @@ class DefineTemplateSpace(SimpleInterface):
         func2anat_dat = traits.File(exists=True)
         anat2func_mat = traits.File(exists=True)
         func2anat_mat = traits.File(exists=True)
+        anat_file = traits.File(exists=True)
         t1w_file = traits.File(exists=True)
         t1w_plot = traits.File(exists=True)
         t2w_file = traits.File()
@@ -125,6 +128,10 @@ class DefineTemplateSpace(SimpleInterface):
         # Transform the T1w image into template space
         t1w_file = self.transform_image(runtime, "norm.mgz",
                                         "t1w_file", "T1w.nii.gz")
+
+        # Duplicate the T1w file with a different name
+        anat_file = self.define_output("anat_file", "anat.nii.gz")
+        anat_file = shutil.copyfile(t1w_file, anat_file)
 
         # Transform the T2w image into template space
         # TODO if we use the HCP recon enhancements instead of
