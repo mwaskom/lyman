@@ -248,6 +248,10 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (run_input, finalize_timeseries,
             [("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
+        (combine_postmats, finalize_timeseries,
+            [("out_file", "reg_file")]),
+        (finalize_unwarping, finalize_timeseries,
+            [("jacobian_file", "jacobian_file")]),
         (restore_timeseries, finalize_timeseries,
             [("out_file", "in_files")]),
 
@@ -261,6 +265,10 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
             [("out_file", "postmat")]),
         (session_input, finalize_template,
             [("mask_file", "mask_file")]),
+        (combine_postmats, finalize_template,
+            [("out_file", "reg_file")]),
+        (finalize_unwarping, finalize_template,
+            [("jacobian_file", "jacobian_file")]),
         (restore_template, finalize_template,
             [("out_file", "in_files")]),
 
@@ -684,9 +692,9 @@ class FinalizeUnwarping(SimpleInterface):
                                    corr_img_frames.header)
         corr_img.to_filename(corrected_file)
 
-        # Save the first frame of the jacobian image using the raw geometry
+        # Save the jacobian images using the raw geometry
         jacobian_file = self.define_output("jacobian_file", "jacobian.nii.gz")
-        jac_img = nib.Nifti1Image(jac_data[..., 0],
+        jac_img = nib.Nifti1Image(jac_data,
                                   raw_img.affine,
                                   raw_img.header)
         jac_img.to_filename(jacobian_file)
@@ -807,7 +815,9 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
     class input_spec(TraitedSpec):
         in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
+        reg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
+        jacobian_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
@@ -825,15 +835,12 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
     def _run_interface(self, runtime):
 
         # Concatenate timeseries frames into 4D image
-        # TODO We need to get the TR information into the header somehow
+        # TODO Note that the TR information is not propogated into the header
         img = nib.concat_images(self.inputs.in_files)
         affine, header = img.affine, img.header
         data = img.get_data()
 
-        # Load the brain mask and seg images
-        seg_img = nib.load(self.inputs.seg_file)
-        seg = seg_img.get_data()
-
+        # Load the template brain mask image
         mask_img = nib.load(self.inputs.mask_file)
         mask = mask_img.get_data().astype(np.bool)
 
@@ -842,7 +849,19 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         # Zero-out data outside the mask
         data[~mask] = 0
 
-        # TODO Jacobian modulate?
+        # Transform the jacobian image into template space
+        jacobian_file = "jacobian.nii.gz"
+        cmdline = ["applywarp",
+                   "-i", self.inputs.jacobian_file,
+                   "-r", self.inputs.in_files[0],
+                   "-o", jacobian_file,
+                   "--premat=" + self.inputs.reg_file]
+        self.submit_cmdline(runtime, cmdline)
+
+        # Jacobian modulate each frame of the timeseries image
+        jacobian_img = nib.load(jacobian_file)
+        jacobian = jacobian_img.get_data()[..., [0]]
+        data *= jacobian
 
         # Scale the timeseries for cross-run intensity normalization
         target = 10000
@@ -874,6 +893,10 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         tsnr_file = self.define_output("tsnr_file", "tsnr.nii.gz")
         tsnr_img = nib.Nifti1Image(tsnr, affine, header)
         tsnr_img.to_filename(tsnr_file)
+
+        # Load the template segmentation image
+        seg_img = nib.load(self.inputs.seg_file)
+        seg = seg_img.get_data()
 
         # Identify unusually noisy voxels
         noise_file = self.define_output("noise_file", "noise.nii.gz")
@@ -930,7 +953,9 @@ class FinalizeTemplate(SimpleInterface):
 
     class input_spec(TraitedSpec):
         in_files = traits.List(traits.File(exists=True))
+        reg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
+        jacobian_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         out_file = traits.File(exists=True)
@@ -944,14 +969,26 @@ class FinalizeTemplate(SimpleInterface):
         affine, header = img.affine, img.header
         data = img.get_data()
 
-        # Load the brain maskimage
+        # Load the brain mask image
         mask_img = nib.load(self.inputs.mask_file)
         mask = mask_img.get_data().astype(np.bool)
 
         # Zero-out data outside the mask
         data[~mask] = 0
 
-        # TODO Jacobian modulate
+        # Transform the jacobian image into template space
+        jacobian_file = "jacobian.nii.gz"
+        cmdline = ["applywarp",
+                   "-i", self.inputs.jacobian_file,
+                   "-r", self.inputs.in_files[0],
+                   "-o", jacobian_file,
+                   "--premat=" + self.inputs.reg_file]
+        self.submit_cmdline(runtime, cmdline)
+
+        # Jacobian modulate each frame of the template image
+        jacobian_img = nib.load(jacobian_file)
+        jacobian = jacobian_img.get_data()
+        data *= jacobian
 
         # Scale each frame to a common mean value
         target = 10000
