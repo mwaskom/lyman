@@ -143,6 +143,7 @@ class DefineTemplateSpace(SimpleInterface):
                                             "t2w_file", "T2w.nii.gz")
 
         # Generate an anat -> func and inverse registration matrices
+        # TODO do we need to write both tkreg and fsl format?
         anat2func_dat = self.define_output("anat2func_dat", "anat2func.dat")
         anat2func_mat = self.define_output("anat2func_mat", "anat2func.mat")
         cmdline = ["tkregister2",

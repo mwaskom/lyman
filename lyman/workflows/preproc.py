@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import nibabel as nib
 
-from nipype import (Workflow, Node, MapNode,
+from nipype import (Workflow, Node, MapNode, JoinNode,
                     IdentityInterface, Function, DataSink)
 from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
@@ -139,6 +139,12 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
     # Perform final preprocessing operations on template
     finalize_template = Node(FinalizeTemplate(), "finalize_template")
 
+    # Define masks at the session level
+    define_masks = JoinNode(DefineSessionMasks(),
+                            name="define_masks",
+                            joinsource="session_source",
+                            joinfield=["brain_masks", "noise_masks"])
+
     # --- Workflow ouptut
 
     def define_template_path(subject, experiment, session):
@@ -246,7 +252,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (combine_postmats, restore_timeseries,
             [("out_file", "postmat")]),
         (run_input, finalize_timeseries,
-            [("seg_file", "seg_file"),
+            [("anat_file", "anat_file"),
+             ("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
         (combine_postmats, finalize_timeseries,
             [("out_file", "reg_file")]),
@@ -272,6 +279,13 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (restore_template, finalize_template,
             [("out_file", "in_files")]),
 
+        # Session-wise mask images
+        (finalize_template, define_masks,
+            [("out_file", "func_file")]),
+        (finalize_timeseries, define_masks,
+            [("mask_file", "brain_masks"),
+             ("noise_file", "noise_masks")]),
+
         # --- Persistent data storage
 
         # Ouputs associated with each scanner run
@@ -285,6 +299,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (finalize_timeseries, timeseries_output,
             [("out_file", "@func"),
              ("mean_file", "@mean"),
+             ("mask_file", "@mask"),
              ("tsnr_file", "@tsnr"),
              ("noise_file", "@noise"),
              ("mc_file", "@mc")]),
@@ -298,6 +313,9 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
             [("path", "container")]),
         (finalize_template, template_output,
             [("out_file", "@func")]),
+        (define_masks, template_output,
+            [("brain_file", "@mask"),
+             ("noise_file", "@noise")]),
 
     ]
     workflow.connect(processing_edges)
@@ -342,6 +360,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (finalize_timeseries, timeseries_output,
             [("out_gif", "qc.@ts_gif"),
              ("out_png", "qc.@ts_png"),
+             ("mask_plot", "qc.@mask_plot"),
              ("mean_plot", "qc.@ts_mean_plot"),
              ("tsnr_plot", "qc.@ts_tsnr_plot"),
              ("noise_plot", "qc.@noise_plot")]),
@@ -352,6 +371,9 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
             [("out_file", "qc.@reg_png")]),
         (finalize_template, template_output,
             [("out_plot", "qc.@func_png")]),
+        (define_masks, template_output,
+            [("brain_plot", "qc.@mask"),
+             ("noise_plot", "qc.@noise")]),
 
     ]
 
@@ -642,6 +664,64 @@ class CombineLinearTransforms(SimpleInterface):
         return runtime
 
 
+class DefineSessionMasks(SimpleInterface):
+    # TODO is there anything else we want to add that combines across runs?
+    # TODO also should we just roll this into FinalizeTemplate?
+
+    class input_spec(TraitedSpec):
+        func_file = traits.File(exists=True)
+        brain_masks = traits.List(traits.File(exists=True))
+        noise_masks = traits.List(traits.File(exists=True))
+
+    class output_spec(TraitedSpec):
+        brain_file = traits.File(exists=True)
+        noise_file = traits.File(exists=True)
+        brain_plot = traits.File(exists=True)
+        noise_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Load the background functional image
+        func_img = nib.load(self.inputs.func_file)
+        affine, header = func_img.affine, func_img.header
+
+        # Load each run's brain mask and find the intersection
+        brain_img_frames = nib.concat_images(self.inputs.brain_masks)
+        brain_masks = brain_img_frames.get_data()
+        brain_mask = brain_masks.all(axis=-1)
+
+        brain_file = self.define_output("brain_file", "mask.nii.gz")
+        brain_img = nib.Nifti1Image(brain_mask, affine, header)
+        brain_img.to_filename(brain_file)
+
+        # Load each run's noise mask and find the union
+        noise_img_frames = nib.concat_images(self.inputs.noise_masks)
+        noise_masks = noise_img_frames.get_data()
+        noise_mask = noise_masks.any(axis=-1)
+
+        noise_file = self.define_output("noise_file", "noise.nii.gz")
+        noise_img = nib.Nifti1Image(noise_mask, affine, header)
+        noise_img.to_filename(noise_file)
+
+        # Make a QC plot of the run mask
+        # TODO should this emphasize areas where runs don't overlap?
+        # TODO should the background here be the anatomy?
+        brain_plot = self.define_output("brain_plot", "mask.png")
+        m = Mosaic(func_img, brain_img)
+        m.plot_mask()
+        m.savefig(brain_plot)
+        m.close()
+
+        # Make a QC plot of the session noise mask
+        noise_plot = self.define_output("noise_plot", "noise.png")
+        m = Mosaic(func_img, noise_img)
+        m.plot_mask(alpha=1)
+        m.savefig(noise_plot)
+        m.close()
+
+        return runtime
+
+
 class FinalizeUnwarping(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -813,6 +893,7 @@ class FinalizeUnwarping(SimpleInterface):
 class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
+        anat_file = traits.File(exists=True)
         in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
         reg_file = traits.File(exists=True)
@@ -828,6 +909,8 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         mean_plot = traits.File(exists=True)
         tsnr_file = traits.File(exists=True)
         tsnr_plot = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        mask_plot = traits.File(exists=True)
         noise_file = traits.File(exists=True)
         noise_plot = traits.File(exists=True)
         mc_file = traits.File(exists=True)
@@ -844,7 +927,11 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         mask_img = nib.load(self.inputs.mask_file)
         mask = mask_img.get_data().astype(np.bool)
 
-        # TODO compute a run-specfic mask that ignores voxels outside the FOV
+        # Compute a run-specfic mask that excludes voxels outside the FOV
+        mask &= data.var(axis=-1) > 0
+        mask_file = self.define_output("mask_file", "mask.nii.gz")
+        mask_img = nib.Nifti1Image(mask, affine, header)
+        mask_img.to_filename(mask_file)
 
         # Zero-out data outside the mask
         data[~mask] = 0
@@ -925,6 +1012,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         self.write_time_series_gif(runtime, out_img, out_gif)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
+        # TODO should the background here be the anatomical volume?
         mean_plot = self.define_output("mean_plot", "mean.png")
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(mean_img, norm_mean, mask_img, show_mask=False)
@@ -938,6 +1026,13 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
         tsnr_m.savefig(tsnr_plot)
         tsnr_m.close()
+
+        # Make a mosaic of the run mask
+        mask_plot = self.define_output("mask_plot", "mask.png")
+        m = Mosaic(self.inputs.anat_file, mask_img)
+        m.plot_mask()
+        m.savefig(mask_plot)
+        m.close()
 
         # Make a mosaic of the noisy voxels
         noise_plot = self.define_output("noise_plot", "noise.png")
