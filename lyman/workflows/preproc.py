@@ -15,26 +15,22 @@ from nipype.interfaces import fsl, freesurfer as fs
 from .. import signals  # TODO confusingly close to scipy.signal
 from ..mosaic import Mosaic
 from ..carpetplot import CarpetPlot
-from ..graphutils import SimpleInterface
+from ..graphutils import SimpleInterface, generate_iterables
 
 
 def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
     # proj_info will be a bunch or other object with data_dir, etc. fields
 
-    # sess info is a nested dictionary:
-    # outer keys are subjects
-    # inner keys are sessions
-    # inner values are lists of runs
-
     # exp_info is a bunch or dict or other obj with experiment parameters
 
     # --- Workflow parameterization and data input
 
-    # TODO The iterable creation should be moved to separate functions
-    # and tested well, as the logic is fairly complicated. Also there
-    # should be a validation of the session info with informative errors
     scan_info = proj_info.scan_info
+    experiment = exp_info.name
+
+    iterables = generate_iterables(scan_info, subjects, experiment, session)
+    subject_iterables, session_iterables, run_iterables = iterables
 
     subject_iterables = subjects
 
@@ -42,25 +38,11 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
                           name="subject_source",
                           iterables=("subject", subject_iterables))
 
-    session_iterables = {
-        subj: [(subj, sess) for sess in scan_info[subj]
-               if exp_info.name in scan_info[subj][sess]
-               and session is None or sess in session]
-        for subj in subjects
-    }
     session_source = Node(IdentityInterface(["subject", "session"]),
                           name="session_source",
                           itersource=("subject_source", "subject"),
                           iterables=("session", session_iterables))
 
-    run_iterables = {
-        (subj, sess): [(subj, sess, run)
-                       for run in scan_info[subj][sess][exp_info.name]]
-        for subj in subjects
-        for sess in scan_info[subj]
-        if exp_info.name in scan_info[subj][sess]
-        and session is None or sess in session
-    }
     run_source = Node(IdentityInterface(["subject", "session", "run"]),
                       name="run_source",
                       itersource=("session_source", "session"),
@@ -72,7 +54,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
                                       phase_encoding=proj_info.phase_encoding),
                          "session_input")
 
-    run_input = Node(RunInput(experiment=exp_info.name,
+    run_input = Node(RunInput(experiment=experiment,
                               data_dir=proj_info.data_dir,
                               analysis_dir=proj_info.analysis_dir,
                               sb_template=proj_info.sb_template,
