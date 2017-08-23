@@ -66,8 +66,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
                       itersource=("session_source", "session"),
                       iterables=("run", run_iterables))
 
-    session_input = Node(SessionInput(experiment=exp_info.name,
-                                      data_dir=proj_info.data_dir,
+    session_input = Node(SessionInput(data_dir=proj_info.data_dir,
                                       analysis_dir=proj_info.analysis_dir,
                                       fm_template=proj_info.fm_template,
                                       phase_encoding=proj_info.phase_encoding),
@@ -132,10 +131,11 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
                                "restore_template")
 
     # Perform final preprocessing operations on timeseries
-    finalize_timeseries = Node(FinalizeTimeseries(), "finalize_timeseries")
+    finalize_timeseries = Node(FinalizeTimeseries(experiment=exp_info.name),
+                               "finalize_timeseries")
 
     # Perform final preprocessing operations on template
-    finalize_template = JoinNode(FinalizeTemplate(),
+    finalize_template = JoinNode(FinalizeTemplate(experiment=exp_info.name),
                                  name="finalize_template",
                                  joinsource="session_source",
                                  joinfield=["mean_files", "tsnr_files",
@@ -230,7 +230,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (combine_postmats, restore_timeseries,
             [("out_file", "postmat")]),
         (run_input, finalize_timeseries,
-            [("anat_file", "anat_file"),
+            [("run", "run_tuple"),
+             ("anat_file", "anat_file"),
              ("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
         (combine_postmats, finalize_timeseries,
@@ -249,7 +250,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (combine_postmats, restore_template,
             [("out_file", "postmat")]),
         (session_input, finalize_template,
-            [("seg_file", "seg_file"),
+            [("session", "session_tuple"),
+             ("seg_file", "seg_file"),
              ("anat_file", "anat_file")]),
         (combine_postmats, finalize_template,
             [("out_file", "reg_file")]),
@@ -268,10 +270,9 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
         # Ouputs associated with each scanner run
 
-        (run_input, timeseries_output,
-            [("output_path", "container")]),
         (finalize_timeseries, timeseries_output,
-            [("out_file", "@func"),
+            [("output_path", "container"),
+             ("out_file", "@func"),
              ("mean_file", "@mean"),
              ("mask_file", "@mask"),
              ("tsnr_file", "@tsnr"),
@@ -280,10 +281,9 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
         # Ouputs associated with the session template
 
-        (session_input, template_output,
-            [("output_path", "container")]),
         (finalize_template, template_output,
-            [("out_file", "@func"),
+            [("output_path", "container"),
+             ("out_file", "@func"),
              ("mean_file", "@mean"),
              ("tsnr_file", "@tsnr"),
              ("mask_file", "@mask"),
@@ -426,7 +426,6 @@ class SessionInput(SimpleInterface):
 
     class input_spec(TraitedSpec):
         session = traits.Tuple()
-        experiment = traits.Str()
         data_dir = traits.Directory(exists=True)
         analysis_dir = traits.Directory(exists=True)
         fm_template = traits.Str()
@@ -444,7 +443,6 @@ class SessionInput(SimpleInterface):
         mask_file = traits.File(exists=True)
         phase_encoding = traits.List(traits.Str())
         readout_times = traits.List(traits.Float())
-        output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
@@ -515,11 +513,6 @@ class SessionInput(SimpleInterface):
             mask_file=op.join(template_path, "mask.nii.gz"),
         )
         self._results.update(results)
-
-        # Spec out the root path for the template outputs
-        experiment = self.inputs.experiment
-        output_path = op.join(subject, experiment, "template", session)
-        self._results["output_path"] = output_path
 
         return runtime
 
@@ -609,11 +602,6 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
             mask_file=op.join(template_path, "mask.nii.gz"),
         )
         self._results.update(results)
-
-        # Spec out the root path for the timeseries outputs
-        output_path = op.join(subject, experiment, "timeseries",
-                              "{}_{}".format(session, run))
-        self._results["output_path"] = output_path
 
         return runtime
 
@@ -820,6 +808,8 @@ class FinalizeUnwarping(SimpleInterface):
 class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
+        experiment = traits.Str()
+        run_tuple = traits.Tuple()
         anat_file = traits.File(exists=True)
         in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
@@ -841,6 +831,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         noise_file = traits.File(exists=True)
         noise_plot = traits.File(exists=True)
         mc_file = traits.File(exists=True)
+        output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
@@ -962,12 +953,21 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         m.savefig(noise_plot)
         m.close()
 
+        # Spec out the root path for the timeseries outputs
+        subject, session, run = self.inputs.run_tuple
+        experiment = self.inputs.experiment
+        output_path = op.join(subject, experiment, "timeseries",
+                              "{}_{}".format(session, run))
+        self._results["output_path"] = output_path
+
         return runtime
 
 
 class FinalizeTemplate(SimpleInterface):
 
     class input_spec(TraitedSpec):
+        session_tuple = traits.Tuple()
+        experiment = traits.Str()
         in_files = traits.List(traits.File(exists=True))
         reg_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
@@ -989,6 +989,7 @@ class FinalizeTemplate(SimpleInterface):
         mean_plot = traits.File(exists=True)
         tsnr_file = traits.File(exists=True)
         tsnr_plot = traits.File(exists=True)
+        output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
@@ -1095,6 +1096,12 @@ class FinalizeTemplate(SimpleInterface):
         m.plot_mask(alpha=1)
         m.savefig(noise_plot)
         m.close()
+
+        # Spec out the root path for the template outputs
+        experiment = self.inputs.experiment
+        subject, session = self.inputs.session_tuple
+        output_path = op.join(subject, experiment, "template", session)
+        self._results["output_path"] = output_path
 
         return runtime
 
