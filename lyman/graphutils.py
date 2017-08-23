@@ -1,5 +1,6 @@
 import os.path as op
 import subprocess as sp
+import nibabel as nib
 import networkx as nx
 from nipype import Workflow, MapNode, Node, IdentityInterface
 from nipype.interfaces.base import (BaseInterface, BaseInterfaceInputSpec,
@@ -184,10 +185,15 @@ class SimpleInterface(BaseInterface):
         self._results[field] = fname
         return fname
 
-    def save_image(self, img, field, fname):
+    def write_image(self, field, fname, data, affine=None, header=None):
 
         fname = self.define_output(field, fname)
+        if isinstance(data, nib.Nifti1Image):
+            img = data
+        else:
+            img = nib.Nifti1Image(data, affine, header)
         img.to_filename(fname)
+        return img
 
     def submit_cmdline(self, runtime, cmdline, **results):
         """Submit a command-line job and capture the output."""

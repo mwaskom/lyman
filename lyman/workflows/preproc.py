@@ -174,11 +174,11 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         # Phase-encode distortion estimation
 
         (session_input, estimate_distortions,
-            [("fm", "in_file"),
+            [("fm_file", "in_file"),
              ("phase_encoding", "encoding_direction"),
              ("readout_times", "readout_times")]),
         (session_input, finalize_unwarping,
-            [("fm", "raw_file"),
+            [("fm_file", "raw_file"),
              ("phase_encoding", "phase_encoding")]),
         (estimate_distortions, finalize_unwarping,
             [("out_corrected", "corrected_file"),
@@ -195,15 +195,15 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         # Registration of each frame to SBRef image
 
         (run_input, ts2sb,
-            [("ts", "in_file"),
-             ("sb", "ref_file")]),
+            [("ts_file", "in_file"),
+             ("sb_file", "ref_file")]),
         (ts2sb, finalize_timeseries,
             [("par_file", "mc_file")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
 
         (run_input, sb2fm,
-            [("sb", "in_file")]),
+            [("sb_file", "in_file")]),
         (finalize_unwarping, sb2fm,
             [("raw_file", "reference"),
              ("mask_file", "ref_weight")]),
@@ -299,7 +299,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         # Registration of each frame to SBRef image
 
         (run_input, ts2sb_qc,
-            [("sb", "target_file")]),
+            [("sb_file", "target_file")]),
         (ts2sb, ts2sb_qc,
             [("par_file", "realign_params")]),
 
@@ -436,7 +436,7 @@ class SessionInput(SimpleInterface):
         session_key = traits.Tuple()
         subject = traits.Str()
         session = traits.Str()
-        fm = traits.File(exists=True)
+        fm_file = traits.File(exists=True)
         fm_frames = traits.List(traits.File(exists=True))
         reg_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
@@ -487,7 +487,7 @@ class SessionInput(SimpleInterface):
         header.set_data_dtype(np.float32)
 
         # Write out a 4D file
-        fname = self.define_output("fm", "fieldmap.nii.gz")
+        fname = self.define_output("fm_file", "fieldmap.nii.gz")
         img = nib.Nifti1Image(data, affine, header)
         img.to_filename(fname)
 
@@ -541,8 +541,8 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         subject = traits.Str()
         session = traits.Str()
         run = traits.Str()
-        sb = traits.File(exists=True)
-        ts = traits.File(exists=True)
+        sb_file = traits.File(exists=True)
+        ts_file = traits.File(exists=True)
         ts_frames = traits.List(traits.File(exists=True))
         ts_plot = traits.File(exists=True)
         reg_file = traits.File(exists=True)
@@ -583,8 +583,8 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
             ts_img = nib.Nifti1Image(ts_data, ts_img.affine, ts_img.header)
 
         # Write out the new images
-        self.write_image("sb", "sb.nii.gz", sb_img)
-        self.write_image("ts", "ts.nii.gz", ts_img)
+        self.write_image("sb_file", "sb.nii.gz", sb_img)
+        self.write_image("ts_file", "ts.nii.gz", ts_img)
 
         # Write out each frame of the timeseries
         os.mkdir("frames")
@@ -746,8 +746,10 @@ class FinalizeUnwarping(SimpleInterface):
 
     def generate_unwarp_gif(self, runtime, raw_img, corrected_img):
 
+        # Load the input and output files
         vol_data = dict(orig=raw_img.get_data(), corr=corrected_img.get_data())
 
+        # Average over the frames that correspond to unique encoding directions
         pe_data = dict(orig=[], corr=[])
         pe = np.array(self.inputs.phase_encoding)
         for enc in np.unique(pe):
@@ -756,15 +758,19 @@ class FinalizeUnwarping(SimpleInterface):
                 enc_data = vol_data[scan][..., enc_trs].mean(axis=-1)
                 pe_data[scan].append(enc_data)
 
+        # Compute the spatial correlation within image pairs
         r_vals = dict()
         for scan, (scan_pos, scan_neg) in pe_data.items():
             r_vals[scan] = np.corrcoef(scan_pos.flat, scan_neg.flat)[0, 1]
 
+        # Set up the figure parameters
         nx, ny, nz, _ = vol_data["orig"].shape
         x_slc = (np.linspace(.2, .8, 8) * nx).astype(np.int)
 
         vmin, vmax = np.percentile(vol_data["orig"].flat, [2, 98])
         kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
+        text_kws = dict(size=7, color="w", backgroundcolor="0",
+                        ha="center", va="bottom")
 
         width = len(x_slc)
         height = (nz / ny) * 2.75
@@ -772,14 +778,14 @@ class FinalizeUnwarping(SimpleInterface):
         png_fnames = []
         for i, enc in enumerate(["pos", "neg"]):
 
+            # Initialize the figure and axes
             f = plt.figure(figsize=(width, height))
             gs = dict(
                 orig=plt.GridSpec(1, len(x_slc), 0, .5, 1, .95, 0, 0),
                 corr=plt.GridSpec(1, len(x_slc), 0, 0, 1, .45, 0, 0)
             )
 
-            text_kws = dict(size=7, color="w", backgroundcolor="0",
-                            ha="center", va="bottom")
+            # Add a title with the image pair correlation
             f.text(.5, .93,
                    "Original similarity: {:.2f}".format(r_vals["orig"]),
                    **text_kws)
@@ -787,6 +793,7 @@ class FinalizeUnwarping(SimpleInterface):
                    "Corrected similarity: {:.2f}".format(r_vals["corr"]),
                    **text_kws)
 
+            # Plot the image data and save the static figure
             for scan in ["orig", "corr"]:
                 axes = [f.add_subplot(pos) for pos in gs[scan]]
                 vol = pe_data[scan][i]
@@ -801,6 +808,7 @@ class FinalizeUnwarping(SimpleInterface):
                 f.savefig(png_fname, facecolor="0", edgecolor="0")
                 plt.close(f)
 
+        # Combine frames into an animated gif
         out_file = self.define_output("unwarp_gif", "unwarp.gif")
         cmdline = ["convert", "-loop", "0", "-delay", "100"]
         cmdline.extend(png_fnames)
@@ -1037,14 +1045,14 @@ class FinalizeTemplate(SimpleInterface):
 
         # Load each run's mean image and take the grand mean
         mean_img = nib.concat_images(self.inputs.mean_files)
-        mean = mean_img.load_data().mean(axis=-1)
+        mean = mean_img.get_data().mean(axis=-1)
         mean[~mask] = 0
         mean_img = self.write_image("mean_file", "mean.nii.gz",
                                     mean, affine, header)
 
         # Load each run's tsnr image and take its tsnr
         tsnr_img = nib.concat_images(self.inputs.tsnr_files)
-        tsnr_data = tsnr_img.load_data().tsnr(axis=-1)
+        tsnr_data = tsnr_img.get_data().tsnr(axis=-1)
         tsnr_data[~mask] = 0
         tsnr_img = self.write_image("tsnr_file", "tsnr.nii.gz",
                                     tsnr_data, affine, header)

@@ -272,9 +272,8 @@ class AnatomicalSegmentation(SimpleInterface):
             mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
             seg_data[mask] = seg_val
 
-        seg_file = self.define_output("seg_file", "seg.nii.gz")
-        seg_img = nib.Nifti1Image(seg_data, affine, header)
-        seg_img.to_filename(seg_file)
+        seg_img = self.write_image("seg_file", "seg.nii.gz",
+                                   seg_data, affine, header)
 
         # --- Whole brain mask
 
@@ -284,10 +283,8 @@ class AnatomicalSegmentation(SimpleInterface):
         brainmask = ndimage.binary_dilation(brainmask, iterations=2)
         brainmask = ndimage.binary_erosion(brainmask)
         brainmask = ndimage.binary_fill_holes(brainmask)
-
-        mask_file = self.define_output("mask_file", "mask.nii.gz")
-        mask_img = nib.Nifti1Image(brainmask, affine, header)
-        mask_img.to_filename(mask_file)
+        mask_img = self.write_image("mask_file", "mask.nii.gz",
+                                    brainmask.astype(np.int), affine, header)
 
         # --- Surface vertex mapping
 
@@ -309,10 +306,7 @@ class AnatomicalSegmentation(SimpleInterface):
 
         hemi_data = [nib.load(f).get_data() for f in hemi_files]
         surf = np.stack(hemi_data, axis=-1)
-
-        surf_file = self.define_output("surf_file", "surf.nii.gz")
-        surf_img = nib.Nifti1Image(surf, affine, header)
-        surf_img.to_filename(surf_file)
+        self.write_image("surf_file", "surf.nii.gz", surf, affine, header)
 
         # --- Generate QC mosaics
 
