@@ -156,13 +156,13 @@ class CarpetPlot(object):
         """Compute the time series of framewise displacements."""
         if isinstance(realign_params, str):
             rp = pd.read_csv(realign_params)
-        elif isinstance(realign_params, np.ndarray):
+        elif isinstance(realign_params, pd.DataFrame):
             rp = realign_params
         else:
             return None
 
-        r = rp.filter(regexp="rot").values
-        t = rp.filter(regexp="trans").values
+        r = rp.filter(regex="rot").values
+        t = rp.filter(regex="trans").values
         s = r * 50
         ad = np.hstack([s, t])
         rd = np.abs(np.diff(ad, axis=0))

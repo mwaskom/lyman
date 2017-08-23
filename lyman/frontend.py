@@ -228,10 +228,13 @@ def execute_workflow(args):
         wf = define_template_workflow(proj_info, subjects, qc)
     if stage == "preproc":
         exp_info = gather_experiment_info(args.experiment)
-        wf = define_preproc_workflow(proj_info, subjects, exp_info, qc)
+        session = args.session
+        if len(subjects) > 1 and session is not None:
+            raise RuntimeError("Can only specify session for single subject")
+        wf = define_preproc_workflow(proj_info, subjects, session,
+                                     exp_info, qc)
 
-    # TODO just default to putting this in the cache dir
     crash_dir = op.join(proj_info.cache_dir, "crashdumps")
-    wf.config["crashdump_dir"] = crash_dir
+    wf.config["execution"]["crashdump_dir"] = crash_dir
 
     run_workflow(wf, args)
