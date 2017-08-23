@@ -64,7 +64,10 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
     # --- Warpfield estimation using topup
 
     # Distortion warpfield estimation
-    estimate_distortions = Node(fsl.TOPUP(config="b02b0.cnf"),
+    #  TODO figure out how to parameterize for testing
+    # topup_config = op.realpath(op.join(__file__, "../../../topup_fast.cnf"))
+    topup_config = "b02b0.cnf"
+    estimate_distortions = Node(fsl.TOPUP(config=topup_config),
                                 "estimate_distortions")
 
     # Post-process the TOPUP outputs
@@ -113,13 +116,13 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
                                "restore_template")
 
     # Perform final preprocessing operations on timeseries
-    finalize_timeseries = Node(FinalizeTimeseries(experiment=exp_info.name),
+    finalize_timeseries = Node(FinalizeTimeseries(experiment=experiment),
                                "finalize_timeseries")
 
     # Perform final preprocessing operations on template
-    finalize_template = JoinNode(FinalizeTemplate(experiment=exp_info.name),
+    finalize_template = JoinNode(FinalizeTemplate(experiment=experiment),
                                  name="finalize_template",
-                                 joinsource="session_source",
+                                 joinsource="run_source",
                                  joinfield=["mean_files", "tsnr_files",
                                             "mask_files", "noise_files"])
 
@@ -212,7 +215,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (combine_postmats, restore_timeseries,
             [("out_file", "postmat")]),
         (run_input, finalize_timeseries,
-            [("run", "run_tuple"),
+            [("run_tuple", "run_tuple"),
              ("anat_file", "anat_file"),
              ("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
@@ -232,7 +235,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (combine_postmats, restore_template,
             [("out_file", "postmat")]),
         (session_input, finalize_template,
-            [("session", "session_tuple"),
+            [("session_tuple", "session_tuple"),
              ("seg_file", "seg_file"),
              ("anat_file", "anat_file")]),
         (combine_postmats, finalize_template,
@@ -321,6 +324,9 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
         # Outputs associated with the session template
 
+        (finalize_unwarping, template_output,
+            [("warp_plot", "qc.@warp_png"),
+             ("unwarp_gif", "qc.@unwarp_gif")]),
         (fm2anat_qc, template_output,
             [("out_file", "qc.@reg_png")]),
         (finalize_template, template_output,
@@ -414,7 +420,7 @@ class SessionInput(SimpleInterface):
         phase_encoding = traits.Str()
 
     class output_spec(TraitedSpec):
-        session_key = traits.Tuple()
+        session_tuple = traits.Tuple()
         subject = traits.Str()
         session = traits.Str()
         fm_file = traits.File(exists=True)
@@ -430,7 +436,7 @@ class SessionInput(SimpleInterface):
 
         # Determine the execution parameters
         subject, session = self.inputs.session
-        self._results["session_key"] = self.inputs.session
+        self._results["session_tuple"] = self.inputs.session
         self._results["subject"] = str(subject)
         self._results["session"] = str(session)
 
@@ -513,6 +519,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         crop_frames = traits.Int(0, usedefault=True)
 
     class output_spec(TraitedSpec):
+        run_tuple = traits.Tuple()
         subject = traits.Str()
         session = traits.Str()
         run = traits.Str()
@@ -531,6 +538,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
         # Determine the parameters
         experiment = self.inputs.experiment
         subject, session, run = self.inputs.run
+        self._results["run_tuple"] = self.inputs.run
         self._results["subject"] = subject
         self._results["session"] = session
         self._results["run"] = run
@@ -637,7 +645,6 @@ class FinalizeUnwarping(SimpleInterface):
         warp_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         jacobian_file = traits.File(Exists=True)
-        corrected_plot = traits.File(exists=True)
         warp_plot = traits.File(exists=True)
         unwarp_gif = traits.File(exists=True)
 
@@ -665,8 +672,8 @@ class FinalizeUnwarping(SimpleInterface):
 
         # Average the corrected image over the final dimension and write
         corr_data_avg = corr_data.mean(axis=-1)
-        corr_img = self.write_image("corrected_file", "func.nii.gz",
-                                    corr_data_avg, affine, header)
+        self.write_image("corrected_file", "func.nii.gz",
+                         corr_data_avg, affine, header)
 
         # Save the jacobian images using the raw geometry
         self.write_image("jacobian_file", "jacobian.nii.gz",
@@ -695,12 +702,6 @@ class FinalizeUnwarping(SimpleInterface):
         mask_data = (np.abs(warp_data_y) < 4).astype(np.int)
         self.write_image("mask_file", "warp_mask.nii.gz",
                          mask_data, affine, header)
-
-        # Generate a QC image of the corrected volume
-        corrected_plot = self.define_output("corrected_plot", "func.png")
-        m = Mosaic(corr_img)
-        m.savefig(corrected_plot)
-        m.close()
 
         # Generate a QC image of the warpfield
         warp_plot = self.define_output("warp_plot", "warp.png")
@@ -1231,7 +1232,7 @@ class CoregGIF(SimpleInterface):
             ref_data = ref_img.get_data()[..., 0]
             ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
 
-        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname)
+        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname, tight=False)
 
         return runtime
 
