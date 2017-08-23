@@ -135,8 +135,7 @@ class DefineTemplateSpace(SimpleInterface):
 
         # Transform the T2w image into template space
         # TODO if we use the HCP recon enhancements instead of
-        # recon-all -T2pial (which doesn't work well!)
-        # this file won't get made
+        # recon-all -T2pial (which doesn't work well!) this file won't get made
         have_t2w = op.exists(op.join(self.mri_dir, "T2w.norm.mgz"))
         if have_t2w:
             t2w_file = self.transform_image(runtime, "T2w.norm.mgz",

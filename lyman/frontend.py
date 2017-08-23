@@ -234,7 +234,6 @@ def execute_workflow(args):
         wf = define_preproc_workflow(proj_info, subjects, session,
                                      exp_info, qc)
 
-    # TODO just default to putting this in the cache dir
     crash_dir = op.join(proj_info.cache_dir, "crashdumps")
     wf.config["execution"]["crashdump_dir"] = crash_dir
 

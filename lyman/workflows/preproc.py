@@ -1053,7 +1053,7 @@ class FinalizeTemplate(SimpleInterface):
 
         # Load each run's tsnr image and take its tsnr
         tsnr_img = nib.concat_images(self.inputs.tsnr_files)
-        tsnr_data = tsnr_img.get_data().tsnr(axis=-1)
+        tsnr_data = tsnr_img.get_data().mean(axis=-1)
         tsnr_data[~mask] = 0
         tsnr_img = self.write_image("tsnr_file", "tsnr.nii.gz",
                                     tsnr_data, affine, header)
