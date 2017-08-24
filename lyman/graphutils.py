@@ -238,7 +238,9 @@ class SimpleInterface(BaseInterface):
 
 
 def generate_iterables(scan_info, subjects, experiment, session=None):
-
+    # TODO This is preproc-specific so move it there
+    # TODO additionally we want to expand this to specify > 1 session
+    # TODO also change the order of subjects and experiment?
     subject_iterables = subjects
     session_iterables = dict()
     run_iterables = dict()

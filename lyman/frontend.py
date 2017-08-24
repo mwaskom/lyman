@@ -14,6 +14,7 @@ from moss import Bunch
 # TODO mayne defer imports?
 from .workflows.template import define_template_workflow
 from .workflows.preproc import define_preproc_workflow
+from .workflows.model import define_model_fit_workflow
 
 
 __all__ = []
@@ -110,6 +111,24 @@ def gather_experiment_info(exp_name=None, altmodel=None, args=None):
     exp_dict["name"] = exp_name
 
     return Bunch(exp_dict)
+
+
+def gather_model_info(experiment, model):
+
+    lyman_dir = os.environ["LYMAN_DIR"]
+
+    model_file = op.join(lyman_dir, "{}-{}.py".format(experiment, model))
+    if not op.exists(model_file):
+        model_file = op.join(lyman_dir, "{}.py".format(model))
+
+    module_name = "lyman_model_{}".format(model)
+    info = imp.load_source(module_name, model_file)
+
+    # TODO hacked to get going
+    fields = ["smooth_fwhm", "hpf_cutoff", "interpolate_noise"]
+    info_dict = {k: getattr(info, k) for k in fields}
+    info_dict["name"] = model
+    return Bunch(info_dict)
 
 
 def default_experiment_parameters():
@@ -217,9 +236,14 @@ def run_workflow(wf, args=None):
 
 def execute_workflow(args):
 
+    # TODO maybe this code should just be in the lyman script
+
     stage = args.stage
 
     proj_info = gather_project_info()
+
+    # TODO either both or neither of subject(s)/session(s)
+    # should be plural at this point
 
     subjects = determine_subjects(args.subject)
     qc = args.qc
@@ -233,6 +257,14 @@ def execute_workflow(args):
             raise RuntimeError("Can only specify session for single subject")
         wf = define_preproc_workflow(proj_info, subjects, session,
                                      exp_info, qc)
+    if stage == "model-fit":
+        exp_info = gather_experiment_info(args.experiment)
+        model_info = gather_model_info(args.experiment, args.model)
+        session = args.session
+        if len(subjects) > 1 and session is not None:
+            raise RuntimeError("Can only specify session for single subject")
+        wf = define_model_fit_workflow(proj_info, subjects, session,
+                                       exp_info, model_info, qc)
 
     crash_dir = op.join(proj_info.cache_dir, "crashdumps")
     wf.config["execution"]["crashdump_dir"] = crash_dir

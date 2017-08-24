@@ -27,11 +27,19 @@ def add_experiment(parser):
                         help="experiment name")
 
 
+def add_model(parser):
+    parser.add_argument("-m", "--model",
+                        metavar="name",
+                        help="model name")
+
+
 def add_execution(parser):
     parser.add_argument("-p", "--plugin",
+                        metavar="name",
                         help="nipype execution plugin")
     parser.add_argument("-n", "--nprocs",
                         type=int,
+                        metavar="number",
                         help="size of multiprocessing pool")
     parser.add_argument("-g", "--graph",
                         action="store_true",  # TODO make this take a filename
@@ -68,14 +76,13 @@ if __name__ == "__main__":
 
     # ---
 
-    model = subparsers.add_parser("model",
-                                  help="univariate glm")
-    add_subject(model)
-    add_experiment(model)
-    model.add_argument("-m", "--model",
-                       metavar="name",
-                       help="model name")
-    add_execution(model)
+    model_fit = subparsers.add_parser("model-fit",
+                                      help="fit univariate glm")
+    add_subject(model_fit)
+    add_experiment(model_fit)
+    add_model(model_fit)
+    add_session(model_fit)
+    add_execution(model_fit)
 
     # ---
 
