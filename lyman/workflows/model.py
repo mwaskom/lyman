@@ -11,7 +11,10 @@ from nipype import (Workflow, Node, MapNode, JoinNode,
 from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
 
-from .. import signals  # TODO confusingly close to scipy.signal
+from moss import Bunch
+from moss import glm as mossglm  # TODO move into lyman
+
+from .. import glm, signals  # TODO confusingly close to scipy.signal
 from ..mosaic import Mosaic
 from ..graphutils import SimpleInterface
 
@@ -81,6 +84,7 @@ def define_model_fit_workflow(proj_info, subjects, session,
              ("run", "run"),
              ("seg_file", "seg_file"),
              ("surf_file", "surf_file"),
+             ("mask_file", "mask_file"),
              ("ts_file", "ts_file"),
              ("noise_file", "noise_file"),
              ("mc_file", "mc_file")]),
@@ -121,7 +125,7 @@ def generate_iterables(scan_info, experiment, subjects, sessions=None):
             if sessions is not None and session not in sessions:
                 continue
             sess_runs = scan_info[subject][session].get(experiment, [])
-            run_tuples = [(subject, session, run) for run in sess_runs]
+            run_tuples = [(session, run) for run in sess_runs]
             run_iterables[subject].extend(run_tuples)
 
     return subject_iterables, run_iterables
@@ -142,6 +146,7 @@ class DataInput(SimpleInterface):
         run = traits.Str()
         seg_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
         ts_file = traits.File(exists=True)
         noise_file = traits.File(Exists=True)
         mc_file = traits.File(exists=True)
@@ -150,24 +155,32 @@ class DataInput(SimpleInterface):
     def _run_interface(self, runtime):
 
         subject = self.inputs.subject
-        session, run = self.inputs.run
+        session, run = self.inputs.run_tuple
+        run_key = "{}_{}".format(session, run)
+
         experiment = self.inputs.experiment
-        model = self.inputs.model_info.name
+        model = self.inputs.model
         anal_dir = self.inputs.analysis_dir
 
         template_path = op.join(anal_dir, subject, "template")
-        timeseries_path = op.join(anal_dir, subject, experiment, "timeseries")
+        timeseries_path = op.join(anal_dir, subject, experiment,
+                                  "timeseries", run_key)
 
         results = dict(
+
+            subject=subject,
+            session=session,
+            run=run,
 
             seg_file=op.join(template_path, "seg.nii.gz"),
             surf_file=op.join(template_path, "surf.nii.gz"),
 
-            mc_file=op.join(timeseries_path, "mc.csv"),
+            mask_file=op.join(timeseries_path, "mask.nii.gz"),
             ts_file=op.join(timeseries_path, "func.nii.gz"),
             noise_file=op.join(timeseries_path, "noise.nii.gz"),
+            mc_file=op.join(timeseries_path, "mc.csv"),
 
-            output_path=op.join(anal_dir, subject, experiment, model)
+            output_path=op.join(anal_dir, subject, experiment, model, run_key)
         )
         self._results.update(results)
 
@@ -186,6 +199,7 @@ class FitModel(SimpleInterface):
         seg_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
         ts_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
         noise_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
 
@@ -200,10 +214,74 @@ class FitModel(SimpleInterface):
     def _run_interface(self, runtime):
 
         subject = self.inputs.subject
-        exp_info = self.inputs.exp_info
-        model_info = self.inputs.model_info
+        session = self.inputs.session
+        run = self.inputs.run
+        exp_info = Bunch(self.inputs.exp_info)
+        model_info = Bunch(self.inputs.model_info)
         data_dir = self.inputs.data_dir
 
-        design_file = op.join(data_dir, subject, "design", model_info.name)
+        # Load the timeseries
+        ts_img = nib.load(self.inputs.ts_file)
+        affine, header = ts_img.affine, ts_img.header
+
+        # Load the anatomical segmentation and restrict to gray matter
+        run_mask = nib.load(self.inputs.mask_file).get_data().astype(np.bool)
+        seg_img = nib.load(self.inputs.seg_file)
+        seg = seg_img.get_data()
+        seg[~run_mask] = 0
+        seg[seg > 4] = 0
+
+        # Load the noise segmentation
+        # TODO this will probably be conditional
+        noise = nib.load(self.inputs.noise_file)
+
+        # Spatially filter the data
+        # TODO implement surface smoothing
+        # Using simple volumetric smoothing for now to get things running
+        fwhm = model_info.smooth_fwhm
+        gray_mask = seg > 0
+        mask_img = nib.Nifti1Image(gray_mask.astype(np.int), affine)
+        ts_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise)
+        data = ts_img.get_data()
+
+        # Compute the mean image for later
+        mean = data.mean(axis=-1)
+
+        # Temporally filter the data
+        ntp = ts_img.shape[-1]
+        hpf_matrix = mossglm.fsl_highpass_matrix(ntp,
+                                                 model_info.hpf_cutoff,
+                                                 exp_info.tr)
+        data[gray_mask] = np.dot(hpf_matrix, data[gray_mask].T).T
+        data[gray_mask] += mean[gray_mask, np.newaxis]
+        data[~gray_mask] = 0
+
+        # Define confound regressons from various sources
+
+        # Detect artifact frames
+
+        # Convert to percent signal change?
+
+        # Build the design matrix
+        design_file = op.join(data_dir, subject, "design",
+                              model_info.name + ".csv")
+        design = pd.read_csv(design_file)
+        run_rows = (design.session == session) & (design.run == run)
+        design = design.loc[run_rows]
+        # TODO better error when thisfails (maybe check earlier too)
+        assert len(design) > 0
+        dmat = mossglm.DesignMatrix(design, ntp=ntp, tr=exp_info.tr)
+        X = dmat.design_matrix.values
+
+        # Prewhiten the data
+        assert not np.isnan(data).any()
+        ts_img = nib.Nifti1Image(data, affine)
+        WY, WX = glm.prewhiten_image_data(ts_img, X, mask_img)
+
+        # Fit the final model
+
+        # Make some QC plots
+
+        # Write out the results
 
         return runtime

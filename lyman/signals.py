@@ -219,7 +219,7 @@ def smooth_cortex(surface, ts, vertvol, noisy_voxels=None, fwhm=2):
     return nib.Nifti1Image(data, ts.affine, ts.header)
 
 
-def smooth_volume(ts, fwhm, mask=None, mask_output=True):
+def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
     """Filter in volume space with an isotropic gaussian kernel.
 
     Parameters
@@ -230,6 +230,8 @@ def smooth_volume(ts, fwhm, mask=None, mask_output=True):
         Size of smoothing kernel in mm.
     mask : nibabel image
         3D binary image defining smoothing range.
+    mask : nibabel image
+        3D binary image defining noisy voxels to be interpolated out.
     mask_output : bool
         If True, apply the smoothing mask to the output.
 
@@ -243,18 +245,26 @@ def smooth_volume(ts, fwhm, mask=None, mask_output=True):
     if np.ndim(data) == 3:
         data = np.expanddims(data, 3)
 
+    # TODO use nibabel function?
     sigma = np.divide(fwhm / 2.355, ts.header.get_zooms()[:3])
 
     if mask is None:
-        mask = norm = 1
+        smooth_mask = mask = norm = 1
     else:
-        mask = mask.get_data()
-        norm = gaussian_filter(mask, sigma)
+        mask = mask.get_data().astype(np.bool)
+        if noise is None:
+            smooth_mask = mask.astype(np.float)
+        else:
+            noise = noise.get_data().astype(np.bool)
+            smooth_mask = (mask & ~noise).astype(np.float)
+        norm = gaussian_filter(smooth_mask, sigma)
 
-    for f in range(data.shape[-1]):
-        data_frame = gaussian_filter(data[..., f] * mask, sigma) / norm
-        if mask_output:
-            data_frame *= mask
-        data[..., f] = data_frame
+    # TODO squelch divide by zero warnings
+    with np.errstate(all="ignore"):
+        for f in range(data.shape[-1]):
+            data_f = gaussian_filter(data[..., f] * smooth_mask, sigma) / norm
+            if mask_output:
+                data_f[~mask] = 0
+            data[..., f] = data_f
 
     return nib.Nifti1Image(data.squeeze(), ts.affine, ts.header)
