@@ -115,3 +115,35 @@ def iterative_ols_fit(Y, X):
         SS[i] = ss_i
 
     return B, XtXinv, SS
+
+
+def iterative_contrast_estimation(B, XtXinv, SS, C):
+
+    from numpy import dot
+
+    assert B.shape[0] == XtXinv.shape[0] == SS.shape[0]
+    assert B.shape[1] == XtXinv.shape[1] == XtXinv.shape[2]
+
+    nvox, nev = B.shape
+    ncon = len(C)
+
+    G = np.empty((nvox, ncon))
+    V = np.empty((nvox, ncon))
+
+    for i in range(nvox):
+        b_i = B[i]
+        XtXinv_i = XtXinv[i]
+        ss_i = SS[i]
+
+        for j, c_j in enumerate(C):
+
+            keff_i = dot(c_j, dot(XtXinv_i, c_j))
+            g_ij = dot(c_j, b_i)
+            v_ij = keff_i * ss_i
+
+            G[i, j] = g_ij
+            V[i, j] = v_ij
+
+    T = G / np.sqrt(V)
+
+    return G, V, T

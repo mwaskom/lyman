@@ -87,6 +87,14 @@ if __name__ == "__main__":
     add_session(model_fit)
     add_execution(model_fit)
 
+    model_res = subparsers.add_parser("model-results",  # TODO model-res?
+                                      help="estimate univariate contrats")
+    add_subject(model_res)
+    add_experiment(model_res)
+    add_model(model_res)
+    add_session(model_res)
+    add_execution(model_res)
+
     # ---
 
     args = parser.parse_args()

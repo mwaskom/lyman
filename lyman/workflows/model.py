@@ -3,13 +3,10 @@ import os.path as op
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import nibabel as nib
 
-from nipype import (Workflow, Node, MapNode, JoinNode,
-                    IdentityInterface, DataSink)
+from nipype import Workflow, Node, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
-from nipype.interfaces import fsl, freesurfer as fs
 
 from moss import Bunch
 from moss import glm as mossglm  # TODO move into lyman
@@ -44,9 +41,9 @@ def define_model_fit_workflow(proj_info, subjects, session,
                       itersource=("subject_source", "subject"),
                       iterables=("run", run_iterables))
 
-    data_input = Node(DataInput(experiment=experiment,
-                                model=model,
-                                analysis_dir=proj_info.analysis_dir),
+    data_input = Node(ModelFitInput(experiment=experiment,
+                                    model=model,
+                                    analysis_dir=proj_info.analysis_dir),
                       "data_input")
 
     # --- Data filtering and model fitting
@@ -110,6 +107,93 @@ def define_model_fit_workflow(proj_info, subjects, session,
     return workflow
 
 
+def define_model_results_workflow(proj_info, subjects, session,
+                                  exp_info, model_info, qc=True):
+
+    # TODO I am copying a lot from above ...
+    # --- Workflow parameterization and data input
+
+    # We just need two levels of iterables here: one subject-level and
+    # one "flat" run-level iterable (i.e. all runs collapsing over
+    # sessions). But we want to be able to specify sessions to process.
+
+    scan_info = proj_info.scan_info
+    experiment = exp_info.name
+    model = model_info.name
+
+    iterables = generate_iterables(scan_info, experiment, subjects, session)
+    subject_iterables, run_iterables = iterables
+
+    subject_source = Node(IdentityInterface(["subject"]),
+                          name="subject_source",
+                          iterables=("subject", subject_iterables))
+
+    run_source = Node(IdentityInterface(["subject", "run"]),
+                      name="run_source",
+                      itersource=("subject_source", "subject"),
+                      iterables=("run", run_iterables))
+
+    data_input = Node(ModelResultsInput(experiment=experiment,
+                                        model=model,
+                                        analysis_dir=proj_info.analysis_dir),
+                      "data_input")
+
+    # --- Run-level contrast estimation
+
+    estimate_contrasts = Node(EstimateContrasts(exp_info=exp_info,
+                                                model_info=model_info),
+                              "estimate_contrasts")
+
+    # --- Subject-level contrast estimation
+
+    # TODO
+
+    # --- Data output
+
+    data_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                                parameterization=False),
+                       "data_output")
+
+    # === Assemble pipeline
+
+    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    workflow = Workflow(name="model_results", base_dir=cache_base)
+
+    # Connect processing nodes
+
+    processing_edges = [
+
+        (subject_source, run_source,
+            [("subject", "subject")]),
+        (subject_source, data_input,
+            [("subject", "subject")]),
+        (run_source, data_input,
+            [("run", "run_tuple")]),
+
+        (data_input, estimate_contrasts,
+            [("beta_file", "beta_file"),
+             ("ols_file", "ols_file"),
+             ("sigsqr_file", "sigsqr_file")]),
+
+        (data_input, data_output,
+            [("output_path", "container")]),
+        (estimate_contrasts, data_output,
+            [("contrast_file", "@contrast"),
+             ("variance_file", "@variance"),
+             ("tstat_file", "@tstat")]),
+
+    ]
+    workflow.connect(processing_edges)
+
+    qc_edges = [
+
+    ]
+    if qc:
+        workflow.connect(qc_edges)
+
+    return workflow
+
+
 # =========================================================================== #
 # Custom processing code
 # =========================================================================== #
@@ -131,7 +215,10 @@ def generate_iterables(scan_info, experiment, subjects, sessions=None):
     return subject_iterables, run_iterables
 
 
-class DataInput(SimpleInterface):
+# --- Workflow inputs
+
+
+class ModelFitInput(SimpleInterface):
 
     class input_spec(TraitedSpec):
         experiment = traits.Str()
@@ -187,6 +274,56 @@ class DataInput(SimpleInterface):
         return runtime
 
 
+class ModelResultsInput(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        experiment = traits.Str()
+        model = traits.Str()
+        analysis_dir = traits.Directory(exists=True)
+        subject = traits.Str()
+        run_tuple = traits.Tuple(traits.Str(), traits.Str())
+
+    class output_spec(TraitedSpec):
+        subject = traits.Str()
+        session = traits.Str()
+        run = traits.Str()
+        beta_file = traits.File(exists=True)
+        ols_file = traits.File(exists=True)
+        sigsqr_file = traits.File(exists=True)
+        output_path = traits.Directory()
+
+    def _run_interface(self, runtime):
+
+        subject = self.inputs.subject
+        session, run = self.inputs.run_tuple
+        run_key = "{}_{}".format(session, run)
+
+        experiment = self.inputs.experiment
+        model = self.inputs.model
+        anal_dir = self.inputs.analysis_dir
+
+        model_path = op.join(anal_dir, subject, experiment, model, run_key)
+
+        results = dict(
+
+            subject=subject,
+            session=session,
+            run=run,
+
+            beta_file=op.join(model_path, "beta.nii.gz"),
+            ols_file=op.join(model_path, "ols.nii.gz"),
+            sigsqr_file=op.join(model_path, "sigsqr.nii.gz"),
+
+            output_path=model_path,
+        )
+        self._results.update(results)
+
+        return runtime
+
+
+# --- Model estimation code
+
+
 class FitModel(SimpleInterface):
 
     class input_spec(TraitedSpec):
@@ -208,7 +345,7 @@ class FitModel(SimpleInterface):
         ols_file = traits.File(exists=True)  # best name?
         sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         resid_file = traits.File()  # TODO do we want?
-        design_file = traits.File(exists=True)
+        sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         design_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
@@ -301,7 +438,78 @@ class FitModel(SimpleInterface):
 
         # Write out the results
         self.write_image("beta_file", "beta.nii.gz", B_img)
+        # TODO better name for this?
         self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
         self.write_image("sigsqr_file", "sigsqr.nii.gz", SS_img)
+
+        return runtime
+
+
+class EstimateContrasts(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        exp_info = traits.Dict()
+        model_info = traits.Dict()
+        beta_file = traits.File(exists=True)
+        ols_file = traits.File(exists=True)
+        sigsqr_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        contrast_file = traits.File(exists=True)
+        variance_file = traits.File(exists=True)
+        tstat_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Load model parameters
+        beta_img = nib.load(self.inputs.beta_file)
+        affine, header = beta_img.affine, beta_img.header
+        beta_data = beta_img.get_data()
+
+        ols_img = nib.load(self.inputs.ols_file)
+        ols_data = ols_img.get_data()
+
+        sigsqr_img = nib.load(self.inputs.sigsqr_file)
+        sigsqr_data = sigsqr_img.get_data()
+
+        # Convert to matrix form
+        gray_mask = beta_data.any(axis=-1)
+        B = beta_data[gray_mask]
+        XtXinv = ols_data[gray_mask]
+        SS = sigsqr_data[gray_mask]
+
+        # Obtain list of contrast matrices
+        # TODO how are we going to do this? Hardcode for now.
+        # TODO do we want to enforce vectors or do we ever want F stats
+        C = [np.array([1, 0, 0, 0]),
+             np.array([0, 1, 0, 0]),
+             np.array([0, 0, 1, 0]),
+             np.array([0, 0, 0, 1]),
+             np.array([1, -1, 0, 0]),
+             np.array([0, 0, 1, -1])]
+
+        # Estimate the contrasts, variances, and statistics in each voxel
+        G, V, T = glm.iterative_contrast_estimation(B, XtXinv, SS, C)
+
+        # Generate the output images
+        nx, ny, nz = gray_mask.shape
+        out_shape = nx, ny, nz, len(C)
+
+        contrast_data = np.zeros(out_shape)
+        contrast_data[gray_mask] = G
+        contrast_img = nib.Nifti1Image(contrast_data, affine, header)
+
+        variance_data = np.zeros(out_shape)
+        variance_data[gray_mask] = V
+        variance_img = nib.Nifti1Image(variance_data, affine, header)
+
+        tstat_data = np.zeros(out_shape)
+        tstat_data[gray_mask] = T
+        tstat_img = nib.Nifti1Image(tstat_data, affine, header)
+
+        # Write out the output files
+        self.write_image("contrast_file", "contrast.nii.gz", contrast_img)
+        self.write_image("variance_file", "variance.nii.gz", variance_img)
+        self.write_image("tstat_file", "tstat.nii.gz", tstat_img)
 
         return runtime

@@ -14,7 +14,8 @@ from moss import Bunch
 # TODO mayne defer imports?
 from .workflows.template import define_template_workflow
 from .workflows.preproc import define_preproc_workflow
-from .workflows.model import define_model_fit_workflow
+from .workflows.model import (define_model_fit_workflow,
+                              define_model_results_workflow)
 
 
 __all__ = []
@@ -257,7 +258,7 @@ def execute_workflow(args):
             raise RuntimeError("Can only specify session for single subject")
         wf = define_preproc_workflow(proj_info, subjects, session,
                                      exp_info, qc)
-    if stage == "model-fit":
+    if stage in ["model", "model-fit"]:
         exp_info = gather_experiment_info(args.experiment)
         model_info = gather_model_info(args.experiment, args.model)
         session = args.session
@@ -265,6 +266,14 @@ def execute_workflow(args):
             raise RuntimeError("Can only specify session for single subject")
         wf = define_model_fit_workflow(proj_info, subjects, session,
                                        exp_info, model_info, qc)
+    if stage in ["model", "model-results"]:
+        exp_info = gather_experiment_info(args.experiment)
+        model_info = gather_model_info(args.experiment, args.model)
+        session = args.session
+        if len(subjects) > 1 and session is not None:
+            raise RuntimeError("Can only specify session for single subject")
+        wf = define_model_results_workflow(proj_info, subjects, session,
+                                           exp_info, model_info, qc)
 
     crash_dir = op.join(proj_info.cache_dir, "crashdumps")
     wf.config["execution"]["crashdump_dir"] = crash_dir
