@@ -48,7 +48,7 @@ def define_model_fit_workflow(proj_info, subjects, session,
 
     # --- Data filtering and model fitting
 
-    fit_model = Node(FitModel(data_dir=proj_info.data_dir,
+    fit_model = Node(ModelFit(data_dir=proj_info.data_dir,
                               exp_info=exp_info,
                               model_info=model_info),
                      "fit_model")
@@ -324,7 +324,7 @@ class ModelResultsInput(SimpleInterface):
 # --- Model estimation code
 
 
-class FitModel(SimpleInterface):
+class ModelFit(SimpleInterface):
 
     class input_spec(TraitedSpec):
         subject = traits.Str()
@@ -346,6 +346,7 @@ class FitModel(SimpleInterface):
         sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         resid_file = traits.File()  # TODO do we want?
         sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
+        design_file = traits.File(exists=True)
         design_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
@@ -386,9 +387,9 @@ class FitModel(SimpleInterface):
 
         # Temporally filter the data
         ntp = ts_img.shape[-1]
-        hpf_matrix = mossglm.fsl_highpass_matrix(ntp,
-                                                 model_info.hpf_cutoff,
-                                                 exp_info.tr)
+        hpf_matrix = glm.highpass_matrix(ntp,
+                                         model_info.hpf_cutoff,
+                                         exp_info.tr)
         data[gray_mask] = np.dot(hpf_matrix, data[gray_mask].T).T
         data[gray_mask] += mean[gray_mask, np.newaxis]
         data[~gray_mask] = 0
@@ -410,7 +411,14 @@ class FitModel(SimpleInterface):
         dmat = mossglm.DesignMatrix(design, ntp=ntp, tr=exp_info.tr)
         X = dmat.design_matrix.values
 
+        # Save out the design matrix
+        design_file = self.define_output("design_file", "design.csv")
+        dmat.design_matrix.to_csv(design_file)
+
         # Prewhiten the data
+        # TODO should we rewrite this so we don't need to keep the full
+        # timeseries image around (it is large!), potentially cutting
+        # down on memory usage?
         assert not np.isnan(data).any()
         ts_img = nib.Nifti1Image(data, affine)
         WY, WX = glm.prewhiten_image_data(ts_img, X, mask_img)

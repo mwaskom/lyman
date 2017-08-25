@@ -1,4 +1,7 @@
+from __future__ import division
 import numpy as np
+import scipy as sp
+from scipy import sparse
 import nibabel as nib
 
 from .signals import smooth_volume
@@ -142,3 +145,72 @@ def iterative_contrast_estimation(B, XtXinv, SS, C):
     T = G / np.sqrt(V)
 
     return G, V, T
+
+
+def highpass_filter_matrix(ntp, cutoff, tr=1):
+    """Return an array to implement a gaussian running line filter.
+
+    To implement the filter, premultiply your data with this array.
+
+    Parameters
+    ----------
+    ntp : int
+        number of observations in data
+    cutoff : float
+        filter cutoff in seconds
+    tr : float
+        TR of data in seconds
+
+    Return
+    ------
+    F : ntp x ntp array
+        filter matrix
+
+    """
+    cutoff = cutoff / tr
+    sig2n = np.square(cutoff / np.sqrt(2))
+
+    kernel = np.exp(-np.square(np.arange(ntp)) / (2 * sig2n))
+    kernel = 1 / np.sqrt(2 * np.pi * sig2n) * kernel
+
+    K = sp.linalg.toeplitz(kernel)
+    K = np.dot(np.diag(1 / K.sum(axis=1)), K)
+
+    H = np.empty((ntp, ntp))
+    X = np.column_stack((np.ones(ntp), np.arange(ntp)))
+    for k in range(ntp):
+        W = sparse.diags(K[k])
+        hat = np.dot(X, np.linalg.pinv(W * X) * W)
+        H[k] = hat[k]
+    F = np.eye(ntp) - H
+    return F
+
+
+def highpass_filter(data, cutoff=128, tr=2, copy=True):
+    """Highpass filter data with gaussian running line filter.
+    Parameters
+    ----------
+    data : 1d or 2d array
+        data array where first dimension is observations
+    cutoff : float
+        filter cutoff in seconds
+    tr : float
+        data TR in seconds
+    copy : boolean
+        if False data is filtered in place
+    Returns
+    -------
+    data : 1d or 2d array
+        filtered version of the data
+    """
+    if copy:
+        data = data.copy()
+    # Ensure data is in right shape
+    ntp = len(data)
+    data = np.atleast_2d(data).reshape(ntp, -1)
+
+    # Filter each column of the data
+    F = highpass_filter_matrix(ntp, cutoff, tr)
+    data[:] = np.dot(F, data)
+
+    return data.squeeze()

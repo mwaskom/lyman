@@ -274,6 +274,8 @@ class AnatomicalSegmentation(SimpleInterface):
         seg_img = self.write_image("seg_file", "seg.nii.gz",
                                    seg_data, affine, header)
 
+        # TODO Write a seg.lut for Freeview
+
         # --- Whole brain mask
 
         # Binarize the segmentation and dilate to generate a brain mask
