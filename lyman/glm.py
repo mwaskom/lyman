@@ -62,25 +62,20 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
     W_fft[1:] = 1 / np.sqrt(np.abs(acf_fft[1:]))
     W_fft /= np.sqrt(np.sum(W_fft[1:] ** 2, axis=0, keepdims=True)) / w_pad
 
-    # TODO this function is fast but pretty RAM intensive
-    # Most likely culprit is the FFTs below
-    # Think about splitting them up a little bit to trade off time/memory
-
     # Prewhiten the data
     Y_fft = fft(Y, axis=0, n=w_pad)
     WY = ifft(W_fft * Y_fft.real
               + W_fft * Y_fft.imag * 1j,
-              axis=0).real[:ntp]
+              axis=0).real[:ntp].astype(np.float32)
     assert WY.shape == (ntp, nvox)
 
     # Prewhiten the design
-    X_fft = fft(X, axis=0, n=w_pad)
-    X_fft_exp = X_fft[:, :, np.newaxis]
-    W_fft_exp = W_fft[:, np.newaxis, :]
-    WX = ifft(W_fft_exp * X_fft_exp.real
-              + W_fft_exp * X_fft_exp.imag * 1j,
-              axis=0).real[:ntp]
-    assert WX.shape == (ntp, nev, nvox)
+    WX = np.empty((ntp, nev, nvox), np.float32)
+    for i in range(nev):
+        X_i = X[:, [i]]
+        X_fft_i = fft(X_i, axis=0, n=w_pad)
+        WX_i = ifft(W_fft * X_fft_i, axis=0).real[:ntp]
+        WX[:, i, :] = WX_i.astype(np.float32)
 
     return WY, WX
 
