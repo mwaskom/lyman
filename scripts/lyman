@@ -76,6 +76,9 @@ if __name__ == "__main__":
 
     # ---
 
+    # TODO a nice API would be something like model, model-fit, and model-results
+    # We typically will want to do both, but want flexibility not to
+
     model_fit = subparsers.add_parser("model-fit",
                                       help="fit univariate glm")
     add_subject(model_fit)

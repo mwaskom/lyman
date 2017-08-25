@@ -94,7 +94,7 @@ def define_model_fit_workflow(proj_info, subjects, session,
         (fit_model, data_output,
             [("beta_file", "@beta"),
              ("ols_file", "@ols"),
-             ("sigmasquares_file", "@sigmasquares"),
+             ("sigsqr_file", "@sigsqr"),
              ("resid_file", "@resid"),
              ("design_file", "@design")]),
 
@@ -205,8 +205,8 @@ class FitModel(SimpleInterface):
 
     class output_spec(TraitedSpec):
         beta_file = traits.File(exists=True)
-        ols_file = traits.File(exists=True)
-        sigmasquares_file = traits.File(exists=True)
+        ols_file = traits.File(exists=True)  # best name?
+        sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         resid_file = traits.File()  # TODO do we want?
         design_file = traits.File(exists=True)
         design_plot = traits.File(exists=True)
@@ -279,9 +279,29 @@ class FitModel(SimpleInterface):
         WY, WX = glm.prewhiten_image_data(ts_img, X, mask_img)
 
         # Fit the final model
+        B, XtXinv, SS = glm.iterative_ols_fit(WY, WX)
+
+        # Generate output images
+        nx, ny, nz, _ = ts_img.shape
+        nev = X.shape[1]
+
+        B_data = np.zeros((nx, ny, nz, nev))
+        B_data[gray_mask] = B
+        B_img = nib.Nifti1Image(B_data, affine, header)
+
+        XtXinv_data = np.zeros((nx, ny, nz, nev, nev))
+        XtXinv_data[gray_mask] = XtXinv
+        XtXinv_img = nib.Nifti1Image(XtXinv_data, affine, header)
+
+        SS_data = np.zeros((nx, ny, nz))
+        SS_data[gray_mask] = SS
+        SS_img = nib.Nifti1Image(SS_data, affine, header)
 
         # Make some QC plots
 
         # Write out the results
+        self.write_image("beta_file", "beta.nii.gz", B_img)
+        self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
+        self.write_image("sigsqr_file", "sigsqr.nii.gz", SS_img)
 
         return runtime

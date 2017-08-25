@@ -17,6 +17,7 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
 
     nvox = mask.sum()
     ntp = ts_img.shape[-1]
+    nev = X.shape[1]
     assert X.shape[0] == ntp
 
     # Fit initial iteration OLS model in one step
@@ -61,11 +62,16 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
     W_fft[1:] = 1 / np.sqrt(np.abs(acf_fft[1:]))
     W_fft /= np.sqrt(np.sum(W_fft[1:] ** 2, axis=0, keepdims=True)) / w_pad
 
+    # TODO this function is fast but pretty RAM intensive
+    # Most likely culprit is the FFTs below
+    # Think about splitting them up a little bit to trade off time/memory
+
     # Prewhiten the data
     Y_fft = fft(Y, axis=0, n=w_pad)
     WY = ifft(W_fft * Y_fft.real
               + W_fft * Y_fft.imag * 1j,
               axis=0).real[:ntp]
+    assert WY.shape == (ntp, nvox)
 
     # Prewhiten the design
     X_fft = fft(X, axis=0, n=w_pad)
@@ -74,5 +80,38 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
     WX = ifft(W_fft_exp * X_fft_exp.real
               + W_fft_exp * X_fft_exp.imag * 1j,
               axis=0).real[:ntp]
+    assert WX.shape == (ntp, nev, nvox)
 
     return WY, WX
+
+
+def iterative_ols_fit(Y, X):
+
+    from numpy import dot
+    from numpy.linalg import pinv
+
+    assert Y.shape[0] == X.shape[0]
+    assert Y.shape[1] == X.shape[2]
+
+    ntp, nev, nvox = X.shape
+
+    B = np.empty((nvox, nev))
+    XtXinv = np.empty((nvox, nev, nev))
+    SS = np.empty(nvox)
+
+    I = np.eye(ntp)
+
+    for i in range(nvox):
+
+        y_i, X_i = Y[..., i], X[..., i]
+        XtXinv_i = pinv(dot(X_i.T, X_i))
+        b_i = dot(XtXinv_i, dot(X_i.T, y_i))
+        R_i = I - dot(X_i, dot(XtXinv_i, X_i.T))
+        r_i = dot(R_i, y_i)
+        ss_i = dot(r_i, r_i.T) / R_i.trace()
+
+        B[i] = b_i
+        XtXinv[i] = XtXinv_i
+        SS[i] = ss_i
+
+    return B, XtXinv, SS
