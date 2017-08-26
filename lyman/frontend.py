@@ -126,7 +126,7 @@ def gather_model_info(experiment, model):
     info = imp.load_source(module_name, model_file)
 
     # TODO hacked to get going
-    fields = ["smooth_fwhm", "hpf_cutoff", "interpolate_noise"]
+    fields = ["smooth_fwhm", "hpf_cutoff", "interpolate_noise", "contrasts"]
     info_dict = {k: getattr(info, k) for k in fields}
     info_dict["name"] = model
     return Bunch(info_dict)

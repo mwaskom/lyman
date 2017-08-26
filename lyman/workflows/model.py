@@ -1,11 +1,12 @@
 from __future__ import division
+import os
 import os.path as op
 
 import numpy as np
 import pandas as pd
 import nibabel as nib
 
-from nipype import Workflow, Node, IdentityInterface, DataSink
+from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 
 from moss import Bunch
@@ -140,19 +141,27 @@ def define_model_results_workflow(proj_info, subjects, session,
 
     # --- Run-level contrast estimation
 
-    estimate_contrasts = Node(EstimateContrasts(exp_info=exp_info,
-                                                model_info=model_info),
+    estimate_contrasts = Node(EstimateContrasts(model_info=model_info),
                               "estimate_contrasts")
 
     # --- Subject-level contrast estimation
 
-    # TODO
+    model_results = JoinNode(ModelResults(model_info=model_info),
+                             name="model_results",
+                             joinsource="run_source",
+                             joinfield=["contrast_files",
+                                        "variance_files",
+                                        "design_files"])
 
     # --- Data output
 
-    data_output = Node(DataSink(base_directory=proj_info.analysis_dir,
-                                parameterization=False),
-                       "data_output")
+    run_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                               parameterization=False),
+                      "run_output")
+
+    subject_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                                   parameterization=False),
+                          "subject_output")
 
     # === Assemble pipeline
 
@@ -175,12 +184,23 @@ def define_model_results_workflow(proj_info, subjects, session,
              ("ols_file", "ols_file"),
              ("sigsqr_file", "sigsqr_file")]),
 
-        (data_input, data_output,
-            [("output_path", "container")]),
-        (estimate_contrasts, data_output,
+        (data_input, model_results,
+            [("design_file", "design_files")]),
+        (estimate_contrasts, model_results,
+            [("contrast_file", "contrast_files"),
+             ("variance_file", "variance_files")]),
+
+        (data_input, run_output,
+            [("run_output_path", "container")]),
+        (estimate_contrasts, run_output,
             [("contrast_file", "@contrast"),
              ("variance_file", "@variance"),
              ("tstat_file", "@tstat")]),
+
+        (data_input, subject_output,
+            [("subject_output_path", "container")]),
+        (model_results, subject_output,
+            [("result_directories", "@results")]),
 
     ]
     workflow.connect(processing_edges)
@@ -290,7 +310,9 @@ class ModelResultsInput(SimpleInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         sigsqr_file = traits.File(exists=True)
-        output_path = traits.Directory()
+        design_file = traits.File(exists=True)
+        run_output_path = traits.Directory()
+        subject_output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
@@ -303,6 +325,7 @@ class ModelResultsInput(SimpleInterface):
         anal_dir = self.inputs.analysis_dir
 
         model_path = op.join(anal_dir, subject, experiment, model, run_key)
+        result_path = op.join(anal_dir, subject, experiment, model, "results")
 
         results = dict(
 
@@ -313,8 +336,10 @@ class ModelResultsInput(SimpleInterface):
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
             sigsqr_file=op.join(model_path, "sigsqr.nii.gz"),
+            design_file=op.join(model_path, "design.csv"),
 
-            output_path=model_path,
+            run_output_path=model_path,
+            subject_output_path=result_path,
         )
         self._results.update(results)
 
@@ -396,9 +421,15 @@ class ModelFit(SimpleInterface):
 
         # Define confound regressons from various sources
 
+        # TODO
+
         # Detect artifact frames
 
+        # TODO
+
         # Convert to percent signal change?
+
+        # TODO
 
         # Build the design matrix
         design_file = op.join(data_dir, subject, "design",
@@ -487,6 +518,7 @@ class EstimateContrasts(SimpleInterface):
         SS = sigsqr_data[gray_mask]
 
         # Obtain list of contrast matrices
+        # C = model_info.contrasts
         # TODO how are we going to do this? Hardcode for now.
         # TODO do we want to enforce vectors or do we ever want F stats
         C = [np.array([1, 0, 0, 0]),
@@ -519,5 +551,77 @@ class EstimateContrasts(SimpleInterface):
         self.write_image("contrast_file", "contrast.nii.gz", contrast_img)
         self.write_image("variance_file", "variance.nii.gz", variance_img)
         self.write_image("tstat_file", "tstat.nii.gz", tstat_img)
+
+        return runtime
+
+
+class ModelResults(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        model_info = traits.Dict()
+        contrast_files = traits.List(traits.File(exists=True))
+        variance_files = traits.List(traits.File(exists=True))
+        design_files = traits.List(traits.File(exists=True))
+
+    class output_spec(TraitedSpec):
+        result_directories = traits.List(traits.Directory(exists=True))
+
+    def _run_interface(self, runtime):
+
+        model_info = Bunch(self.inputs.model_info)
+
+        designs = [pd.read_csv(f, index_col=0)
+                   for f in self.inputs.design_files]
+        dof = np.sum([d.shape[0] - d.shape[1] for d in designs])
+
+        img = nib.load(self.inputs.contrast_files[0])
+        affine, header = img.affine, img.header
+
+        # TODO define contrasts properly accounting for missing EVs
+        result_directories = []
+        for i, contrast in enumerate(model_info.contrasts):
+
+            result_directories.append(op.abspath(contrast))
+            os.mkdir(contrast)
+
+            con_frames = []
+            var_frames = []
+
+            for con_file, var_file in zip(self.inputs.contrast_files,
+                                          self.inputs.variance_files):
+
+                con_frames.append(nib.load(con_file).get_data()[..., i])
+                var_frames.append(nib.load(var_file).get_data()[..., i])
+
+            con_data = np.stack(con_frames, axis=-1)
+            var_data = np.stack(var_frames, axis=-1)
+
+            mask = (var_data > 0).all(axis=-1)
+            shape = mask.shape
+
+            con_data = con_data[mask]
+            var_data = var_data[mask]
+
+            var_ffx = 1 / (1 / var_data).sum(axis=-1)
+            con_ffx = var_ffx * (con_data / var_data).sum(axis=-1)
+            t_ffx = con_ffx / np.sqrt(var_ffx)
+            # TODO make a zstat image?
+
+            con_vol_out = np.zeros(shape)
+            con_vol_out[mask] = con_ffx
+            con_img_out = nib.Nifti1Image(con_vol_out, affine, header)
+            con_img_out.to_filename(op.join(contrast, "contrast.nii.gz"))
+
+            var_vol_out = np.zeros(shape)
+            var_vol_out[mask] = var_ffx
+            var_img_out = nib.Nifti1Image(var_vol_out, affine, header)
+            var_img_out.to_filename(op.join(contrast, "variance.nii.gz"))
+
+            t_vol_out = np.zeros(shape)
+            t_vol_out[mask] = t_ffx
+            t_img_out = nib.Nifti1Image(t_vol_out, affine, header)
+            t_img_out.to_filename(op.join(contrast, "tstat.nii.gz"))
+
+        self._results["result_directories"] = result_directories
 
         return runtime
