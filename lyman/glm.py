@@ -30,12 +30,12 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
     assert resid_ols.shape == (ntp, nvox)
 
     # Estimate the residual autocorrelation function
-    tukey_m = int(np.round(np.sqrt(ntp)))
+    tukey_m = int(np.floor(np.sqrt(ntp)))
     acf_pad = ntp * 2 - 1
     resid_fft = fft(resid_ols, n=acf_pad, axis=0)
     acf_fft = resid_fft * resid_fft.conjugate()
     acf = ifft(acf_fft, axis=0).real[:tukey_m]
-    acf /= acf[0]
+    acf /= acf[[0]]
     assert acf.shape == (tukey_m, nvox)
 
     # Regularize the autocorrelation estimates with a tukey taper
@@ -63,7 +63,7 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
     acf_fft = fft(acf_kernel, axis=0).real
     W_fft = np.zeros((w_pad, nvox))
     W_fft[1:] = 1 / np.sqrt(np.abs(acf_fft[1:]))
-    W_fft /= np.sqrt(np.sum(W_fft[1:] ** 2, axis=0, keepdims=True)) / w_pad
+    W_fft /= np.sqrt(np.sum(W_fft[1:] ** 2, axis=0, keepdims=True) / w_pad)
 
     # Prewhiten the data
     Y_fft = fft(Y, axis=0, n=w_pad)
