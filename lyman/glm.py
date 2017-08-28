@@ -67,9 +67,7 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
 
     # Prewhiten the data
     Y_fft = fft(Y, axis=0, n=w_pad)
-    WY = ifft(W_fft * Y_fft.real
-              + W_fft * Y_fft.imag * 1j,
-              axis=0).real[:ntp].astype(np.float32)
+    WY = ifft(W_fft * Y_fft, axis=0).real[:ntp].astype(np.float32)
     assert WY.shape == (ntp, nvox)
 
     # Prewhiten the design
