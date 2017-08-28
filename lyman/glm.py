@@ -45,12 +45,15 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
     assert acf_tukey.shape == (tukey_m, nvox)
 
     # Smooth the autocorrelation estimates
-    nx, ny, nz = mask_img.shape
-    acf_img_data = np.zeros((nx, ny, nz, tukey_m))
-    acf_img_data[mask] = acf_tukey.T
-    acf_img = nib.Nifti1Image(acf_img_data, affine)
-    acf_img_smooth = smooth_volume(acf_img, smooth_fwhm, mask_img)
-    acf_smooth = acf_img_smooth.get_data()[mask].T
+    if smooth_fwhm is None:
+        acf_smooth = acf_tukey
+    else:
+        nx, ny, nz = mask_img.shape
+        acf_img_data = np.zeros((nx, ny, nz, tukey_m))
+        acf_img_data[mask] = acf_tukey.T
+        acf_img = nib.Nifti1Image(acf_img_data, affine)
+        acf_img_smooth = smooth_volume(acf_img, smooth_fwhm, mask_img)
+        acf_smooth = acf_img_smooth.get_data()[mask].T
 
     # Compute the autocorrelation kernel
     w_pad = ntp + tukey_m
@@ -153,16 +156,16 @@ def highpass_filter_matrix(ntp, cutoff, tr=1):
     Parameters
     ----------
     ntp : int
-        number of observations in data
+        Number of timepoints in data.
     cutoff : float
-        filter cutoff in seconds
+        Filter cutoff, in seconds.
     tr : float
-        TR of data in seconds
+        Temporal resolution of data, in seconds.
 
     Return
     ------
     F : ntp x ntp array
-        filter matrix
+        Filter matrix.
 
     """
     cutoff = cutoff / tr
@@ -184,30 +187,34 @@ def highpass_filter_matrix(ntp, cutoff, tr=1):
     return F
 
 
-def highpass_filter(data, cutoff=128, tr=2, copy=True):
+def highpass_filter(data, cutoff, tr=1, copy=True):
     """Highpass filter data with gaussian running line filter.
     Parameters
     ----------
     data : 1d or 2d array
-        data array where first dimension is observations
+        Data array where first dimension is time.
     cutoff : float
-        filter cutoff in seconds
+        Filter cutoff in seconds.
     tr : float
-        data TR in seconds
+        TR of data in seconds.
     copy : boolean
-        if False data is filtered in place
+        If False, data is filtered in place.
+
     Returns
     -------
     data : 1d or 2d array
-        filtered version of the data
+        Filtered version of the data.
+
     """
     if copy:
         data = data.copy()
+
     # Ensure data is in right shape
-    ntp = len(data)
-    data = np.atleast_2d(data).reshape(ntp, -1)
+    if data.ndim == 1:
+        data = data[:, np.newaxis]
 
     # Filter each column of the data
+    ntp = data.shape[0]
     F = highpass_filter_matrix(ntp, cutoff, tr)
     data[:] = np.dot(F, data)
 
