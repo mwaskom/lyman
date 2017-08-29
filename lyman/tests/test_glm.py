@@ -19,7 +19,7 @@ def test_prewhitened_glm_against_fsl():
     mask_data = np.ones(ts_data.shape[:-1], np.int)
     mask_img = nib.Nifti1Image(mask_data, np.eye(4))
 
-    WY, WX = glm.prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=None)
+    WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=None)
     B, _, _, _ = glm.iterative_ols_fit(WY, WX)
 
     # Note that while our code produces highly similar values to what we get

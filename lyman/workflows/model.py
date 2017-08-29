@@ -452,7 +452,7 @@ class ModelFit(SimpleInterface):
         # Prewhiten the data
         assert not np.isnan(data).any()
         ts_img = nib.Nifti1Image(data, affine)
-        WY, WX = glm.prewhiten_image_data(ts_img, X, mask_img)
+        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
 
         # Fit the final model
         B, XtXinv, SS, E = glm.iterative_ols_fit(WY, WX)
@@ -536,6 +536,8 @@ class EstimateContrasts(SimpleInterface):
         nx, ny, nz = gray_mask.shape
         out_shape = nx, ny, nz, len(C)
 
+        # TODO this idiom (go from an array to an image) is common and should
+        # be abstracted out somewhere
         contrast_data = np.zeros(out_shape)
         contrast_data[gray_mask] = G
         contrast_img = nib.Nifti1Image(contrast_data, affine, header)

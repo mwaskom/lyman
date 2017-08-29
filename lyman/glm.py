@@ -7,11 +7,30 @@ import nibabel as nib
 from .signals import smooth_volume
 
 
-def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
+def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
+    """Estimate autocorrelation and transform data and design for OLS.
 
+    Parameters
+    ----------
+    ts_img : nibabel image
+        4D image with fMRI data. If using autocorrelation smoothing, the
+        affine must have correct information about voxel size.
+    mask_img : nibabel image
+        3D image with mask defining voxels to include in model. Also used
+        to constrain the autocorrelation estimate smoothing.
+    X : n_tp x n_ev array
+        Design matrix array. Should have zero mean and no constant.
+    smooth_fwhm : float
+        Size (in mm) of the smoothing kernel for smoothing the autocorrelation
+        estimates. Requires that the time series image affine has correct
+        information about voxel size.
+
+    """
     from numpy.fft import fft, ifft
     from numpy.linalg import lstsq
 
+    # TODO this should be enhanced to take a segmentation image, not
+    # just a mask image. That will need to update information accodingly.
     mask = mask_img.get_data().astype(np.bool)
     affine = mask_img.affine
 
@@ -85,7 +104,31 @@ def prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=5):
 
 
 def iterative_ols_fit(Y, X):
+    """Fit an OLS model in each voxel.
 
+    The design matrix is expected to be 3D because this function is intended
+    to be used in the context of a prewhitened model, where each voxel has a
+    slightly different (whitened) design.
+
+    Parameters
+    ----------
+    Y : n_tp x n_vox array
+        Time series for each voxel.
+    X : n_tp x n_ev x n_vox array
+        Design matrix for each voxel.
+
+    Returns
+    -------
+    B : n_vox x n_ev array
+        Parameter estimates at each voxel.
+    XtXinv : n_vox x n_ev x n_ev array
+        The pinv(X' * X) matrices at each voxel.
+    SS : n_vox array
+        Model error summary at each voxel.
+    X : n_tp x n_vox array
+        Residual time series at each voxel.
+
+    """
     from numpy import dot
     from numpy.linalg import pinv
 
@@ -119,7 +162,29 @@ def iterative_ols_fit(Y, X):
 
 
 def iterative_contrast_estimation(B, XtXinv, SS, C):
+    """Compute contrast parameter and variance estimates in each voxel.
 
+    Parameters
+    ----------
+    B : n_vox x n_ev array
+        Parameter estimates for each voxel.
+    XtXinv : n_vox x n_ev x n_ev array
+        The pinv(X' * X) matrices for each voxel.
+    SS : n_vox array
+        The model error summary at each voxel.
+    C : n_con x n_ev array
+        List of contrast vectors.
+
+    Returns
+    -------
+    G : n_vox x n_con array
+        Contrast parameter estimates.
+    V : n_vox x n_con array
+        Contrast parameter variance estimates.
+    T : n_vox x n_con array
+        Contrast t statistics.
+
+    """
     from numpy import dot
 
     assert B.shape[0] == XtXinv.shape[0] == SS.shape[0]
@@ -150,10 +215,28 @@ def iterative_contrast_estimation(B, XtXinv, SS, C):
     return G, V, T
 
 
-def contrast_fixed_effects(C, V):
+def contrast_fixed_effects(G, V):
+    """Compute higher-order fixed effects parameters.
 
+    Parameters
+    ----------
+    G : n_vox x n_run array
+        First-level contrast parameter estimates.
+    V : n_Vox x n_run array
+        First-level contrast parameter variance estimates.
+
+    Returns
+    -------
+    con : n_vox array
+        Fixed effects contrast parameter estimates.
+    var : n_vox  array
+        Fixed effects contrast parameter variance estimates.
+    t : n_vox array
+        Fixed effects t statistics.
+
+    """
     var = 1 / (1 / V).sum(axis=-1)
-    con = var * (C / V).sum(axis=-1)
+    con = var * (G / V).sum(axis=-1)
     t = con / np.sqrt(var)
     return con, var, t
 
