@@ -270,10 +270,7 @@ def execute_workflow(args):
     if stage in ["model", "model-res"]:
         exp_info = gather_experiment_info(args.experiment)
         model_info = gather_model_info(args.experiment, args.model)
-        session = args.session
-        if len(subjects) > 1 and session is not None:
-            raise RuntimeError("Can only specify session for single subject")
-        wf = define_model_results_workflow(proj_info, subjects, session,
+        wf = define_model_results_workflow(proj_info, subjects,
                                            exp_info, model_info, qc)
 
     crash_dir = op.join(proj_info.cache_dir, "crashdumps")

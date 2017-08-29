@@ -108,21 +108,23 @@ def define_model_fit_workflow(proj_info, subjects, session,
     return workflow
 
 
-def define_model_results_workflow(proj_info, subjects, session,
+def define_model_results_workflow(proj_info, subjects,
                                   exp_info, model_info, qc=True):
 
     # TODO I am copying a lot from above ...
+
     # --- Workflow parameterization and data input
 
     # We just need two levels of iterables here: one subject-level and
     # one "flat" run-level iterable (i.e. all runs collapsing over
-    # sessions). But we want to be able to specify sessions to process.
+    # sessions). Unlike in the model fit workflow, we always want to process
+    # all sessions.
 
     scan_info = proj_info.scan_info
     experiment = exp_info.name
     model = model_info.name
 
-    iterables = generate_iterables(scan_info, experiment, subjects, session)
+    iterables = generate_iterables(scan_info, experiment, subjects)
     subject_iterables, run_iterables = iterables
 
     subject_source = Node(IdentityInterface(["subject"]),
