@@ -161,6 +161,11 @@ def define_model_results_workflow(proj_info, subjects,
                                parameterization=False),
                       "run_output")
 
+    results_path = Node(ModelResultsPath(analysis_dir=proj_info.analysis_dir,
+                                         experiment=experiment,
+                                         model=model),
+                        "results_path")
+
     subject_output = Node(DataSink(base_directory=proj_info.analysis_dir,
                                    parameterization=False),
                           "subject_output")
@@ -193,14 +198,16 @@ def define_model_results_workflow(proj_info, subjects,
              ("variance_file", "variance_files")]),
 
         (data_input, run_output,
-            [("run_output_path", "container")]),
+            [("output_path", "container")]),
         (estimate_contrasts, run_output,
             [("contrast_file", "@contrast"),
              ("variance_file", "@variance"),
              ("tstat_file", "@tstat")]),
 
-        (data_input, subject_output,
-            [("subject_output_path", "container")]),
+        (subject_source, results_path,
+            [("subject", "subject")]),
+        (results_path, subject_output,
+            [("output_path", "container")]),
         (model_results, subject_output,
             [("result_directories", "@results")]),
 
@@ -313,8 +320,7 @@ class ModelResultsInput(SimpleInterface):
         ols_file = traits.File(exists=True)
         sigsqr_file = traits.File(exists=True)
         design_file = traits.File(exists=True)
-        run_output_path = traits.Directory()
-        subject_output_path = traits.Directory()
+        output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
@@ -327,7 +333,6 @@ class ModelResultsInput(SimpleInterface):
         anal_dir = self.inputs.analysis_dir
 
         model_path = op.join(anal_dir, subject, experiment, model, run_key)
-        result_path = op.join(anal_dir, subject, experiment, model, "results")
 
         results = dict(
 
@@ -340,8 +345,7 @@ class ModelResultsInput(SimpleInterface):
             sigsqr_file=op.join(model_path, "sigsqr.nii.gz"),
             design_file=op.join(model_path, "design.csv"),
 
-            run_output_path=model_path,
-            subject_output_path=result_path,
+            output_path=model_path,
         )
         self._results.update(results)
 
@@ -414,9 +418,9 @@ class ModelFit(SimpleInterface):
 
         # Temporally filter the data
         ntp = ts_img.shape[-1]
-        hpf_matrix = glm.highpass_matrix(ntp,
-                                         model_info.hpf_cutoff,
-                                         exp_info.tr)
+        hpf_matrix = glm.highpass_filter_matrix(ntp,
+                                                model_info.hpf_cutoff,
+                                                exp_info.tr)
         data[gray_mask] = np.dot(hpf_matrix, data[gray_mask].T).T
 
         # TODO remove the mean from the data
@@ -474,6 +478,8 @@ class ModelFit(SimpleInterface):
         SS_data = np.zeros((nx, ny, nz))
         SS_data[gray_mask] = SS
         SS_img = nib.Nifti1Image(SS_data, affine, header)
+
+        # TODO save out the mask
 
         # Make some QC plots
 
@@ -646,4 +652,27 @@ class ModelResults(SimpleInterface):
         # simplifies placing files in subdirectories named after contrasts.
         self._results["result_directories"] = result_directories
 
+        return runtime
+
+
+class ModelResultsPath(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        analysis_dir = traits.Directory(exists=True)
+        subject = traits.Str()
+        experiment = traits.Str()
+        model = traits.Str()
+
+    class output_spec(TraitedSpec):
+        output_path = traits.Directory()
+
+    def _run_interface(self, runtime):
+
+        self._results["output_path"] = op.join(
+            self.inputs.analysis_dir,
+            self.inputs.subject,
+            self.inputs.experiment,
+            self.inputs.model,
+            "results"
+        )
         return runtime
