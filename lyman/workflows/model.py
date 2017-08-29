@@ -571,12 +571,17 @@ class ModelResults(SimpleInterface):
 
         model_info = Bunch(self.inputs.model_info)
 
-        designs = [pd.read_csv(f, index_col=0)
-                   for f in self.inputs.design_files]
-        dof = np.sum([d.shape[0] - d.shape[1] for d in designs])
+        # Load the designs to compute the first-level degrees of freedom
+        first_level_dofs = []
+        for f in self.inputs.design_files:
+            X = pd.read_csv(f, index_col=0)
+            first_level_dofs.append(X.shape[0] - X.shape[1])
+        ffx_dof = np.sum(first_level_dofs)
 
+        # Load the first file to get
         img = nib.load(self.inputs.contrast_files[0])
         affine, header = img.affine, img.header
+        vol_shape = img.shape[:3]
 
         # TODO define contrasts properly accounting for missing EVs
         result_directories = []
@@ -588,6 +593,12 @@ class ModelResults(SimpleInterface):
             con_frames = []
             var_frames = []
 
+            # Load the parameter and variance data for each run/contrast.
+            # Files are input as a list of 4D images where list entries are
+            # runs and the last axis is contrast, but we want to combine over
+            # runs for each contrast, so we need to in effect "transpose" the
+            # ordering. We do this by loading the data multiple times, which is
+            # cheap for models with reasonable numbers of contrasts.
             for con_file, var_file in zip(self.inputs.contrast_files,
                                           self.inputs.variance_files):
 
@@ -597,32 +608,38 @@ class ModelResults(SimpleInterface):
             con_data = np.stack(con_frames, axis=-1)
             var_data = np.stack(var_frames, axis=-1)
 
+            # Define a mask as voxels with nonzero variance in each run
+            # and extract voxel data as arrays
             mask = (var_data > 0).all(axis=-1)
-            shape = mask.shape
+            con = con_data[mask]
+            var = var_data[mask]
 
-            con_data = con_data[mask]
-            var_data = var_data[mask]
+            # Compute the higher-level fixed effects parameters
+            con_ffx, var_ffx, t_ffx = glm.contrast_fixed_effects(con, var)
 
-            var_ffx = 1 / (1 / var_data).sum(axis=-1)
-            con_ffx = var_ffx * (con_data / var_data).sum(axis=-1)
-            t_ffx = con_ffx / np.sqrt(var_ffx)
             # TODO make a zstat image?
 
-            con_vol_out = np.zeros(shape)
+            # Write out output images
+            con_vol_out = np.zeros(vol_shape)
             con_vol_out[mask] = con_ffx
             con_img_out = nib.Nifti1Image(con_vol_out, affine, header)
             con_img_out.to_filename(op.join(contrast, "contrast.nii.gz"))
 
-            var_vol_out = np.zeros(shape)
+            var_vol_out = np.zeros(vol_shape)
             var_vol_out[mask] = var_ffx
             var_img_out = nib.Nifti1Image(var_vol_out, affine, header)
             var_img_out.to_filename(op.join(contrast, "variance.nii.gz"))
 
-            t_vol_out = np.zeros(shape)
+            t_vol_out = np.zeros(vol_shape)
             t_vol_out[mask] = t_ffx
             t_img_out = nib.Nifti1Image(t_vol_out, affine, header)
             t_img_out.to_filename(op.join(contrast, "tstat.nii.gz"))
 
+            # TODO save out the mask?
+
+        # Output a list of directories with results.
+        # This makes the connections in the workflow more opaque, but it
+        # simplifies placing files in subdirectories named after contrasts.
         self._results["result_directories"] = result_directories
 
         return runtime

@@ -150,6 +150,14 @@ def iterative_contrast_estimation(B, XtXinv, SS, C):
     return G, V, T
 
 
+def contrast_fixed_effects(C, V):
+
+    var = 1 / (1 / V).sum(axis=-1)
+    con = var * (C / V).sum(axis=-1)
+    t = con / np.sqrt(var)
+    return con, var, t
+
+
 def highpass_filter_matrix(ntp, cutoff, tr=1):
     """Return an array to implement a gaussian running line filter.
 
