@@ -18,13 +18,13 @@ def test_prewhitened_glm_against_fsl():
     mask_img = nib.Nifti1Image(mask_data, np.eye(4))
 
     WY, WX = glm.prewhiten_image_data(ts_img, X, mask_img, smooth_fwhm=None)
-    B, _, _ = glm.iterative_ols_fit(WY, WX)
+    B, _, _, _ = glm.iterative_ols_fit(WY, WX)
 
     # Note that while our code produces highly similar values to what we get
     # from FSL, there are enough small differences that we can't simply test
     # array equality (or even almost equality to n decimals).
     # This is somewhat disconcerting, but possibly expected given the number
-    # of differences in the two approaches it is not wholly unexpected.
+    # of differences in the two implementations it is not wholly unexpected.
     # Further, there is enough small weirdness in the FSL code (i.e. the
     # autocorrelation estimates don't appear properly normalized) that it's
     # not certain that small deviations are problems in our code and not FSL.
@@ -38,3 +38,20 @@ def test_prewhitened_glm_against_fsl():
 
     B_corr = np.corrcoef(B.flat, test_data["B"].flat)[0, 1]
     assert B_corr > .999
+
+
+def test_highpass_filter_against_fsl():
+    """Test highpass filter performance against fslmaths."""
+    test_data = np.load(op.join(op.dirname(__file__), "data/hpf_data.npz"))
+
+    filt = glm.highpass_filter(test_data["orig"], test_data["cutoff"])
+
+    # Note that similar to the prewhitening, our code doesn't achieve exact
+    # parity with FSL. In the case of the hpf, this seems to be a recent
+    # development and FSL has maybe added some code to handle edge effects,
+    # as the differences are very small and occur at the beginning and end
+    # of the time series. In any case, we will test that the results are highly
+    # similar, and test basic attributes of hpf functionality elsewhere.
+
+    corr = np.corrcoef(filt.flat, test_data["filt"].flat)[0, 1]
+    assert corr > .999

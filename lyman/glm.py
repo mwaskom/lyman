@@ -184,11 +184,13 @@ def highpass_filter_matrix(ntp, cutoff, tr=1):
         hat = np.dot(X, np.linalg.pinv(W * X) * W)
         H[k] = hat[k]
     F = np.eye(ntp) - H
+
     return F
 
 
 def highpass_filter(data, cutoff, tr=1, copy=True):
     """Highpass filter data with gaussian running line filter.
+
     Parameters
     ----------
     data : 1d or 2d array
@@ -209,13 +211,23 @@ def highpass_filter(data, cutoff, tr=1, copy=True):
     if copy:
         data = data.copy()
 
-    # Ensure data is in right shape
+    # Ensure data is a matrix
     if data.ndim == 1:
+        need_squeeze = True
         data = data[:, np.newaxis]
+    else:
+        need_squeeze = False
 
     # Filter each column of the data
     ntp = data.shape[0]
     F = highpass_filter_matrix(ntp, cutoff, tr)
     data[:] = np.dot(F, data)
 
-    return data.squeeze()
+    # Remove the residueal mean of each timeseries to match FSL
+    data -= data.mean(axis=0, keepdims=True)
+
+    # Remove added dimensions
+    if need_squeeze:
+        data = data.squeeze()
+
+    return data
