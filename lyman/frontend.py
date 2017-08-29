@@ -249,6 +249,7 @@ def execute_workflow(args):
     subjects = determine_subjects(args.subject)
     qc = args.qc
 
+    # TODO Oof this logic needs to be reworked
     if stage == "template":
         wf = define_template_workflow(proj_info, subjects, qc)
     if stage == "preproc":
@@ -266,7 +267,7 @@ def execute_workflow(args):
             raise RuntimeError("Can only specify session for single subject")
         wf = define_model_fit_workflow(proj_info, subjects, session,
                                        exp_info, model_info, qc)
-    if stage in ["model", "model-results"]:
+    if stage in ["model", "model-res"]:
         exp_info = gather_experiment_info(args.experiment)
         model_info = gather_model_info(args.experiment, args.model)
         session = args.session

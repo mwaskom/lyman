@@ -80,14 +80,14 @@ if __name__ == "__main__":
     # We typically will want to do both, but want flexibility not to
 
     model_fit = subparsers.add_parser("model-fit",
-                                      help="fit univariate glm")
+                                      help="fit univariate GLM")
     add_subject(model_fit)
     add_experiment(model_fit)
     add_model(model_fit)
     add_session(model_fit)
     add_execution(model_fit)
 
-    model_res = subparsers.add_parser("model-results",  # TODO model-res?
+    model_res = subparsers.add_parser("model-res",
                                       help="estimate univariate contrats")
     add_subject(model_res)
     add_experiment(model_res)
