@@ -416,7 +416,10 @@ class ModelFit(SimpleInterface):
                                          model_info.hpf_cutoff,
                                          exp_info.tr)
         data[gray_mask] = np.dot(hpf_matrix, data[gray_mask].T).T
-        data[gray_mask] += mean[gray_mask, np.newaxis]
+
+        # TODO remove the mean from the data
+        # data[gray_mask] += mean[gray_mask, np.newaxis]
+
         data[~gray_mask] = 0
 
         # Define confound regressons from various sources
@@ -447,15 +450,12 @@ class ModelFit(SimpleInterface):
         dmat.design_matrix.to_csv(design_file)
 
         # Prewhiten the data
-        # TODO should we rewrite this so we don't need to keep the full
-        # timeseries image around (it is large!), potentially cutting
-        # down on memory usage?
         assert not np.isnan(data).any()
         ts_img = nib.Nifti1Image(data, affine)
         WY, WX = glm.prewhiten_image_data(ts_img, X, mask_img)
 
         # Fit the final model
-        B, XtXinv, SS = glm.iterative_ols_fit(WY, WX)
+        B, XtXinv, SS, E = glm.iterative_ols_fit(WY, WX)
 
         # Generate output images
         nx, ny, nz, _ = ts_img.shape
@@ -480,6 +480,7 @@ class ModelFit(SimpleInterface):
         # TODO better name for this?
         self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
         self.write_image("sigsqr_file", "sigsqr.nii.gz", SS_img)
+        # TODO optionally save residual
 
         return runtime
 

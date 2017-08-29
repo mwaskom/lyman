@@ -97,6 +97,7 @@ def iterative_ols_fit(Y, X):
     B = np.empty((nvox, nev))
     XtXinv = np.empty((nvox, nev, nev))
     SS = np.empty(nvox)
+    E = np.empty((ntp, nvox))
 
     I = np.eye(ntp)
 
@@ -106,14 +107,15 @@ def iterative_ols_fit(Y, X):
         XtXinv_i = pinv(dot(X_i.T, X_i))
         b_i = dot(XtXinv_i, dot(X_i.T, y_i))
         R_i = I - dot(X_i, dot(XtXinv_i, X_i.T))
-        r_i = dot(R_i, y_i)
-        ss_i = dot(r_i, r_i.T) / R_i.trace()
+        e_i = dot(R_i, y_i)
+        ss_i = dot(e_i, e_i.T) / R_i.trace()
 
         B[i] = b_i
         XtXinv[i] = XtXinv_i
         SS[i] = ss_i
+        E[:, i] = e_i
 
-    return B, XtXinv, SS
+    return B, XtXinv, SS, E
 
 
 def iterative_contrast_estimation(B, XtXinv, SS, C):
