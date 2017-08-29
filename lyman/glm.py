@@ -104,7 +104,7 @@ def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
 
 
 def iterative_ols_fit(Y, X):
-    """Fit an OLS model in each voxel.
+    """Fit a linear model using ordinary least squares in each voxel.
 
     The design matrix is expected to be 3D because this function is intended
     to be used in the context of a prewhitened model, where each voxel has a

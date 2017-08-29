@@ -78,6 +78,14 @@ if __name__ == "__main__":
 
     # TODO a nice API would be something like model, model-fit, and model-res
     # We typically will want to do both, but want flexibility not to
+    model_all = subparsers.add_parser("model",
+                                      help=("fit univariate GLM "
+                                            "and estimate contrasts"))
+    add_subject(model_all)
+    add_experiment(model_all)
+    add_model(model_all)
+    add_session(model_all)
+    add_execution(model_all)
 
     model_fit = subparsers.add_parser("model-fit",
                                       help="fit univariate GLM")

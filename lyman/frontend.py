@@ -226,10 +226,15 @@ def determine_engine(args):
     return plugin, plugin_args
 
 
-def run_workflow(wf, args=None):
+def run_workflow(wf, args, proj_info):
     """Run a workflow, if we asked to do so on the command line."""
+
+    crash_dir = op.join(proj_info.cache_dir, "crashdumps")
+    wf.config["execution"]["crashdump_dir"] = crash_dir
+
     if args.graph:
         wf.write_graph(args.stage, "orig", "svg")
+
     else:
         plugin, plugin_args = determine_engine(args)
         wf.run(plugin, plugin_args)
@@ -247,33 +252,36 @@ def execute_workflow(args):
     # should be plural at this point
 
     subjects = determine_subjects(args.subject)
+    session = args.session
     qc = args.qc
+
+    if len(subjects) > 1 and session is not None:
+        raise RuntimeError("Can only specify session for single subject")
 
     # TODO Oof this logic needs to be reworked
     if stage == "template":
         wf = define_template_workflow(proj_info, subjects, qc)
-    if stage == "preproc":
-        exp_info = gather_experiment_info(args.experiment)
-        session = args.session
-        if len(subjects) > 1 and session is not None:
-            raise RuntimeError("Can only specify session for single subject")
-        wf = define_preproc_workflow(proj_info, subjects, session,
-                                     exp_info, qc)
-    if stage in ["model", "model-fit"]:
-        exp_info = gather_experiment_info(args.experiment)
-        model_info = gather_model_info(args.experiment, args.model)
-        session = args.session
-        if len(subjects) > 1 and session is not None:
-            raise RuntimeError("Can only specify session for single subject")
-        wf = define_model_fit_workflow(proj_info, subjects, session,
-                                       exp_info, model_info, qc)
-    if stage in ["model", "model-res"]:
-        exp_info = gather_experiment_info(args.experiment)
-        model_info = gather_model_info(args.experiment, args.model)
-        wf = define_model_results_workflow(proj_info, subjects,
-                                           exp_info, model_info, qc)
 
-    crash_dir = op.join(proj_info.cache_dir, "crashdumps")
-    wf.config["execution"]["crashdump_dir"] = crash_dir
+    else:
+        exp_info = gather_experiment_info(args.experiment)
 
-    run_workflow(wf, args)
+        if stage == "preproc":
+            wf = define_preproc_workflow(proj_info, subjects, session,
+                                         exp_info, qc)
+
+            run_workflow(wf, args, proj_info)
+
+        else:
+            model_info = gather_model_info(args.experiment, args.model)
+
+            if stage in ["model", "model-fit"]:
+                wf = define_model_fit_workflow(proj_info, subjects, session,
+                                               exp_info, model_info, qc)
+
+                run_workflow(wf, args, proj_info)
+
+            if stage in ["model", "model-res"]:
+                wf = define_model_results_workflow(proj_info, subjects,
+                                                   exp_info, model_info, qc)
+
+                run_workflow(wf, args, proj_info)
