@@ -2,6 +2,8 @@ import os.path as op
 import numpy as np
 import nibabel as nib
 
+import numpy.testing as npt
+
 from .. import glm
 
 
@@ -55,3 +57,16 @@ def test_highpass_filter_against_fsl():
 
     corr = np.corrcoef(filt.flat, test_data["filt"].flat)[0, 1]
     assert corr > .999
+
+
+def test_fixed_effects_contrasts_against_fsl():
+    """Test higher-level fixed effects estimation against flameo."""
+    from numpy import sqrt
+    test_data = np.load(op.join(op.dirname(__file__), "data/ffx_data.npz"))
+
+    con_ffx, var_ffx, t_ffx = glm.contrast_fixed_effects(test_data["con"],
+                                                         test_data["var"])
+
+    npt.assert_array_almost_equal(con_ffx, test_data["con_ffx"], 3)
+    npt.assert_array_almost_equal(sqrt(var_ffx), sqrt(test_data["var_ffx"]), 3)
+    npt.assert_array_almost_equal(t_ffx, test_data["t_ffx"], 3)
