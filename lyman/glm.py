@@ -174,7 +174,11 @@ def iterative_ols_fit(Y, X):
     Y = Y.astype(np.float64)
     X = X.astype(np.float64)
 
+    assert Y.shape[0] == X.shape[0]
+    assert Y.shape[1] == X.shape[2]
+
     n_tp, n_ev, n_vox = X.shape
+
     B = np.empty((n_vox, n_ev), np.float32)
     SS = np.empty(n_vox, np.float32)
     XtXinv = np.empty((n_vox, n_ev, n_ev), np.float32)
@@ -237,8 +241,8 @@ def iterative_contrast_estimation(B, SS, XtXinv, C):
     for i in range(n_vox):
 
         b_i = B[i]
-        XtXinv_i = XtXinv[i]
         ss_i = SS[i]
+        XtXinv_i = XtXinv[i]
 
         for j, c_j in enumerate(C):
 
@@ -280,14 +284,14 @@ def contrast_fixed_effects(G, V):
     return con, var, t
 
 
-def highpass_filter_matrix(ntp, cutoff, tr=1):
+def highpass_filter_matrix(n_tp, cutoff, tr=1):
     """Return an array to implement a gaussian running line filter.
 
     To implement the filter, premultiply your data with this array.
 
     Parameters
     ----------
-    ntp : int
+    n_tp : int
         Number of timepoints in data.
     cutoff : float
         Filter cutoff, in seconds.
@@ -296,26 +300,26 @@ def highpass_filter_matrix(ntp, cutoff, tr=1):
 
     Return
     ------
-    F : ntp x ntp array
+    F : n_ntp x n_tp array
         Filter matrix.
 
     """
     cutoff = cutoff / tr
     sig2n = np.square(cutoff / np.sqrt(2))
 
-    kernel = np.exp(-np.square(np.arange(ntp)) / (2 * sig2n))
+    kernel = np.exp(-np.square(np.arange(n_tp)) / (2 * sig2n))
     kernel = 1 / np.sqrt(2 * np.pi * sig2n) * kernel
 
     K = sp.linalg.toeplitz(kernel)
     K = np.dot(np.diag(1 / K.sum(axis=1)), K)
 
-    H = np.empty((ntp, ntp))
-    X = np.column_stack((np.ones(ntp), np.arange(ntp)))
-    for k in range(ntp):
+    H = np.empty((n_tp, n_tp))
+    X = np.column_stack((np.ones(n_tp), np.arange(n_tp)))
+    for k in range(n_tp):
         W = sparse.diags(K[k])
         hat = np.dot(X, np.linalg.pinv(W * X) * W)
         H[k] = hat[k]
-    F = np.eye(ntp) - H
+    F = np.eye(n_tp) - H
 
     return F
 
@@ -351,9 +355,9 @@ def highpass_filter(data, cutoff, tr=1, copy=True):
         need_squeeze = False
 
     # Filter each column of the data
-    ntp = data.shape[0]
-    F = highpass_filter_matrix(ntp, cutoff, tr)
-    data[:] = np.dot(F, data)
+    n_tp = data.shape[0]
+    F = highpass_filter_matrix(n_tp, cutoff, tr)
+    data[:] = np.dot(F, data).astype(data.dtype)
 
     # Remove the residueal mean of each timeseries to match FSL
     data -= data.mean(axis=0, keepdims=True)

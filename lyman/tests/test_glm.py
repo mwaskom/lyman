@@ -196,13 +196,67 @@ class TestHighpassFilter(object):
     def test_data(self):
 
         data_path = op.join(op.dirname(__file__), "data/hpf_data.npz")
-        test_data = np.load(data_path)
+        test_data_obj = np.load(data_path)
+        test_data = dict(test_data_obj)
+
+        n_tp = test_data["orig"].shape[-1]
+        test_data["orig"] = test_data["orig"].reshape(-1, n_tp).T
+        test_data["filt"] = test_data["filt"].reshape(-1, n_tp).T
+
         yield test_data
-        test_data.close()
+        test_data_obj.close()
+
+    def test_highpass_filter_matrix(self, test_data):
+
+        n_tp = 200
+        cutoff = test_data["cutoff"]
+        tr = test_data["tr"]
+
+        F = glm.highpass_filter_matrix(n_tp, cutoff, tr)
+
+        # Test filter shape
+        assert F.shape == (n_tp, n_tp)
+
+        # Test row normalization
+        assert F.sum(axis=1) == approx(np.zeros(n_tp))
+
+    def test_highpass_filter_spectrum(self, test_data):
+
+        # TODO
+        assert True
+
+    def test_highpass_filter(self, test_data):
+
+        orig = test_data["orig"]
+        cutoff = test_data["cutoff"]
+        tr = test_data["tr"]
+
+        n_tp, n_vox = orig.shape
+
+        filt_2d = glm.highpass_filter(orig, cutoff, tr)
+        assert filt_2d.shape == (n_tp, n_vox)
+
+        filt_1d = glm.highpass_filter(orig[:, 0], cutoff, tr)
+        assert filt_1d.shape == (n_tp,)
+
+    def test_highpass_filter_copy(self, test_data):
+
+        orig = test_data["orig"].copy()
+        cutoff = test_data["cutoff"]
+
+        filt = glm.highpass_filter(orig, cutoff, copy=True)
+        assert not orig == approx(filt)
+
+        filt = glm.highpass_filter(orig, cutoff, copy=False)
+        assert orig == approx(filt)
 
     def test_highpass_filter_against_fsl(self, test_data):
-        """Test highpass filter performance against fslmaths."""
-        filt = glm.highpass_filter(test_data["orig"], test_data["cutoff"])
+
+        orig = test_data["orig"]
+        cutoff = test_data["cutoff"]
+        tr = test_data["tr"]
+
+        filt = glm.highpass_filter(orig, cutoff, tr)
 
         # Note that similar to the prewhitening, our code doesn't achieve exact
         # parity with FSL. In the case of the hpf, this seems to be a recent
@@ -211,8 +265,7 @@ class TestHighpassFilter(object):
         # In any case, we will test that the results are highly similar, and
         # test basic attributes of hpf functionality elsewhere.
 
-        corr = np.corrcoef(filt.flat, test_data["filt"].flat)[0, 1]
-        assert corr > .999
+        assert_highly_correlated(filt, test_data["filt"])
 
 
 class TestFixedEffectsContrasts(object):
@@ -221,12 +274,14 @@ class TestFixedEffectsContrasts(object):
     def test_data(self):
 
         data_path = op.join(op.dirname(__file__), "data/ffx_data.npz")
-        test_data = np.load(data_path)
+        test_data_obj = np.load(data_path)
+        test_data = dict(test_data_obj)
+
         yield test_data
-        test_data.close()
+        test_data_obj.close()
 
     def test_fixed_effects_contrasts_against_fsl(self, test_data):
-        """Test higher-level fixed effects estimation against flameo."""
+
         from numpy import sqrt
         con, var = test_data["con"], test_data["var"]
         con_ffx, var_ffx, t_ffx = glm.contrast_fixed_effects(con, var)
