@@ -41,7 +41,7 @@ def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
     affine = mask_img.affine
 
     # TODO Abstract this operation and add inverse as something like
-    # model_array_from_img, img_from_model_array
+    # matrix_from_img, img_from_matrix
     Y = ts_img.get_data()[mask].T
     Y = Y - Y.mean(axis=0)
 

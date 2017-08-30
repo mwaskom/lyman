@@ -20,6 +20,10 @@ class TestLinearModel(object):
         ts_data = test_data["ts_data"]
         test_data["ts_img"] = nib.Nifti1Image(ts_data, np.eye(4))
 
+        nx, ny, nz, n_tp = ts_data.shape
+        n_vox = nx * ny * nz
+        test_data["data_matrix_shape"] = n_tp, n_vox
+
         mask = np.ones(ts_data.shape[:-1], np.int)
         test_data["mask_img"] = nib.Nifti1Image(mask, np.eye(4))
 
@@ -27,15 +31,14 @@ class TestLinearModel(object):
         test_data_obj.close()
 
     def test_image_prewhitening_outputs(self, test_data):
-        """Test basic image interface to prewhitening."""
+
         ts_img = test_data["ts_img"]
         mask_img = test_data["mask_img"]
         X = test_data["X"]
         smooth_fwhm = None
 
+        n_tp, n_vox = test_data["data_matrix_shape"]
         _, n_ev = X.shape
-        nx, ny, nz, n_tp = test_data["ts_data"].shape
-        n_vox = nx * ny * nz
 
         # Test output shapes with the full data
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm)
@@ -44,7 +47,7 @@ class TestLinearModel(object):
 
         # Test output shapes using a more restrictive mask
         n_mask = 10
-        mask = np.zeros((nx, ny, nz), np.int)
+        mask = np.zeros(mask_img.shape, np.int)
         mask.flat[:n_mask] = 1
         mask_img = nib.Nifti1Image(mask, np.eye(4))
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm)
@@ -60,9 +63,7 @@ class TestLinearModel(object):
     def test_residual_autocorrelation_outputs(self, test_data):
 
         ts_data = test_data["ts_data"]
-        nx, ny, nz, n_tp = ts_data.shape
-        n_vox = nx * ny * nz
-
+        n_tp, n_vox = test_data["data_matrix_shape"]
         Y = ts_data.reshape(n_vox, n_tp).T
         X = test_data["X"]
 
@@ -82,12 +83,15 @@ class TestLinearModel(object):
         assert acf.shape == (tukey_m, n_vox)
 
     def test_prewhitened_glm_against_fsl(self, test_data):
-        """Test prewhitening and OLS fit against values from film_gls."""
+
         ts_img = test_data["ts_img"]
         mask_img = test_data["mask_img"]
+        n_tp, n_vox = test_data["data_matrix_shape"]
+        Y = test_data["ts_data"].reshape(n_vox, n_tp).T
         X = test_data["X"]
         smooth_fwhm = None
 
+        acf = glm.estimate_residual_autocorrelation(Y, X)
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm)
         B, _, _, _ = glm.iterative_ols_fit(WY, WX)
 
@@ -101,6 +105,9 @@ class TestLinearModel(object):
         # not certain that small deviations are problems in our code and not
         # FSL. In any case, it will suffice to test that the values are highly
         # similar.
+
+        acf_corr = np.corrcoef(acf.flat, test_data["acf"].flat)[0, 1]
+        assert acf_corr > .999
 
         WY_corr = np.corrcoef(WY.flat, test_data["WY"].flat)[0, 1]
         assert WY_corr > .999
