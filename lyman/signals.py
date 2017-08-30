@@ -225,12 +225,12 @@ def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
     Parameters
     ----------
     ts : nibabel image
-        4D timeseries data.
+        3D or 4D image data.
     fwhm : float
         Size of smoothing kernel in mm.
     mask : nibabel image
         3D binary image defining smoothing range.
-    mask : nibabel image
+    noise : nibabel image
         3D binary image defining noisy voxels to be interpolated out.
     mask_output : bool
         If True, apply the smoothing mask to the output.
@@ -243,7 +243,10 @@ def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
     """
     data = ts.get_data().copy()  # TODO allow inplace as an option
     if np.ndim(data) == 3:
+        need_squeeze = True
         data = np.expanddims(data, 3)
+    else:
+        need_squeeze = False
 
     # TODO use nibabel function?
     sigma = np.divide(fwhm / 2.355, ts.header.get_zooms()[:3])
@@ -259,7 +262,6 @@ def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
             smooth_mask = (mask & ~noise).astype(np.float)
         norm = gaussian_filter(smooth_mask, sigma)
 
-    # TODO squelch divide by zero warnings
     with np.errstate(all="ignore"):
         for f in range(data.shape[-1]):
             data_f = gaussian_filter(data[..., f] * smooth_mask, sigma) / norm
@@ -267,4 +269,7 @@ def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
                 data_f[~mask] = 0
             data[..., f] = data_f
 
-    return nib.Nifti1Image(data.squeeze(), ts.affine, ts.header)
+    if need_squeeze:
+        data = data.squeeze()
+
+    return nib.Nifti1Image(data, ts.affine, ts.header)

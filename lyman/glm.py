@@ -25,15 +25,23 @@ def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
         estimates. Requires that the time series image affine has correct
         information about voxel size.
 
+    Returns
+    -------
+    WY : n_tp x n_vox array
+        Prewhitened time series data for voxels in mask.
+    WX : n_tp x n_ev x n_vox array
+        Prewhitened design matrix for voxels in mask.
+
     """
     from numpy.fft import fft, ifft
-    from numpy.linalg import lstsq
 
     # TODO this should be enhanced to take a segmentation image, not
     # just a mask image. That will need to update information accodingly.
     mask = mask_img.get_data().astype(np.bool)
     affine = mask_img.affine
 
+    # TODO Abstract this operation and add inverse as something like
+    # model_array_from_img, img_from_model_array
     Y = ts_img.get_data()[mask].T
     Y = Y - Y.mean(axis=0)
 
@@ -42,34 +50,17 @@ def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
     nev = X.shape[1]
     assert X.shape[0] == ntp
 
-    # Fit initial iteration OLS model in one step
-    B_ols, _, _, _ = lstsq(X, Y)
-    Yhat_ols = X.dot(B_ols)
-    resid_ols = Y - Yhat_ols
-    assert resid_ols.shape == (ntp, nvox)
-
-    # Estimate the residual autocorrelation function
-    tukey_m = int(np.floor(np.sqrt(ntp)))
-    acf_pad = ntp * 2 - 1
-    resid_fft = fft(resid_ols, n=acf_pad, axis=0)
-    acf_fft = resid_fft * resid_fft.conjugate()
-    acf = ifft(acf_fft, axis=0).real[:tukey_m]
-    acf /= acf[[0]]
-    assert acf.shape == (tukey_m, nvox)
-
-    # Regularize the autocorrelation estimates with a tukey taper
-    lag = np.arange(tukey_m)
-    window = .5 * (1 + np.cos(np.pi * lag / tukey_m))
-    acf_tukey = acf * window[:, np.newaxis]
-    assert acf_tukey.shape == (tukey_m, nvox)
+    # Estimate the autocorrelation function of the model residuals
+    acf = estimate_residual_autocorrelation(Y, X)
+    tukey_m, _ = acf.shape
 
     # Smooth the autocorrelation estimates
     if smooth_fwhm is None:
-        acf_smooth = acf_tukey
+        acf_smooth = acf
     else:
         nx, ny, nz = mask_img.shape
         acf_img_data = np.zeros((nx, ny, nz, tukey_m))
-        acf_img_data[mask] = acf_tukey.T
+        acf_img_data[mask] = acf.T
         acf_img = nib.Nifti1Image(acf_img_data, affine)
         acf_img_smooth = smooth_volume(acf_img, smooth_fwhm, mask_img)
         acf_smooth = acf_img_smooth.get_data()[mask].T
@@ -101,6 +92,54 @@ def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
         WX[:, i, :] = WX_i.astype(np.float32)
 
     return WY, WX
+
+
+def estimate_residual_autocorrelation(Y, X, tukey_m=None):
+    """Fit OLS model and estimate residual autocorrelation with regularization.
+
+    Parameters
+    ----------
+    Y : n_tp x n_vox array
+        Array of time series data for multiple voxels.
+    X : n_tp x n_ev array
+        Design matrix for the model.
+    tukey_m: int or None
+        Size of tukey taper window or None to use default rule.
+
+    Returns
+    -------
+    acf : tukey_m x n_vox array
+        Regularized autocorrelation function estimate for each voxel.
+
+    """
+    from numpy.fft import fft, ifft
+
+    # Fit initial iteration OLS model in one step
+    B_ols, _, _, _ = np.linalg.lstsq(X, Y)
+    Yhat_ols = X.dot(B_ols)
+    resid_ols = Y - Yhat_ols
+
+    # Compute empircal residual autocorrelation function
+    n_tp = Y.shape[0]
+    if tukey_m is None:
+        tukey_m = default_tukey_window(n_tp)
+    acf_pad = n_tp * 2 - 1
+    resid_fft = fft(resid_ols, n=acf_pad, axis=0)
+    acf_fft = resid_fft * resid_fft.conjugate()
+    acf = ifft(acf_fft, axis=0).real[:tukey_m]
+    acf /= acf[[0]]
+
+    # Regularize the autocorrelation estimate with a tukey taper
+    lag = np.expand_dims(np.arange(tukey_m), 1)
+    window = .5 * (1 + np.cos(np.pi * lag / tukey_m))
+    acf *= window
+
+    return acf
+
+
+def default_tukey_window(n):
+    """The default rule for choosing the Tukey taper window used by FSL."""
+    return int(np.floor(np.sqrt(n)))
 
 
 def iterative_ols_fit(Y, X):
@@ -135,6 +174,7 @@ def iterative_ols_fit(Y, X):
     assert Y.shape[0] == X.shape[0]
     assert Y.shape[1] == X.shape[2]
 
+    # TODO could expand X when it is 2D for flexibility
     ntp, nev, nvox = X.shape
 
     B = np.empty((nvox, nev))
