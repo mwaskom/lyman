@@ -373,8 +373,8 @@ class ModelFit(SimpleInterface):
 
     class output_spec(TraitedSpec):
         beta_file = traits.File(exists=True)
-        ols_file = traits.File(exists=True)  # best name?
         sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
+        ols_file = traits.File(exists=True)  # best name?
         resid_file = traits.File()  # TODO do we want?
         sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         design_file = traits.File(exists=True)
@@ -461,7 +461,7 @@ class ModelFit(SimpleInterface):
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
 
         # Fit the final model
-        B, XtXinv, SS, E = glm.iterative_ols_fit(WY, WX)
+        B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
 
         # Generate output images
         nx, ny, nz, _ = ts_img.shape
@@ -471,13 +471,13 @@ class ModelFit(SimpleInterface):
         B_data[gray_mask] = B
         B_img = nib.Nifti1Image(B_data, affine, header)
 
-        XtXinv_data = np.zeros((nx, ny, nz, nev, nev))
-        XtXinv_data[gray_mask] = XtXinv
-        XtXinv_img = nib.Nifti1Image(XtXinv_data, affine, header)
-
         SS_data = np.zeros((nx, ny, nz))
         SS_data[gray_mask] = SS
         SS_img = nib.Nifti1Image(SS_data, affine, header)
+
+        XtXinv_data = np.zeros((nx, ny, nz, nev, nev))
+        XtXinv_data[gray_mask] = XtXinv
+        XtXinv_img = nib.Nifti1Image(XtXinv_data, affine, header)
 
         # TODO save out the mask
 
@@ -486,8 +486,8 @@ class ModelFit(SimpleInterface):
         # Write out the results
         self.write_image("beta_file", "beta.nii.gz", B_img)
         # TODO better name for this?
-        self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
         self.write_image("sigsqr_file", "sigsqr.nii.gz", SS_img)
+        self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
         # TODO optionally save residual
 
         return runtime
@@ -538,7 +538,7 @@ class EstimateContrasts(SimpleInterface):
              np.array([0, 0, 1, -1])]
 
         # Estimate the contrasts, variances, and statistics in each voxel
-        G, V, T = glm.iterative_contrast_estimation(B, XtXinv, SS, C)
+        G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
 
         # Generate the output images
         nx, ny, nz = gray_mask.shape

@@ -8,6 +8,11 @@ from pytest import approx
 from .. import glm
 
 
+def assert_highly_correlated(a, b, thresh=.999):
+    corr = np.corrcoef(a.flat, b.flat)[0, 1]
+    assert corr > thresh
+
+
 class TestLinearModel(object):
 
     @pytest.fixture
@@ -82,6 +87,30 @@ class TestLinearModel(object):
         acf = glm.estimate_residual_autocorrelation(Y, X, tukey_m)
         assert acf.shape == (tukey_m, n_vox)
 
+    def test_iterative_ols_fit(self, test_data):
+
+        ts_img = test_data["ts_img"]
+        mask_img = test_data["mask_img"]
+        X = test_data["X"]
+        smooth_fwhm = None
+
+        n_tp, n_vox = test_data["data_matrix_shape"]
+        _, n_ev = X.shape
+
+        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm)
+        B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
+
+        # Test output shapes
+        assert B.shape == (n_vox, n_ev)
+        assert SS.shape == (n_vox,)
+        assert XtXinv.shape == (n_vox, n_ev, n_ev)
+        assert E.shape == (n_tp, n_vox)
+
+        # Test against numpy's basic least squares estimation
+        for i in range(n_vox):
+            B_i, _, _, _ = np.linalg.lstsq(WX[:, :, i], WY[:, i])
+            assert B_i == approx(B[i])
+
     def test_prewhitened_glm_against_fsl(self, test_data):
 
         ts_img = test_data["ts_img"]
@@ -89,35 +118,48 @@ class TestLinearModel(object):
         n_tp, n_vox = test_data["data_matrix_shape"]
         Y = test_data["ts_data"].reshape(n_vox, n_tp).T
         X = test_data["X"]
+        C = test_data["C"]
         smooth_fwhm = None
 
         acf = glm.estimate_residual_autocorrelation(Y, X)
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm)
-        B, _, _, _ = glm.iterative_ols_fit(WY, WX)
+        WX_mean = WX.mean(axis=-1)
+        B, SS, XtXinv, _ = glm.iterative_ols_fit(WY, WX)
+        G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
 
         # Note that while our code produces highly similar values to what we
         # get from FSL, there are enough small differences that we can't simply
         # test array equality (or even almost equality to n decimals).  This is
-        # somewhat disconcerting, but possibly expected given the number of
-        # differences in the two implementations it is not wholly unexpected.
-        # Further, there is enough small weirdness in the FSL code (i.e. the
-        # autocorrelation estimates don't appear properly normalized) that it's
-        # not certain that small deviations are problems in our code and not
-        # FSL. In any case, it will suffice to test that the values are highly
-        # similar.
+        # somewhat disconcerting, but given the number of differences in the
+        # two implementations it is not wholly unexpected.  Further, there is
+        # enough small weirdness in the FSL code (i.e. the autocorrelation
+        # estimates don't appear properly normalized) that it's not certain
+        # that small deviations are problems in our code and not FSL. In any
+        # case, it will suffice to test that the values are highly similar.
 
-        acf_corr = np.corrcoef(acf.flat, test_data["acf"].flat)[0, 1]
-        assert acf_corr > .999
+        # Test residual autocorrelation estimate
+        assert_highly_correlated(acf, test_data["acf"])
 
-        WY_corr = np.corrcoef(WY.flat, test_data["WY"].flat)[0, 1]
-        assert WY_corr > .999
+        # Test prewhitened fMRI data
+        assert_highly_correlated(WY, test_data["WY"])
 
-        WX_mean = WX.mean(axis=-1)
-        WX_corr = np.corrcoef(WX_mean.flat, test_data["WX"].flat)[0, 1]
-        assert WX_corr > .999
+        # Test (average) prewhitened design
+        assert_highly_correlated(WX_mean, test_data["WX"])
 
-        B_corr = np.corrcoef(B.flat, test_data["B"].flat)[0, 1]
-        assert B_corr > .999
+        # Test model parameter estimates
+        assert_highly_correlated(B, test_data["B"])
+
+        # Test model error summary
+        assert_highly_correlated(SS, test_data["SS"])
+
+        # Test contrast of parameter estimates
+        assert_highly_correlated(G, test_data["G"])
+
+        # Test variance of contrast of parameter estimates
+        assert_highly_correlated(V, test_data["V"])
+
+        # Test contrast t statistics
+        assert_highly_correlated(T, test_data["T"])
 
 
 class TestHighpassFilter(object):

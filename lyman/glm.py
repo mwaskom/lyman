@@ -160,31 +160,29 @@ def iterative_ols_fit(Y, X):
     -------
     B : n_vox x n_ev array
         Parameter estimates at each voxel.
-    XtXinv : n_vox x n_ev x n_ev array
-        The pinv(X' * X) matrices at each voxel.
     SS : n_vox array
         Model error summary at each voxel.
-    X : n_tp x n_vox array
+    XtXinv : n_vox x n_ev x n_ev array
+        The pinv(X' * X) matrices at each voxel.
+    E : n_tp x n_vox array
         Residual time series at each voxel.
 
     """
     from numpy import dot
     from numpy.linalg import pinv
 
-    assert Y.shape[0] == X.shape[0]
-    assert Y.shape[1] == X.shape[2]
+    Y = Y.astype(np.float64)
+    X = X.astype(np.float64)
 
-    # TODO could expand X when it is 2D for flexibility
-    ntp, nev, nvox = X.shape
+    n_tp, n_ev, n_vox = X.shape
+    B = np.empty((n_vox, n_ev), np.float32)
+    SS = np.empty(n_vox, np.float32)
+    XtXinv = np.empty((n_vox, n_ev, n_ev), np.float32)
+    E = np.empty((n_tp, n_vox), np.float32)
 
-    B = np.empty((nvox, nev))
-    XtXinv = np.empty((nvox, nev, nev))
-    SS = np.empty(nvox)
-    E = np.empty((ntp, nvox))
+    I = np.eye(n_tp)
 
-    I = np.eye(ntp)
-
-    for i in range(nvox):
+    for i in range(n_vox):
 
         y_i, X_i = Y[..., i], X[..., i]
         XtXinv_i = pinv(dot(X_i.T, X_i))
@@ -194,24 +192,24 @@ def iterative_ols_fit(Y, X):
         ss_i = dot(e_i, e_i.T) / R_i.trace()
 
         B[i] = b_i
-        XtXinv[i] = XtXinv_i
         SS[i] = ss_i
+        XtXinv[i] = XtXinv_i
         E[:, i] = e_i
 
-    return B, XtXinv, SS, E
+    return B, SS, XtXinv, E
 
 
-def iterative_contrast_estimation(B, XtXinv, SS, C):
+def iterative_contrast_estimation(B, SS, XtXinv, C):
     """Compute contrast parameter and variance estimates in each voxel.
 
     Parameters
     ----------
     B : n_vox x n_ev array
         Parameter estimates for each voxel.
-    XtXinv : n_vox x n_ev x n_ev array
-        The pinv(X' * X) matrices for each voxel.
     SS : n_vox array
         The model error summary at each voxel.
+    XtXinv : n_vox x n_ev x n_ev array
+        The pinv(X' * X) matrices for each voxel.
     C : n_con x n_ev array
         List of contrast vectors.
 
