@@ -228,22 +228,23 @@ def iterative_contrast_estimation(B, SS, XtXinv, C):
     assert B.shape[0] == XtXinv.shape[0] == SS.shape[0]
     assert B.shape[1] == XtXinv.shape[1] == XtXinv.shape[2]
 
-    nvox, nev = B.shape
-    ncon = len(C)
+    n_vox, n_ev = B.shape
+    n_con = len(C)
 
-    G = np.empty((nvox, ncon))
-    V = np.empty((nvox, ncon))
+    G = np.empty((n_vox, n_con))
+    V = np.empty((n_vox, n_con))
 
-    for i in range(nvox):
+    for i in range(n_vox):
+
         b_i = B[i]
         XtXinv_i = XtXinv[i]
         ss_i = SS[i]
 
         for j, c_j in enumerate(C):
 
-            keff_i = dot(c_j, dot(XtXinv_i, c_j))
+            keff_ij = dot(c_j, dot(XtXinv_i, c_j))
             g_ij = dot(c_j, b_i)
-            v_ij = keff_i * ss_i
+            v_ij = keff_ij * ss_i
 
             G[i, j] = g_ij
             V[i, j] = v_ij

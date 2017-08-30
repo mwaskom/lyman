@@ -15,7 +15,7 @@ def assert_highly_correlated(a, b, thresh=.999):
 
 class TestLinearModel(object):
 
-    @pytest.fixture
+    @pytest.fixture()
     def test_data(self):
 
         data_path = op.join(op.dirname(__file__), "data/film_data.npz")
@@ -111,6 +111,34 @@ class TestLinearModel(object):
             B_i, _, _, _ = np.linalg.lstsq(WX[:, :, i], WY[:, i])
             assert B_i == approx(B[i])
 
+        # Test XtXinv symmetry
+        for XtXinv_i in XtXinv:
+            assert np.array_equal(XtXinv_i, XtXinv_i.T)
+
+    def test_iterative_contrast_estimation(self, test_data):
+
+        ts_img = test_data["ts_img"]
+        mask_img = test_data["mask_img"]
+        n_tp, n_vox = test_data["data_matrix_shape"]
+        X = test_data["X"]
+        C = test_data["C"]
+        smooth_fwhm = None
+
+        n_tp, n_vox = test_data["data_matrix_shape"]
+        n_con, n_ev = C.shape
+
+        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm)
+        B, SS, XtXinv, _ = glm.iterative_ols_fit(WY, WX)
+        G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
+
+        # Test output shapes
+        assert G.shape == (n_vox, n_con)
+        assert V.shape == (n_vox, n_con)
+        assert T.shape == (n_vox, n_con)
+
+        # Test computation of contrast parameter estimates
+        assert np.array_equal(G, np.dot(B, C.T))
+
     def test_prewhitened_glm_against_fsl(self, test_data):
 
         ts_img = test_data["ts_img"]
@@ -121,7 +149,7 @@ class TestLinearModel(object):
         C = test_data["C"]
         smooth_fwhm = None
 
-        acf = glm.estimate_residual_autocorrelation(Y, X)
+        acf = glm.estimate_residual_autocorrelation(Y - Y.mean(axis=0), X)
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm)
         WX_mean = WX.mean(axis=-1)
         B, SS, XtXinv, _ = glm.iterative_ols_fit(WY, WX)
