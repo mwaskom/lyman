@@ -15,7 +15,6 @@ from moss import glm as mossglm  # TODO move into lyman
 from .. import glm, signals  # TODO confusingly close to scipy.signal
 from ..utils import image_to_matrix, matrix_to_image
 from ..carpetplot import CarpetPlot
-from ..mosaic import Mosaic
 from ..graphutils import SimpleInterface
 
 
@@ -92,9 +91,10 @@ def define_model_fit_workflow(proj_info, subjects, session,
         (data_input, data_output,
             [("output_path", "container")]),
         (fit_model, data_output,
-            [("beta_file", "@beta"),
-             ("ols_file", "@ols"),
+            [("mask_file", "@mask"),
+             ("beta_file", "@beta"),
              ("sigsqr_file", "@sigsqr"),
+             ("ols_file", "@ols"),
              ("resid_file", "@resid"),
              ("design_file", "@design")]),
 
@@ -192,9 +192,10 @@ def define_model_results_workflow(proj_info, subjects,
             [("run", "run_tuple")]),
 
         (data_input, estimate_contrasts,
-            [("beta_file", "beta_file"),
-             ("ols_file", "ols_file"),
-             ("sigsqr_file", "sigsqr_file")]),
+            [("mask_file", "mask_file"),
+             ("beta_file", "beta_file"),
+             ("sigsqr_file", "sigsqr_file"),
+             ("ols_file", "ols_file")]),
 
         (data_input, model_results,
             [("design_file", "design_files")]),
@@ -321,6 +322,7 @@ class ModelResultsInput(SimpleInterface):
         subject = traits.Str()
         session = traits.Str()
         run = traits.Str()
+        mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         sigsqr_file = traits.File(exists=True)
@@ -345,6 +347,7 @@ class ModelResultsInput(SimpleInterface):
             session=session,
             run=run,
 
+            mask_file=op.join(model_path, "mask.nii.gz"),
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
             sigsqr_file=op.join(model_path, "sigsqr.nii.gz"),
@@ -377,11 +380,11 @@ class ModelFit(SimpleInterface):
         mc_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
+        mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
         sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         ols_file = traits.File(exists=True)  # best name?
         resid_file = traits.File()  # TODO do we want?
-        sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         design_file = traits.File(exists=True)
         design_plot = traits.File(exists=True)
         resid_plot = traits.File(exists=True)
@@ -399,14 +402,14 @@ class ModelFit(SimpleInterface):
         ts_img = nib.load(self.inputs.ts_file)
         affine, header = ts_img.affine, ts_img.header
 
-        # Load the anatomical segmentation and restrict to gray matter
+        # Load the anatomical segmentation and fine analysis mask
         run_mask = nib.load(self.inputs.mask_file).get_data() > 0
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
-        seg[~run_mask] = 0
-        seg[seg > 4] = 0
-        gray_mask = seg > 0
-        gray_img = nib.Nifti1Image(gray_mask.astype(np.int), affine, header)
+        gray_mask = (seg > 0) & (seg < 5) & run_mask
+        n_vox = gray_mask.sum()
+        # TODO change name to mask_img for future flexibility?
+        gray_img = nib.Nifti1Image(gray_mask.astype(np.int8), affine, header)
 
         # Load the noise segmentation
         # TODO this will probably be conditional
@@ -424,8 +427,8 @@ class ModelFit(SimpleInterface):
         mean = data.mean(axis=-1, keepdims=True)
 
         # Temporally filter the data
-        ntp = ts_img.shape[-1]
-        hpf_matrix = glm.highpass_filter_matrix(ntp,
+        n_tp = ts_img.shape[-1]
+        hpf_matrix = glm.highpass_filter_matrix(n_tp,
                                                 model_info.hpf_cutoff,
                                                 exp_info.tr)
         data[gray_mask] = np.dot(hpf_matrix, data[gray_mask].T).T
@@ -454,9 +457,9 @@ class ModelFit(SimpleInterface):
         design = pd.read_csv(design_file)
         run_rows = (design.session == session) & (design.run == run)
         design = design.loc[run_rows]
-        # TODO better error when thisfails (maybe check earlier too)
+        # TODO better error when this fails (maybe check earlier too)
         assert len(design) > 0
-        dmat = mossglm.DesignMatrix(design, ntp=ntp, tr=exp_info.tr)
+        dmat = mossglm.DesignMatrix(design, ntp=n_tp, tr=exp_info.tr)
         X = dmat.design_matrix.values
 
         # Save out the design matrix
@@ -471,17 +474,16 @@ class ModelFit(SimpleInterface):
         # Fit the final model
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
 
+        # Convert outputs to image format
         B_img = matrix_to_image(B.T, gray_img)
         SS_img = matrix_to_image(SS, gray_img)
-        XtXinv_flat = XtXinv.reshape(len(SS), -1)
+        XtXinv_flat = XtXinv.reshape(n_vox, -1)
         XtXinv_img = matrix_to_image(XtXinv_flat.T, gray_img)
         E_img = matrix_to_image(E, gray_img, ts_img)
 
-        # TODO save out the mask, with a qc plot
-
         # Make some QC plots
         # We want a version of the resid data with an intact mean so that
-        # the carpet plot can computer percent signal change.
+        # the carpet plot can compute percent signal change.
         # (Maybe carpetplot should accept a mean image and handle that
         # internally)?
         # TODO standarize the representation of mean in this method
@@ -495,13 +497,19 @@ class ModelFit(SimpleInterface):
         p.savefig(resid_plot)
         p.close()
 
+        # TODO design matrix QC
+
+        # TODO sigsqr/error image qc
+
+        # mask image qc
+
         # Write out the results
+        self.write_image("mask_file", "mask.nii.gz", gray_img)
         self.write_image("beta_file", "beta.nii.gz", B_img)
         self.write_image("sigsqr_file", "sigsqr.nii.gz", SS_img)
         self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
         if model_info.save_residuals:
             self.write_image("resid_file", "resid.nii.gz", E_img)
-        # TODO optionally save residual
 
         return runtime
 
@@ -511,6 +519,7 @@ class EstimateContrasts(SimpleInterface):
     class input_spec(TraitedSpec):
         exp_info = traits.Dict()
         model_info = traits.Dict()
+        mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         sigsqr_file = traits.File(exists=True)
@@ -522,19 +531,15 @@ class EstimateContrasts(SimpleInterface):
 
     def _run_interface(self, runtime):
 
-        # Load model parameters
+        # Load model fit outputs
+        mask_img = nib.load(self.inputs.mask_file)
         beta_img = nib.load(self.inputs.beta_file)
-        affine, header = beta_img.affine, beta_img.header
-        beta_data = beta_img.get_data()
-        # TODO maybe read in a mask image?
-        gray_img = nib.Nifti1Image(beta_data.all(axis=-1), affine, header)
-
         sigsqr_img = nib.load(self.inputs.sigsqr_file)
         ols_img = nib.load(self.inputs.ols_file)
 
-        B = image_to_matrix(beta_img, gray_img)
-        SS = image_to_matrix(sigsqr_img, gray_img)
-        XtXinv = image_to_matrix(ols_img, gray_img)
+        B = image_to_matrix(beta_img, mask_img)
+        SS = image_to_matrix(sigsqr_img, mask_img)
+        XtXinv = image_to_matrix(ols_img, mask_img)
 
         # Reshape the matrix form data to what the glm functions expect
         # TODO the shape/orientation of model parameter matrices needs some
@@ -559,9 +564,9 @@ class EstimateContrasts(SimpleInterface):
 
         # TODO generate zstat data?
 
-        contrast_img = matrix_to_image(G.T, gray_img)
-        variance_img = matrix_to_image(V.T, gray_img)
-        tstat_img = matrix_to_image(T.T, gray_img)
+        contrast_img = matrix_to_image(G.T, mask_img)
+        variance_img = matrix_to_image(V.T, mask_img)
+        tstat_img = matrix_to_image(T.T, mask_img)
 
         # Write out the output files
         self.write_image("contrast_file", "contrast.nii.gz", contrast_img)
@@ -587,16 +592,19 @@ class ModelResults(SimpleInterface):
         model_info = Bunch(self.inputs.model_info)
 
         # Load the designs to compute the first-level degrees of freedom
+        # TODO we only need this if we want to convert t to z
+        # which given that the t DOF is almost always > 100 is probably
+        # not necessary...
         first_level_dofs = []
         for f in self.inputs.design_files:
             X = pd.read_csv(f, index_col=0)
             first_level_dofs.append(X.shape[0] - X.shape[1])
-        ffx_dof = np.sum(first_level_dofs)
+        # ffx_dof = np.sum(first_level_dofs)  # TODO use or remove
 
-        # Load the first file to get
+        # Load the first file to get image geometry information
+        # (TODO -- do we want an explicit template image?)
         img = nib.load(self.inputs.contrast_files[0])
         affine, header = img.affine, img.header
-        vol_shape = img.shape[:3]
 
         # TODO define contrasts properly accounting for missing EVs
         result_directories = []
@@ -626,6 +634,7 @@ class ModelResults(SimpleInterface):
             # Define a mask as voxels with nonzero variance in each run
             # and extract voxel data as arrays
             mask = (var_data > 0).all(axis=-1)
+            mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
             con = con_data[mask]
             var = var_data[mask]
 
@@ -635,22 +644,14 @@ class ModelResults(SimpleInterface):
             # TODO make a zstat image?
 
             # Write out output images
-            con_vol_out = np.zeros(vol_shape)
-            con_vol_out[mask] = con_ffx
-            con_img_out = nib.Nifti1Image(con_vol_out, affine, header)
+            con_img_out = matrix_to_image(con_ffx.T, mask_img)
+            var_img_out = matrix_to_image(var_ffx.T, mask_img)
+            t_img_out = matrix_to_image(t_ffx.T, mask_img)
+
             con_img_out.to_filename(op.join(contrast, "contrast.nii.gz"))
-
-            var_vol_out = np.zeros(vol_shape)
-            var_vol_out[mask] = var_ffx
-            var_img_out = nib.Nifti1Image(var_vol_out, affine, header)
             var_img_out.to_filename(op.join(contrast, "variance.nii.gz"))
-
-            t_vol_out = np.zeros(vol_shape)
-            t_vol_out[mask] = t_ffx
-            t_img_out = nib.Nifti1Image(t_vol_out, affine, header)
             t_img_out.to_filename(op.join(contrast, "tstat.nii.gz"))
-
-            # TODO save out the mask?
+            mask_img.to_filename(op.join(contrast, "mask.nii.gz"))
 
         # Output a list of directories with results.
         # This makes the connections in the workflow more opaque, but it

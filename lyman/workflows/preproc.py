@@ -16,7 +16,7 @@ from nipype.interfaces import fsl, freesurfer as fs
 from .. import signals  # TODO confusingly close to scipy.signal
 from ..mosaic import Mosaic
 from ..carpetplot import CarpetPlot
-from ..graphutils import SimpleInterface, generate_iterables
+from ..graphutils import SimpleInterface, generate_iterables  # TODO move here
 
 
 def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):

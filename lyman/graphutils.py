@@ -157,7 +157,7 @@ def list_out_file(fname):
     return _list_outputs
 
 
-# TODO rename to LymanInterface
+# TODO rename to LymanInterface, move to utils
 class SimpleInterface(BaseInterface):
 
     def __init__(self, **inputs):
