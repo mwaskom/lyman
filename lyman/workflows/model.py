@@ -94,7 +94,7 @@ def define_model_fit_workflow(proj_info, subjects, session,
         (fit_model, data_output,
             [("mask_file", "@mask"),
              ("beta_file", "@beta"),
-             ("sigsqr_file", "@sigsqr"),
+             ("error_file", "@error"),
              ("ols_file", "@ols"),
              ("resid_file", "@resid"),
              ("design_file", "@design")]),
@@ -196,7 +196,7 @@ def define_model_results_workflow(proj_info, subjects,
         (data_input, estimate_contrasts,
             [("mask_file", "mask_file"),
              ("beta_file", "beta_file"),
-             ("sigsqr_file", "sigsqr_file"),
+             ("error_file", "error_file"),
              ("ols_file", "ols_file")]),
 
         (data_input, model_results,
@@ -298,6 +298,7 @@ class ModelFitInput(SimpleInterface):
             noise_file=op.join(timeseries_path, "noise.nii.gz"),
             mc_file=op.join(timeseries_path, "mc.csv"),
 
+            # TODO XXX why is this generating sess_02_run_04?
             output_path=op.join(anal_dir, subject, experiment, model, run_key)
         )
         self._results.update(results)
@@ -322,7 +323,7 @@ class ModelResultsInput(SimpleInterface):
         mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
-        sigsqr_file = traits.File(exists=True)
+        error_file = traits.File(exists=True)
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -349,7 +350,7 @@ class ModelResultsInput(SimpleInterface):
             mask_file=op.join(model_path, "mask.nii.gz"),
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
-            sigsqr_file=op.join(model_path, "sigsqr.nii.gz"),
+            error_file=op.join(model_path, "error.nii.gz"),
 
             output_path=model_path,
         )
@@ -380,7 +381,7 @@ class ModelFit(SimpleInterface):
     class output_spec(TraitedSpec):
         mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
-        sigsqr_file = traits.File(exists=True)  # TODO maybe call "error_file"?
+        error_file = traits.File(exists=True)  # TODO maybe call "error_file"?
         ols_file = traits.File(exists=True)  # TODO is this best name?
         resid_file = traits.File()
         design_file = traits.File(exists=True)
@@ -471,21 +472,23 @@ class ModelFit(SimpleInterface):
         # Fit the final model
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
 
+        # TODO should we re-compute the tSNR on the residuals?
+
         # Convert outputs to image format
         # TODO change to output names
-        B_img = matrix_to_image(B.T, gray_img)
-        SS_img = matrix_to_image(SS, gray_img)
+        beta_img = matrix_to_image(B.T, gray_img)
+        error_img = matrix_to_image(SS, gray_img)
         XtXinv_flat = XtXinv.reshape(n_vox, -1)
-        XtXinv_img = matrix_to_image(XtXinv_flat.T, gray_img)
-        E_img = matrix_to_image(E, gray_img, ts_img)
+        ols_img = matrix_to_image(XtXinv_flat.T, gray_img)
+        resid_img = matrix_to_image(E, gray_img, ts_img)
 
         # Write out the results
         self.write_image("mask_file", "mask.nii.gz", gray_img)
-        self.write_image("beta_file", "beta.nii.gz", B_img)
-        self.write_image("sigsqr_file", "sigsqr.nii.gz", SS_img)
-        self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
+        self.write_image("beta_file", "beta.nii.gz", beta_img)
+        self.write_image("error_file", "error.nii.gz", error_img)
+        self.write_image("ols_file", "ols.nii.gz", ols_img)
         if model_info.save_residuals:
-            self.write_image("resid_file", "resid.nii.gz", E_img)
+            self.write_image("resid_file", "resid.nii.gz", resid_img)
 
         # Make some QC plots
         # We want a version of the resid data with an intact mean so that
@@ -495,7 +498,7 @@ class ModelFit(SimpleInterface):
         # TODO standarize the representation of mean in this method
         gray_mean = mean * gray_mask
         resid_data = np.zeros(ts_img.shape, np.float32)
-        resid_data += np.expanddims(gray_mean, axis=-1)
+        resid_data += np.expand_dims(gray_mean, axis=-1)
         resid_data[gray_mask] += E.T
         resid_img = nib.Nifti1Image(resid_data, affine, header)
 
@@ -509,9 +512,9 @@ class ModelFit(SimpleInterface):
         design_plot = self.define_output("design_plot", "design.png")
         dmat.plot(fname=design_plot, close=True)
 
-        # TODO sigsqr/error image qc
+        # TODO error image qc
         error_plot = self.define_output("error_plot", "error.png")
-        error_m = Mosaic(mean_img, SS_img, gray_img)
+        error_m = Mosaic(mean_img, error_img, gray_img)
         error_m.plot_overlay("cube:.8:.2", 0, alpha=.6, fmt=".02f")
         error_m.savefig(error_plot)
         error_m.close()
@@ -529,7 +532,7 @@ class EstimateContrasts(SimpleInterface):
         mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
-        sigsqr_file = traits.File(exists=True)
+        error_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         contrast_file = traits.File(exists=True)
@@ -541,11 +544,11 @@ class EstimateContrasts(SimpleInterface):
         # Load model fit outputs
         mask_img = nib.load(self.inputs.mask_file)
         beta_img = nib.load(self.inputs.beta_file)
-        sigsqr_img = nib.load(self.inputs.sigsqr_file)
+        error_img = nib.load(self.inputs.error_file)
         ols_img = nib.load(self.inputs.ols_file)
 
         B = image_to_matrix(beta_img, mask_img)
-        SS = image_to_matrix(sigsqr_img, mask_img)
+        SS = image_to_matrix(error_img, mask_img)
         XtXinv = image_to_matrix(ols_img, mask_img)
 
         # Reshape the matrix form data to what the glm functions expect

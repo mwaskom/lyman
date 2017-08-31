@@ -244,7 +244,7 @@ def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
     data = ts.get_data().copy()  # TODO allow inplace as an option
     if np.ndim(data) == 3:
         need_squeeze = True
-        data = np.expanddims(data, 3)
+        data = np.expand_dims(data, 3)
     else:
         need_squeeze = False
 
