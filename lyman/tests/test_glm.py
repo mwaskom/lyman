@@ -1,6 +1,9 @@
+from __future__ import division
 import os.path as op
 import numpy as np
 import nibabel as nib
+
+from scipy.signal import periodogram
 
 import pytest
 from pytest import approx
@@ -139,6 +142,12 @@ class TestLinearModel(object):
         # Test computation of contrast parameter estimates
         assert np.array_equal(G, np.dot(B, C.T))
 
+        # Test that variances are all positive
+        assert np.all(V > 0)
+
+        # Test that t stats have the same sign as the effect sizes
+        assert np.all(np.sign(T) == np.sign(G))
+
     def test_prewhitened_glm_against_fsl(self, test_data):
 
         ts_img = test_data["ts_img"]
@@ -222,7 +231,30 @@ class TestHighpassFilter(object):
 
     def test_highpass_filter_spectrum(self, test_data):
 
-        # TODO
+        orig = test_data["orig"][:, 0]
+        tr = test_data["tr"]
+
+        cutoff_a = 80
+        cutoff_b = 40
+
+        fs, spec_orig = periodogram(orig, 1 / tr)
+
+        filt_a = glm.highpass_filter(orig, cutoff_a, tr)
+        filt_b = glm.highpass_filter(orig, cutoff_b, tr)
+
+        _, spec_a = periodogram(filt_a, 1 / tr)
+        _, spec_b = periodogram(filt_b, 1 / tr)
+
+        stop_a = fs < (1 / cutoff_a)
+        stop_b = fs < (1 / cutoff_b)
+
+        # Test spectral density in the approximate stop-band
+        assert spec_a[stop_a].sum() < spec_orig[stop_a].sum()
+        assert spec_b[stop_b].sum() < spec_orig[stop_b].sum()
+
+        # Test total spectral density with different cutoffs
+        assert spec_b.sum() < spec_a.sum()
+
         assert True
 
     def test_highpass_filter(self, test_data):
@@ -279,6 +311,24 @@ class TestFixedEffectsContrasts(object):
 
         yield test_data
         test_data_obj.close()
+
+    def test_fixed_effects_contrasts_outputs(self, test_data):
+
+        con, var = test_data["con"], test_data["var"]
+        n_vox, n_run = con.shape
+
+        con_ffx, var_ffx, t_ffx = glm.contrast_fixed_effects(con, var)
+
+        # Test output shapes
+        assert con_ffx.shape == (n_vox,)
+        assert var_ffx.shape == (n_vox,)
+        assert t_ffx.shape == (n_vox,)
+
+        # Test that variances are positive
+        assert np.all(var_ffx > 0)
+
+        # Test that t stats have the same sign as the effect sizes
+        assert np.all(np.sign(t_ffx) == np.sign(con_ffx))
 
     def test_fixed_effects_contrasts_against_fsl(self, test_data):
 
