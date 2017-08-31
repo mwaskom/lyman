@@ -617,16 +617,15 @@ class ModelResults(SimpleInterface):
             var_frames = []
 
             # Load the parameter and variance data for each run/contrast.
-            # Files are input as a list of 4D images where list entries are
-            # runs and the last axis is contrast, but we want to combine over
-            # runs for each contrast, so we need to in effect "transpose" the
-            # ordering. We do this by loading the data multiple times, which is
-            # cheap for models with reasonable numbers of contrasts.
-            for con_file, var_file in zip(self.inputs.contrast_files,
-                                          self.inputs.variance_files):
+            con_images = map(nib.load, self.inputs.contrast_files)
+            var_images = map(nib.load, self.inputs.variance_files)
 
-                con_frames.append(nib.load(con_file).get_data()[..., i])
-                var_frames.append(nib.load(var_file).get_data()[..., i])
+            # Files are input as a list of 4D images where list entries are
+            # runs and the last axis is contrast; we want to concatenate runs
+            # for each contrast, so we need to transpose" the ordering.
+            for con_img, var_img in zip(con_images, var_images):
+                con_frames.append(con_img.get_data()[..., i])
+                var_frames.append(var_img.get_data()[..., i])
 
             con_data = np.stack(con_frames, axis=-1)
             var_data = np.stack(var_frames, axis=-1)
@@ -641,17 +640,20 @@ class ModelResults(SimpleInterface):
             # Compute the higher-level fixed effects parameters
             con_ffx, var_ffx, t_ffx = glm.contrast_fixed_effects(con, var)
 
-            # TODO make a zstat image?
-
-            # Write out output images
+            # Convert to image volume format
             con_img_out = matrix_to_image(con_ffx.T, mask_img)
             var_img_out = matrix_to_image(var_ffx.T, mask_img)
             t_img_out = matrix_to_image(t_ffx.T, mask_img)
 
+            # TODO make a zstat image?
+
+            # Write out output images
             con_img_out.to_filename(op.join(contrast, "contrast.nii.gz"))
             var_img_out.to_filename(op.join(contrast, "variance.nii.gz"))
             t_img_out.to_filename(op.join(contrast, "tstat.nii.gz"))
             mask_img.to_filename(op.join(contrast, "mask.nii.gz"))
+
+            # TODO make QC mosaics
 
         # Output a list of directories with results.
         # This makes the connections in the workflow more opaque, but it
