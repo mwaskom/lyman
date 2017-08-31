@@ -1,3 +1,4 @@
+# TODO merge with mosaic into one plotting module
 from __future__ import division
 import numpy as np
 import pandas as pd
@@ -20,8 +21,7 @@ class CarpetPlot(object):
         """Heatmap rendering of an fMRI timeseries for quality control.
 
         The Freesurfer segmentation is used to organize data by different
-        components of the brain. The components are organized from top to
-        bottom and color-coded as follows:
+        components of the brain.
 
         Instantiating the class will load, preprocess, and plot the data.
 
@@ -31,7 +31,7 @@ class CarpetPlot(object):
             4D time series data to plot.
         wmparc : filename or nibabel image
             Freesurfer wmparc image in functional space.
-        realign_params : filename or DataFrame, optional
+        mc_params : filename or DataFrame, optional
             Text file or array of realignment parameters. If present, the time
             series of framewise displacements will be shown at the top of the
             figure.
@@ -53,6 +53,8 @@ class CarpetPlot(object):
         fd : 1d array of framewise displacements
 
         """
+        # TODO Accept mean_img and use that to convert to pct change if present
+        # TODO accept a lut? (Also make the anat segmentation generate one)
         # Load the timeseries data
         if isinstance(data, str):
             img = nib.load(data)

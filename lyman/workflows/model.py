@@ -13,6 +13,7 @@ from moss import Bunch
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals  # TODO confusingly close to scipy.signal
+from ..carpetplot import CarpetPlot
 from ..mosaic import Mosaic
 from ..graphutils import SimpleInterface
 
@@ -100,6 +101,9 @@ def define_model_fit_workflow(proj_info, subjects, session,
     workflow.connect(processing_edges)
 
     qc_edges = [
+
+        (fit_model, data_output,
+            [("resid_plot", "qc.@resid_plot")]),
 
     ]
     if qc:
@@ -379,6 +383,7 @@ class ModelFit(SimpleInterface):
         sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
         design_file = traits.File(exists=True)
         design_plot = traits.File(exists=True)
+        resid_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -414,7 +419,8 @@ class ModelFit(SimpleInterface):
         data = ts_img.get_data()
 
         # Compute the mean image for later
-        mean = data.mean(axis=-1)
+        # TODO limit togray matter voxels?
+        mean = data.mean(axis=-1, keepdims=True)
 
         # Temporally filter the data
         ntp = ts_img.shape[-1]
@@ -429,6 +435,8 @@ class ModelFit(SimpleInterface):
         data[~gray_mask] = 0
 
         # Define confound regressons from various sources
+
+        mc_data = pd.read_csv(self.inputs.mc_file)
 
         # TODO
 
@@ -479,9 +487,22 @@ class ModelFit(SimpleInterface):
         XtXinv_data[gray_mask] = XtXinv
         XtXinv_img = nib.Nifti1Image(XtXinv_data, affine, header)
 
-        # TODO save out the mask
+        # TODO save out the mask, with a qc plot
 
         # Make some QC plots
+        # We want a version of the resid data with an intact mean so that
+        # the carpet plot can computer percent signal change.
+        # (Maybe carpetplot should accept a mean image and handle that
+        # internally)?
+        gray_mean = mean * np.expand_dims(gray_mask, -1)
+        resid_data = gray_mean + np.zeros(ts_img.shape, np.float32)
+        resid_data[gray_mask] += E.T
+        resid_img = nib.Nifti1Image(resid_data, affine, header)
+
+        resid_plot = self.define_output("resid_plot", "resid.png")
+        p = CarpetPlot(resid_img, seg_img, mc_data)
+        p.savefig(resid_plot)
+        p.close()
 
         # Write out the results
         self.write_image("beta_file", "beta.nii.gz", B_img)

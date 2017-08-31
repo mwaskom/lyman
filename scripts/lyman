@@ -48,6 +48,9 @@ def add_execution(parser):
                         dest="qc", action="store_false",
                         help="don't connect qc nodes")
 
+    # TODO add a force execution option that deletes the cache dir
+    # (or sets nipype's always rerun functionality)
+
 
 # TODO add debug mode that preserves cache directory and uneccessary outputs
 
