@@ -105,7 +105,9 @@ def define_model_fit_workflow(proj_info, subjects, session,
     qc_edges = [
 
         (fit_model, data_output,
-            [("resid_plot", "qc.@resid_plot")]),
+            [("design_plot", "qc.@design_plot"),
+             ("resid_plot", "qc.@resid_plot"),
+             ("error_plot", "qc.@error_plot")]),
 
     ]
     if qc:
@@ -219,12 +221,6 @@ def define_model_results_workflow(proj_info, subjects,
 
     ]
     workflow.connect(processing_edges)
-
-    qc_edges = [
-
-    ]
-    if qc:
-        workflow.connect(qc_edges)
 
     return workflow
 
@@ -384,12 +380,13 @@ class ModelFit(SimpleInterface):
     class output_spec(TraitedSpec):
         mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
-        sigsqr_file = traits.File(exists=True)  # maybe call "error_file"?
-        ols_file = traits.File(exists=True)  # best name?
-        resid_file = traits.File()  # TODO do we want?
+        sigsqr_file = traits.File(exists=True)  # TODO maybe call "error_file"?
+        ols_file = traits.File(exists=True)  # TODO is this best name?
+        resid_file = traits.File()
         design_file = traits.File(exists=True)
-        design_plot = traits.File(exists=True)
         resid_plot = traits.File(exists=True)
+        design_plot = traits.File(exists=True)
+        error_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -414,7 +411,7 @@ class ModelFit(SimpleInterface):
         gray_img = nib.Nifti1Image(gray_mask.astype(np.int8), affine, header)
 
         # Load the noise segmentation
-        # TODO this will probably be conditional
+        # TODO implement noisy voxel removal
         noise = nib.load(self.inputs.noise_file)
 
         # Spatially filter the data
@@ -426,7 +423,8 @@ class ModelFit(SimpleInterface):
         # Compute the mean image for later
         # TODO limit to gray matter voxels?
         data = ts_img.get_data()
-        mean = data.mean(axis=-1, keepdims=True)
+        mean = data.mean(axis=-1)
+        mean_img = nib.Nifti1Image(mean, affine, header)
 
         # Temporally filter the data
         n_tp = ts_img.shape[-1]
@@ -440,20 +438,17 @@ class ModelFit(SimpleInterface):
         data[~gray_mask] = 0
 
         # Define confound regressons from various sources
-
+        # TODO
         mc_data = pd.read_csv(self.inputs.mc_file)
 
-        # TODO
-
         # Detect artifact frames
-
         # TODO
 
         # Convert to percent signal change?
-
         # TODO
 
         # Build the design matrix
+        # TODO move out of moss and simplify
         design_file = op.join(data_dir, subject, "design",
                               model_info.name + ".csv")
         design = pd.read_csv(design_file)
@@ -477,33 +472,12 @@ class ModelFit(SimpleInterface):
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
 
         # Convert outputs to image format
+        # TODO change to output names
         B_img = matrix_to_image(B.T, gray_img)
         SS_img = matrix_to_image(SS, gray_img)
         XtXinv_flat = XtXinv.reshape(n_vox, -1)
         XtXinv_img = matrix_to_image(XtXinv_flat.T, gray_img)
         E_img = matrix_to_image(E, gray_img, ts_img)
-
-        # Make some QC plots
-        # We want a version of the resid data with an intact mean so that
-        # the carpet plot can compute percent signal change.
-        # (Maybe carpetplot should accept a mean image and handle that
-        # internally)?
-        # TODO standarize the representation of mean in this method
-        gray_mean = mean * np.expand_dims(gray_mask, -1)
-        resid_data = gray_mean + np.zeros(ts_img.shape, np.float32)
-        resid_data[gray_mask] += E.T
-        resid_img = nib.Nifti1Image(resid_data, affine, header)
-
-        resid_plot = self.define_output("resid_plot", "resid.png")
-        p = CarpetPlot(resid_img, seg_img, mc_data)
-        p.savefig(resid_plot)
-        p.close()
-
-        # TODO design matrix QC
-
-        # TODO sigsqr/error image qc
-
-        # mask image qc
 
         # Write out the results
         self.write_image("mask_file", "mask.nii.gz", gray_img)
@@ -512,6 +486,37 @@ class ModelFit(SimpleInterface):
         self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
         if model_info.save_residuals:
             self.write_image("resid_file", "resid.nii.gz", E_img)
+
+        # Make some QC plots
+        # We want a version of the resid data with an intact mean so that
+        # the carpet plot can compute percent signal change.
+        # (Maybe carpetplot should accept a mean image and handle that
+        # internally)?
+        # TODO standarize the representation of mean in this method
+        gray_mean = mean * gray_mask
+        resid_data = np.zeros(ts_img.shape, np.float32)
+        resid_data += np.expanddims(gray_mean, axis=-1)
+        resid_data[gray_mask] += E.T
+        resid_img = nib.Nifti1Image(resid_data, affine, header)
+
+        resid_plot = self.define_output("resid_plot", "resid.png")
+        p = CarpetPlot(resid_img, seg_img, mc_data)
+        p.savefig(resid_plot)
+        p.close()
+
+        # Plot the deisgn matrix
+        # TODO update when improving design matrix code
+        design_plot = self.define_output("design_plot", "design.png")
+        dmat.plot(fname=design_plot, close=True)
+
+        # TODO sigsqr/error image qc
+        error_plot = self.define_output("error_plot", "error.png")
+        error_m = Mosaic(mean_img, SS_img, gray_img)
+        error_m.plot_overlay("cube:.8:.2", 0, alpha=.6, fmt=".02f")
+        error_m.savefig(error_plot)
+        error_m.close()
+
+        # mask image qc
 
         return runtime
 

@@ -467,6 +467,7 @@ class Mosaic(object):
 
     def savefig(self, fname, **kwargs):
         """Save the figure."""
+        # TODO add an option to close the figure and simplify code elsewhere
         self.fig.savefig(fname, facecolor="k", edgecolor="k", **kwargs)
 
     def close(self):
