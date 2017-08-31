@@ -14,6 +14,7 @@ from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals  # TODO confusingly close to scipy.signal
 from ..utils import image_to_matrix, matrix_to_image
+from ..mosaic import Mosaic
 from ..carpetplot import CarpetPlot
 from ..graphutils import SimpleInterface
 
@@ -157,8 +158,7 @@ def define_model_results_workflow(proj_info, subjects,
                              name="model_results",
                              joinsource="run_source",
                              joinfield=["contrast_files",
-                                        "variance_files",
-                                        "design_files"])
+                                        "variance_files"])
 
     # --- Data output
 
@@ -198,7 +198,7 @@ def define_model_results_workflow(proj_info, subjects,
              ("ols_file", "ols_file")]),
 
         (data_input, model_results,
-            [("design_file", "design_files")]),
+            [("anat_file", "anat_file")]),
         (estimate_contrasts, model_results,
             [("contrast_file", "contrast_files"),
              ("variance_file", "variance_files")]),
@@ -322,11 +322,11 @@ class ModelResultsInput(SimpleInterface):
         subject = traits.Str()
         session = traits.Str()
         run = traits.Str()
+        anat_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         sigsqr_file = traits.File(exists=True)
-        design_file = traits.File(exists=True)
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -337,9 +337,10 @@ class ModelResultsInput(SimpleInterface):
 
         experiment = self.inputs.experiment
         model = self.inputs.model
-        anal_dir = self.inputs.analysis_dir
+        analysis_dir = self.inputs.analysis_dir
 
-        model_path = op.join(anal_dir, subject, experiment, model, run_key)
+        template_path = op.join(analysis_dir, subject, "template")
+        model_path = op.join(analysis_dir, subject, experiment, model, run_key)
 
         results = dict(
 
@@ -347,11 +348,12 @@ class ModelResultsInput(SimpleInterface):
             session=session,
             run=run,
 
+            anat_file=op.join(template_path, "anat.nii.gz"),
+
             mask_file=op.join(model_path, "mask.nii.gz"),
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
             sigsqr_file=op.join(model_path, "sigsqr.nii.gz"),
-            design_file=op.join(model_path, "design.csv"),
 
             output_path=model_path,
         )
@@ -580,9 +582,9 @@ class ModelResults(SimpleInterface):
 
     class input_spec(TraitedSpec):
         model_info = traits.Dict()
+        anat_file = traits.File(exists=True)
         contrast_files = traits.List(traits.File(exists=True))
         variance_files = traits.List(traits.File(exists=True))
-        design_files = traits.List(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
         result_directories = traits.List(traits.Directory(exists=True))
@@ -591,27 +593,16 @@ class ModelResults(SimpleInterface):
 
         model_info = Bunch(self.inputs.model_info)
 
-        # Load the designs to compute the first-level degrees of freedom
-        # TODO we only need this if we want to convert t to z
-        # which given that the t DOF is almost always > 100 is probably
-        # not necessary...
-        first_level_dofs = []
-        for f in self.inputs.design_files:
-            X = pd.read_csv(f, index_col=0)
-            first_level_dofs.append(X.shape[0] - X.shape[1])
-        # ffx_dof = np.sum(first_level_dofs)  # TODO use or remove
-
-        # Load the first file to get image geometry information
-        # (TODO -- do we want an explicit template image?)
-        img = nib.load(self.inputs.contrast_files[0])
-        affine, header = img.affine, img.header
+        # Load the anatomical template to get image geometry information
+        anat_img = nib.load(self.inputs.anat_file)
+        affine, header = anat_img.affine, anat_img.header
 
         # TODO define contrasts properly accounting for missing EVs
         result_directories = []
         for i, contrast in enumerate(model_info.contrasts):
 
             result_directories.append(op.abspath(contrast))
-            os.mkdir(contrast)
+            os.makedirs(op.join(contrast, "qc"))
 
             con_frames = []
             var_frames = []
@@ -641,19 +632,25 @@ class ModelResults(SimpleInterface):
             con_ffx, var_ffx, t_ffx = glm.contrast_fixed_effects(con, var)
 
             # Convert to image volume format
-            con_img_out = matrix_to_image(con_ffx.T, mask_img)
-            var_img_out = matrix_to_image(var_ffx.T, mask_img)
-            t_img_out = matrix_to_image(t_ffx.T, mask_img)
-
-            # TODO make a zstat image?
+            con_img = matrix_to_image(con_ffx.T, mask_img)
+            var_img = matrix_to_image(var_ffx.T, mask_img)
+            t_img = matrix_to_image(t_ffx.T, mask_img)
 
             # Write out output images
-            con_img_out.to_filename(op.join(contrast, "contrast.nii.gz"))
-            var_img_out.to_filename(op.join(contrast, "variance.nii.gz"))
-            t_img_out.to_filename(op.join(contrast, "tstat.nii.gz"))
+            con_img.to_filename(op.join(contrast, "contrast.nii.gz"))
+            var_img.to_filename(op.join(contrast, "variance.nii.gz"))
+            t_img.to_filename(op.join(contrast, "tstat.nii.gz"))
             mask_img.to_filename(op.join(contrast, "mask.nii.gz"))
 
-            # TODO make QC mosaics
+            # Contrast t statistic overlay
+            stat_m = Mosaic(anat_img, t_img, mask_img, show_mask=True)
+            stat_m.plot_overlay("coolwarm", -10, 10)
+            stat_m.savefig(op.join(contrast, "qc", "tstat.png"))
+
+            # Analysis mask
+            mask_m = Mosaic(anat_img, mask_img)
+            mask_m.plot_mask()
+            mask_m.savefig(op.join(contrast, "qc", "mask.png"))
 
         # Output a list of directories with results.
         # This makes the connections in the workflow more opaque, but it
