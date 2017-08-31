@@ -1,9 +1,10 @@
 """Forward facing lyman tools with information about ecosystem."""
 import os
+import os.path as op
 import re
 import sys
 import imp
-import os.path as op
+import shutil
 import yaml
 
 import numpy as np
@@ -234,12 +235,19 @@ def run_workflow(wf, args, proj_info):
     crash_dir = op.join(proj_info.cache_dir, "crashdumps")
     wf.config["execution"]["crashdump_dir"] = crash_dir
 
+    cache_dir = op.join(wf.base_dir, wf.name)
+    if args.clear_cache:
+        if op.exists(cache_dir):
+            shutil.rmtree(cache_dir)
+
     if args.graph:
         wf.write_graph(args.stage, "orig", "svg")
 
     else:
         plugin, plugin_args = determine_engine(args)
         wf.run(plugin, plugin_args)
+
+    # TODO remove cache directory again here
 
 
 def execute_workflow(args):
@@ -254,7 +262,7 @@ def execute_workflow(args):
     # should be plural at this point
 
     subjects = determine_subjects(args.subject)
-    session = args.session
+    session = getattr(args, "session", None)
     qc = args.qc
 
     if len(subjects) > 1 and session is not None:
