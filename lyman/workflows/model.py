@@ -13,6 +13,7 @@ from moss import Bunch
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals  # TODO confusingly close to scipy.signal
+from ..utils import image_to_matrix, matrix_to_image
 from ..carpetplot import CarpetPlot
 from ..mosaic import Mosaic
 from ..graphutils import SimpleInterface
@@ -399,11 +400,13 @@ class ModelFit(SimpleInterface):
         affine, header = ts_img.affine, ts_img.header
 
         # Load the anatomical segmentation and restrict to gray matter
-        run_mask = nib.load(self.inputs.mask_file).get_data().astype(np.bool)
+        run_mask = nib.load(self.inputs.mask_file).get_data() > 0
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
         seg[~run_mask] = 0
         seg[seg > 4] = 0
+        gray_mask = seg > 0
+        gray_img = nib.Nifti1Image(gray_mask.astype(np.int), affine, header)
 
         # Load the noise segmentation
         # TODO this will probably be conditional
@@ -413,13 +416,11 @@ class ModelFit(SimpleInterface):
         # TODO implement surface smoothing
         # Using simple volumetric smoothing for now to get things running
         fwhm = model_info.smooth_fwhm
-        gray_mask = seg > 0
-        mask_img = nib.Nifti1Image(gray_mask.astype(np.int), affine)
-        ts_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise)
-        data = ts_img.get_data()
+        ts_img = signals.smooth_volume(ts_img, fwhm, gray_img, noise)
 
         # Compute the mean image for later
-        # TODO limit togray matter voxels?
+        # TODO limit to gray matter voxels?
+        data = ts_img.get_data()
         mean = data.mean(axis=-1, keepdims=True)
 
         # Temporally filter the data
@@ -431,7 +432,6 @@ class ModelFit(SimpleInterface):
 
         # TODO remove the mean from the data
         # data[gray_mask] += mean[gray_mask, np.newaxis]
-
         data[~gray_mask] = 0
 
         # Define confound regressons from various sources
@@ -466,26 +466,16 @@ class ModelFit(SimpleInterface):
         # Prewhiten the data
         assert not np.isnan(data).any()
         ts_img = nib.Nifti1Image(data, affine)
-        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
+        WY, WX = glm.prewhiten_image_data(ts_img, gray_img, X)
 
         # Fit the final model
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
 
-        # Generate output images
-        nx, ny, nz, _ = ts_img.shape
-        nev = X.shape[1]
-
-        B_data = np.zeros((nx, ny, nz, nev))
-        B_data[gray_mask] = B
-        B_img = nib.Nifti1Image(B_data, affine, header)
-
-        SS_data = np.zeros((nx, ny, nz))
-        SS_data[gray_mask] = SS
-        SS_img = nib.Nifti1Image(SS_data, affine, header)
-
-        XtXinv_data = np.zeros((nx, ny, nz, nev, nev))
-        XtXinv_data[gray_mask] = XtXinv
-        XtXinv_img = nib.Nifti1Image(XtXinv_data, affine, header)
+        B_img = matrix_to_image(B.T, gray_img)
+        SS_img = matrix_to_image(SS, gray_img)
+        XtXinv_flat = XtXinv.reshape(len(SS), -1)
+        XtXinv_img = matrix_to_image(XtXinv_flat.T, gray_img)
+        E_img = matrix_to_image(E, gray_img, ts_img)
 
         # TODO save out the mask, with a qc plot
 
@@ -494,6 +484,7 @@ class ModelFit(SimpleInterface):
         # the carpet plot can computer percent signal change.
         # (Maybe carpetplot should accept a mean image and handle that
         # internally)?
+        # TODO standarize the representation of mean in this method
         gray_mean = mean * np.expand_dims(gray_mask, -1)
         resid_data = gray_mean + np.zeros(ts_img.shape, np.float32)
         resid_data[gray_mask] += E.T
@@ -506,9 +497,10 @@ class ModelFit(SimpleInterface):
 
         # Write out the results
         self.write_image("beta_file", "beta.nii.gz", B_img)
-        # TODO better name for this?
         self.write_image("sigsqr_file", "sigsqr.nii.gz", SS_img)
         self.write_image("ols_file", "ols.nii.gz", XtXinv_img)
+        if model_info.save_residuals:
+            self.write_image("resid_file", "resid.nii.gz", E_img)
         # TODO optionally save residual
 
         return runtime
@@ -534,18 +526,22 @@ class EstimateContrasts(SimpleInterface):
         beta_img = nib.load(self.inputs.beta_file)
         affine, header = beta_img.affine, beta_img.header
         beta_data = beta_img.get_data()
-
-        ols_img = nib.load(self.inputs.ols_file)
-        ols_data = ols_img.get_data()
+        # TODO maybe read in a mask image?
+        gray_img = nib.Nifti1Image(beta_data.all(axis=-1), affine, header)
 
         sigsqr_img = nib.load(self.inputs.sigsqr_file)
-        sigsqr_data = sigsqr_img.get_data()
+        ols_img = nib.load(self.inputs.ols_file)
 
-        # Convert to matrix form
-        gray_mask = beta_data.any(axis=-1)
-        B = beta_data[gray_mask]
-        XtXinv = ols_data[gray_mask]
-        SS = sigsqr_data[gray_mask]
+        B = image_to_matrix(beta_img, gray_img)
+        SS = image_to_matrix(sigsqr_img, gray_img)
+        XtXinv = image_to_matrix(ols_img, gray_img)
+
+        # Reshape the matrix form data to what the glm functions expect
+        # TODO the shape/orientation of model parameter matrices needs some
+        # more thinking / standardization
+        B = B.T
+        n_vox, n_ev = B.shape
+        XtXinv = XtXinv.reshape(n_ev, n_ev, n_vox).T
 
         # Obtain list of contrast matrices
         # C = model_info.contrasts
@@ -561,23 +557,11 @@ class EstimateContrasts(SimpleInterface):
         # Estimate the contrasts, variances, and statistics in each voxel
         G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
 
-        # Generate the output images
-        nx, ny, nz = gray_mask.shape
-        out_shape = nx, ny, nz, len(C)
+        # TODO generate zstat data?
 
-        # TODO this idiom (go from an array to an image) is common and should
-        # be abstracted out somewhere
-        contrast_data = np.zeros(out_shape)
-        contrast_data[gray_mask] = G
-        contrast_img = nib.Nifti1Image(contrast_data, affine, header)
-
-        variance_data = np.zeros(out_shape)
-        variance_data[gray_mask] = V
-        variance_img = nib.Nifti1Image(variance_data, affine, header)
-
-        tstat_data = np.zeros(out_shape)
-        tstat_data[gray_mask] = T
-        tstat_img = nib.Nifti1Image(tstat_data, affine, header)
+        contrast_img = matrix_to_image(G.T, gray_img)
+        variance_img = matrix_to_image(V.T, gray_img)
+        tstat_img = matrix_to_image(T.T, gray_img)
 
         # Write out the output files
         self.write_image("contrast_file", "contrast.nii.gz", contrast_img)
