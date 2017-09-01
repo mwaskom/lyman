@@ -428,9 +428,8 @@ class TimeSeriesGIF(object):
                 text.set_text("T: {:d}".format(t))
 
             frame_png = "png/{:04d}.png".format(t)
+            f.savefig(frame_png, facecolor="0", edgecolor="0")
             pngs.append(frame_png)
-            f.savefig(frame_png,
-                      facecolor="0", edgecolor="0")
 
         cmdline = ["convert", "-loop", "0", "-delay", str(delay)]
         cmdline.extend(pngs)
@@ -739,8 +738,7 @@ class FinalizeUnwarping(LymanInterface):
         warp_plot = self.define_output("warp_plot", "warp.png")
         m = Mosaic(raw_img, warp_data_y)
         m.plot_overlay("coolwarm", vmin=-6, vmax=6, alpha=.75)
-        m.savefig(warp_plot)
-        m.close()
+        m.savefig(warp_plot, close=True)
 
         # Generate a QC gif of the unwarping performance
         self.generate_unwarp_gif(runtime, raw_img_frames, corr_img_frames)
@@ -932,8 +930,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         # Make a carpet plot of the final timeseries
         out_png = self.define_output("out_png", "func.png")
         p = CarpetPlot(out_img, seg_img, mc_data)
-        p.savefig(out_png)
-        p.close()
+        p.savefig(out_png, close=True)
 
         # Make a GIF movie of the final timeseries
         out_gif = self.define_output("out_gif", "func.gif")
@@ -944,15 +941,13 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(anat_img, norm_mean)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
-        mean_m.savefig(mean_plot)
-        mean_m.close()
+        mean_m.savefig(mean_plot, close=True)
 
         # Make a mosaic of the tSNR
         tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
         tsnr_m = Mosaic(anat_img, tsnr)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
-        tsnr_m.savefig(tsnr_plot)
-        tsnr_m.close()
+        tsnr_m.savefig(tsnr_plot, close=True)
 
         # Make a mosaic of the run mask
         # TODO is the better QC showing the run mask over the unmasked mean
@@ -960,15 +955,13 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         mask_plot = self.define_output("mask_plot", "mask.png")
         m = Mosaic(anat_img, mask_img)
         m.plot_mask()
-        m.savefig(mask_plot)
-        m.close()
+        m.savefig(mask_plot, close=True)
 
         # Make a mosaic of the noisy voxels
         noise_plot = self.define_output("noise_plot", "noise.png")
         m = Mosaic(anat_img, noise_img, mask_img, show_mask=False)
         m.plot_mask(alpha=1)
-        m.savefig(noise_plot)
-        m.close()
+        m.savefig(noise_plot, close=True)
 
         # Spec out the root path for the timeseries outputs
         subject, session, run = self.inputs.run_tuple
@@ -1077,9 +1070,7 @@ class FinalizeTemplate(LymanInterface):
 
         # Write static mosaic image
         out_plot = self.define_output("out_plot", "func.png")
-        m = Mosaic(out_img)
-        m.savefig(out_plot)
-        m.close()
+        Mosaic(out_img).savefig(out_plot, close=True)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
         # TODO copied from timeseries interface!
@@ -1089,30 +1080,26 @@ class FinalizeTemplate(LymanInterface):
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(anat_img, norm_mean, mask_img, show_mask=False)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
-        mean_m.savefig(mean_plot)
-        mean_m.close()
+        mean_m.savefig(mean_plot, close=True)
 
         # Make a mosaic of the tSNR
         tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
         tsnr_m = Mosaic(anat_img, tsnr_img, mask_img, show_mask=False)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
-        tsnr_m.savefig(tsnr_plot)
-        tsnr_m.close()
+        tsnr_m.savefig(tsnr_plot, close=True)
 
         # Make a QC plot of the run mask
         # TODO should this emphasize areas where runs don't overlap?
         mask_plot = self.define_output("mask_plot", "mask.png")
         m = Mosaic(anat_img, mask_img)
         m.plot_mask()
-        m.savefig(mask_plot)
-        m.close()
+        m.savefig(mask_plot, close=True)
 
         # Make a QC plot of the session noise mask
         noise_plot = self.define_output("noise_plot", "noise.png")
         m = Mosaic(anat_img, noise_img)
         m.plot_mask(alpha=1)
-        m.savefig(noise_plot)
-        m.close()
+        m.savefig(noise_plot, close=True)
 
         # Spec out the root path for the template outputs
         experiment = self.inputs.experiment
@@ -1152,8 +1139,7 @@ class RealignmentReport(LymanInterface):
         # Plot the target image
         target_plot = self.define_output("target_plot", "mc_target.png")
         m = self.plot_target()
-        m.savefig(target_plot)
-        m.close()
+        m.savefig(target_plot, close=True)
 
         return runtime
 
@@ -1240,8 +1226,7 @@ class AnatRegReport(LymanInterface):
         if cost is not None:
             m.fig.suptitle("Final cost: {:.2f}".format(cost),
                            size=10, color="white")
-        m.savefig(out_file)
-        m.close()
+        m.savefig(out_file, close=True)
 
         return runtime
 
@@ -1272,13 +1257,8 @@ class CoregGIF(LymanInterface):
 
     def write_mosaic_gif(self, runtime, img1, img2, fname, **kws):
 
-        m1 = Mosaic(img1, **kws)
-        m1.savefig("img1.png")
-        m1.close()
-
-        m2 = Mosaic(img2, **kws)
-        m2.savefig("img2.png")
-        m2.close()
+        Mosaic(img1, **kws).savefig("img1.png", close=True)
+        Mosaic(img2, **kws).savefig("img2.png", close=True)
 
         cmdline = ["convert", "-loop", "0", "-delay", "100",
                    "img1.png", "img2.png", fname]

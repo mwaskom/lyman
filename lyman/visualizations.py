@@ -463,10 +463,11 @@ class Mosaic(object):
                 cmap = mpl.colors.ListedColormap(lut)
         return cmap
 
-    def savefig(self, fname, **kwargs):
-        """Save the figure."""
-        # TODO add an option to close the figure and simplify code elsewhere
-        self.fig.savefig(fname, facecolor="k", edgecolor="k", **kwargs)
+    def savefig(self, fname, close=False, **kwargs):
+        """Save the figure; optionally close it."""
+        self.fig.savefig(fname, facecolor="0", edgecolor="0", **kwargs)
+        if close:
+            self.close()
 
     def close(self):
         """Close the figure."""
@@ -566,9 +567,11 @@ class CarpetPlot(object):
         self.segdata = segdata
         self.fd = fd
 
-    def savefig(self, fname, **kwargs):
+    def savefig(self, fname, close=True, **kwargs):
 
         self.fig.savefig(fname, **kwargs)
+        if close:
+            self.close()
 
     def close(self):
 

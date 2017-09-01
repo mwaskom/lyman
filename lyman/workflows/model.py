@@ -498,8 +498,7 @@ class ModelFit(LymanInterface):
 
         resid_plot = self.define_output("resid_plot", "resid.png")
         p = CarpetPlot(resid_img, seg_img, mc_data)
-        p.savefig(resid_plot)
-        p.close()
+        p.savefig(resid_plot, close=True)
 
         # Plot the deisgn matrix
         # TODO update when improving design matrix code
@@ -510,8 +509,7 @@ class ModelFit(LymanInterface):
         error_plot = self.define_output("error_plot", "error.png")
         error_m = Mosaic(mean_img, error_img, mask_img)
         error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
-        error_m.savefig(error_plot)
-        error_m.close()
+        error_m.savefig(error_plot, close=True)
 
         # mask image qc
 
@@ -644,12 +642,12 @@ class ModelResults(LymanInterface):
             # Contrast t statistic overlay
             stat_m = Mosaic(anat_img, t_img, mask_img, show_mask=True)
             stat_m.plot_overlay("coolwarm", -10, 10)
-            stat_m.savefig(op.join(contrast, "qc", "tstat.png"))
+            stat_m.savefig(op.join(contrast, "qc", "tstat.png"), close=True)
 
             # Analysis mask
             mask_m = Mosaic(anat_img, mask_img)
             mask_m.plot_mask()
-            mask_m.savefig(op.join(contrast, "qc", "mask.png"))
+            mask_m.savefig(op.join(contrast, "qc", "mask.png"), close=True)
 
         # Output a list of directories with results.
         # This makes the connections in the workflow more opaque, but it

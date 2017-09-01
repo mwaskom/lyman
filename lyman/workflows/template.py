@@ -169,15 +169,11 @@ class DefineTemplateSpace(LymanInterface):
 
         # Write out QC mosaics
         t1w_plot = self.define_output("t1w_plot", "T1w.png")
-        m = Mosaic(t1w_file)
-        m.savefig(t1w_plot)
-        m.close()
+        Mosaic(t1w_file).savefig(t1w_plot, close=True)
 
         if have_t2w:
             t2w_plot = self.define_output("t2w_plot", "T2w.png")
-            m = Mosaic(t2w_file)
-            m.savefig(t2w_plot)
-            m.close()
+            Mosaic(t2w_file).savefig(t2w_plot, close=True)
 
         return runtime
 
@@ -321,8 +317,7 @@ class AnatomicalSegmentation(LymanInterface):
         m_seg = Mosaic(template_img, seg_img, mask_img,
                        step=2, tight=True, show_mask=False)
         m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
-        m_seg.savefig(seg_plot)
-        m_seg.close()
+        m_seg.savefig(seg_plot, close=True)
 
         # Brain mask
 
@@ -330,8 +325,7 @@ class AnatomicalSegmentation(LymanInterface):
         m_mask = Mosaic(template_img, mask_img, mask_img,
                         step=2, tight=True, show_mask=False)
         m_mask.plot_mask()
-        m_mask.savefig(mask_plot)
-        m_mask.close()
+        m_mask.savefig(mask_plot, close=True)
 
         # Surface ribbon
 
@@ -343,7 +337,6 @@ class AnatomicalSegmentation(LymanInterface):
         m_surf = Mosaic(template_img, ribbon, mask_img,
                         step=2, tight=True, show_mask=False)
         m_surf.plot_overlay(ribbon_cmap, 1, 2, thresh=.5, fmt=None)
-        m_surf.savefig(surf_plot)
-        m_surf.close()
+        m_surf.savefig(surf_plot, close=True)
 
         return runtime
