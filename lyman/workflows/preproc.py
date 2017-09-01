@@ -14,9 +14,8 @@ from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
 
 from .. import signals  # TODO confusingly close to scipy.signal
-from ..mosaic import Mosaic
-from ..carpetplot import CarpetPlot
-from ..graphutils import SimpleInterface, generate_iterables  # TODO move here
+from ..utils import LymanInterface
+from ..visualizations import Mosaic, CarpetPlot
 
 
 def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
@@ -346,8 +345,40 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
 
 # =========================================================================== #
-# Custom processing nodes
+# Custom processing code
 # =========================================================================== #
+
+
+def generate_iterables(scan_info, subjects, experiment, session=None):
+
+    # TODO additionally we want to expand this to specify > 1 session
+    # TODO also change the order of subjects and experiment?
+    subject_iterables = subjects
+    session_iterables = dict()
+    run_iterables = dict()
+
+    for subj in subjects:
+
+        session_iterables[subj] = []
+
+        for sess in scan_info[subj]:
+
+            sess_key = subj, sess
+
+            if session is not None and sess != session:
+                continue
+
+            if experiment in scan_info[subj][sess]:
+
+                session_iterables[subj].append(sess_key)
+                run_iterables[sess_key] = []
+
+                for run in scan_info[subj][sess][experiment]:
+                    run_key = subj, sess, run
+                    run_iterables[sess_key].append(run_key)
+
+    return subject_iterables, session_iterables, run_iterables
+
 
 # ---- Quality control mixins
 
@@ -411,7 +442,7 @@ class TimeSeriesGIF(object):
 # ---- Data input and pre-preprocessing
 
 
-class SessionInput(SimpleInterface):
+class SessionInput(LymanInterface):
 
     class input_spec(TraitedSpec):
         session = traits.Tuple()
@@ -506,7 +537,7 @@ class SessionInput(SimpleInterface):
         return runtime
 
 
-class RunInput(SimpleInterface, TimeSeriesGIF):
+class RunInput(LymanInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         run = traits.Tuple()
@@ -600,7 +631,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
 # --- Preprocessing operations
 
 
-class CombineLinearTransforms(SimpleInterface):
+class CombineLinearTransforms(LymanInterface):
 
     class input_spec(TraitedSpec):
         ts2sb_file = traits.File(exists=True)
@@ -631,7 +662,7 @@ class CombineLinearTransforms(SimpleInterface):
         return runtime
 
 
-class FinalizeUnwarping(SimpleInterface):
+class FinalizeUnwarping(LymanInterface):
 
     class input_spec(TraitedSpec):
         raw_file = traits.File(exists=True)
@@ -789,7 +820,7 @@ class FinalizeUnwarping(SimpleInterface):
         self.submit_cmdline(runtime, cmdline)
 
 
-class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
+class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         experiment = traits.Str()
@@ -949,7 +980,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         return runtime
 
 
-class FinalizeTemplate(SimpleInterface):
+class FinalizeTemplate(LymanInterface):
 
     class input_spec(TraitedSpec):
         session_tuple = traits.Tuple()
@@ -1095,7 +1126,7 @@ class FinalizeTemplate(SimpleInterface):
 # --- Preprocessing quality control
 
 
-class RealignmentReport(SimpleInterface):
+class RealignmentReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         target_file = traits.File(exists=True)
@@ -1162,7 +1193,7 @@ class RealignmentReport(SimpleInterface):
         return Mosaic(self.inputs.target_file, step=2)
 
 
-class AnatRegReport(SimpleInterface):
+class AnatRegReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
@@ -1215,7 +1246,7 @@ class AnatRegReport(SimpleInterface):
         return runtime
 
 
-class CoregGIF(SimpleInterface):
+class CoregGIF(LymanInterface):
 
     class input_spec(TraitedSpec):
         in_file = traits.File(exists=True)

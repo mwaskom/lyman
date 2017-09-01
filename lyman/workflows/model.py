@@ -9,14 +9,12 @@ import nibabel as nib
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 
-from moss import Bunch
+from moss import Bunch  # TODO get from nipype
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals  # TODO confusingly close to scipy.signal
-from ..utils import image_to_matrix, matrix_to_image
-from ..mosaic import Mosaic
-from ..carpetplot import CarpetPlot
-from ..graphutils import SimpleInterface
+from ..utils import LymanInterface, image_to_matrix, matrix_to_image
+from ..visualizations import Mosaic, CarpetPlot
 
 
 def define_model_fit_workflow(proj_info, subjects, session,
@@ -249,7 +247,7 @@ def generate_iterables(scan_info, experiment, subjects, sessions=None):
 # --- Workflow inputs
 
 
-class ModelFitInput(SimpleInterface):
+class ModelFitInput(LymanInterface):
 
     class input_spec(TraitedSpec):
         experiment = traits.Str()
@@ -305,7 +303,7 @@ class ModelFitInput(SimpleInterface):
         return runtime
 
 
-class ModelResultsInput(SimpleInterface):
+class ModelResultsInput(LymanInterface):
 
     class input_spec(TraitedSpec):
         experiment = traits.Str()
@@ -361,7 +359,7 @@ class ModelResultsInput(SimpleInterface):
 # --- Model estimation code
 
 
-class ModelFit(SimpleInterface):
+class ModelFit(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject = traits.Str()
@@ -520,7 +518,7 @@ class ModelFit(SimpleInterface):
         return runtime
 
 
-class EstimateContrasts(SimpleInterface):
+class EstimateContrasts(LymanInterface):
 
     class input_spec(TraitedSpec):
         exp_info = traits.Dict()
@@ -579,7 +577,7 @@ class EstimateContrasts(SimpleInterface):
         return runtime
 
 
-class ModelResults(SimpleInterface):
+class ModelResults(LymanInterface):
 
     class input_spec(TraitedSpec):
         model_info = traits.Dict()
@@ -661,7 +659,7 @@ class ModelResults(SimpleInterface):
         return runtime
 
 
-class ModelResultsPath(SimpleInterface):
+class ModelResultsPath(LymanInterface):
 
     class input_spec(TraitedSpec):
         analysis_dir = traits.Directory(exists=True)

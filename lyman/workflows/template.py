@@ -10,8 +10,8 @@ import nibabel as nib
 from nipype import Workflow, Node, IdentityInterface, Function, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 
-from ..mosaic import Mosaic
-from ..graphutils import SimpleInterface
+from ..utils import LymanInterface
+from ..visualizations import Mosaic
 
 
 def define_template_workflow(proj_info, subjects, qc=True):
@@ -100,7 +100,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
 # =========================================================================== #
 
 
-class DefineTemplateSpace(SimpleInterface):
+class DefineTemplateSpace(LymanInterface):
 
     class input_spec(TraitedSpec):
         data_dir = traits.Directory(exists=True)
@@ -212,7 +212,7 @@ class DefineTemplateSpace(SimpleInterface):
         return out_file
 
 
-class AnatomicalSegmentation(SimpleInterface):
+class AnatomicalSegmentation(LymanInterface):
 
     class input_spec(TraitedSpec):
         template_file = traits.File(exists=True)
