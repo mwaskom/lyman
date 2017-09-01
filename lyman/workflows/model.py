@@ -298,7 +298,6 @@ class ModelFitInput(SimpleInterface):
             noise_file=op.join(timeseries_path, "noise.nii.gz"),
             mc_file=op.join(timeseries_path, "mc.csv"),
 
-            # TODO XXX why is this generating sess_02_run_04?
             output_path=op.join(anal_dir, subject, experiment, model, run_key)
         )
         self._results.update(results)
@@ -381,8 +380,8 @@ class ModelFit(SimpleInterface):
     class output_spec(TraitedSpec):
         mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
-        error_file = traits.File(exists=True)  # TODO maybe call "error_file"?
-        ols_file = traits.File(exists=True)  # TODO is this best name?
+        error_file = traits.File(exists=True)
+        ols_file = traits.File(exists=True)
         resid_file = traits.File()
         design_file = traits.File(exists=True)
         resid_plot = traits.File(exists=True)
@@ -406,10 +405,9 @@ class ModelFit(SimpleInterface):
         run_mask = nib.load(self.inputs.mask_file).get_data() > 0
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
-        gray_mask = (seg > 0) & (seg < 5) & run_mask
-        n_vox = gray_mask.sum()
-        # TODO change name to mask_img for future flexibility?
-        gray_img = nib.Nifti1Image(gray_mask.astype(np.int8), affine, header)
+        mask = (seg > 0) & (seg < 5) & run_mask
+        n_vox = mask.sum()
+        mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
 
         # Load the noise segmentation
         # TODO implement noisy voxel removal
@@ -419,7 +417,7 @@ class ModelFit(SimpleInterface):
         # TODO implement surface smoothing
         # Using simple volumetric smoothing for now to get things running
         fwhm = model_info.smooth_fwhm
-        ts_img = signals.smooth_volume(ts_img, fwhm, gray_img, noise)
+        ts_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise)
 
         # Compute the mean image for later
         # TODO limit to gray matter voxels?
@@ -432,11 +430,11 @@ class ModelFit(SimpleInterface):
         hpf_matrix = glm.highpass_filter_matrix(n_tp,
                                                 model_info.hpf_cutoff,
                                                 exp_info.tr)
-        data[gray_mask] = np.dot(hpf_matrix, data[gray_mask].T).T
+        data[mask] = np.dot(hpf_matrix, data[mask].T).T
 
         # TODO remove the mean from the data
         # data[gray_mask] += mean[gray_mask, np.newaxis]
-        data[~gray_mask] = 0
+        data[~mask] = 0
 
         # Define confound regressons from various sources
         # TODO
@@ -467,7 +465,7 @@ class ModelFit(SimpleInterface):
         # Prewhiten the data
         assert not np.isnan(data).any()
         ts_img = nib.Nifti1Image(data, affine)
-        WY, WX = glm.prewhiten_image_data(ts_img, gray_img, X)
+        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
 
         # Fit the final model
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
@@ -475,15 +473,14 @@ class ModelFit(SimpleInterface):
         # TODO should we re-compute the tSNR on the residuals?
 
         # Convert outputs to image format
-        # TODO change to output names
-        beta_img = matrix_to_image(B.T, gray_img)
-        error_img = matrix_to_image(SS, gray_img)
+        beta_img = matrix_to_image(B.T, mask_img)
+        error_img = matrix_to_image(SS, mask_img)
         XtXinv_flat = XtXinv.reshape(n_vox, -1)
-        ols_img = matrix_to_image(XtXinv_flat.T, gray_img)
-        resid_img = matrix_to_image(E, gray_img, ts_img)
+        ols_img = matrix_to_image(XtXinv_flat.T, mask_img)
+        resid_img = matrix_to_image(E, mask_img, ts_img)
 
         # Write out the results
-        self.write_image("mask_file", "mask.nii.gz", gray_img)
+        self.write_image("mask_file", "mask.nii.gz", mask_img)
         self.write_image("beta_file", "beta.nii.gz", beta_img)
         self.write_image("error_file", "error.nii.gz", error_img)
         self.write_image("ols_file", "ols.nii.gz", ols_img)
@@ -496,10 +493,9 @@ class ModelFit(SimpleInterface):
         # (Maybe carpetplot should accept a mean image and handle that
         # internally)?
         # TODO standarize the representation of mean in this method
-        gray_mean = mean * gray_mask
         resid_data = np.zeros(ts_img.shape, np.float32)
-        resid_data += np.expand_dims(gray_mean, axis=-1)
-        resid_data[gray_mask] += E.T
+        resid_data += np.expand_dims(mean * mask, axis=-1)
+        resid_data[mask] += E.T
         resid_img = nib.Nifti1Image(resid_data, affine, header)
 
         resid_plot = self.define_output("resid_plot", "resid.png")
@@ -512,10 +508,10 @@ class ModelFit(SimpleInterface):
         design_plot = self.define_output("design_plot", "design.png")
         dmat.plot(fname=design_plot, close=True)
 
-        # TODO error image qc
+        # Plot the sigma squares image for QC
         error_plot = self.define_output("error_plot", "error.png")
-        error_m = Mosaic(mean_img, error_img, gray_img)
-        error_m.plot_overlay("cube:.8:.2", 0, alpha=.6, fmt=".02f")
+        error_m = Mosaic(mean_img, error_img, mask_img)
+        error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
         error_m.savefig(error_plot)
         error_m.close()
 
@@ -571,9 +567,6 @@ class EstimateContrasts(SimpleInterface):
 
         # Estimate the contrasts, variances, and statistics in each voxel
         G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
-
-        # TODO generate zstat data?
-
         contrast_img = matrix_to_image(G.T, mask_img)
         variance_img = matrix_to_image(V.T, mask_img)
         tstat_img = matrix_to_image(T.T, mask_img)
