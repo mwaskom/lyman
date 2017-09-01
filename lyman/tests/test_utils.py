@@ -98,7 +98,7 @@ class TestLymanInterface(object):
 
             msg = "test"
             runtime = Bunch(returncode=None,
-                            cwd=tmpdir,
+                            cwd=str(tmpdir),
                             environ={"msg": msg})
 
             ifc = utils.LymanInterface()
