@@ -7,24 +7,24 @@ from nipype.interfaces.base import BaseInterface
 
 
 class LymanInterface(BaseInterface):
-
+    """Enhanced Interface object that custom interface should inherit from."""
     def __init__(self, **inputs):
 
         super(LymanInterface, self).__init__(**inputs)
         self._results = {}
 
     def _list_outputs(self):
-
+        """Override BaseInterface._list_outputs using out _results dict."""
         return self._results
 
     def define_output(self, field, fname):
-
+        """Set an interface output field using an absolute path to `fname`."""
         fname = op.abspath(fname)
         self._results[field] = fname
         return fname
 
     def write_image(self, field, fname, data, affine=None, header=None):
-
+        """Write a nibabel image to disk and assign path to output field."""
         fname = self.define_output(field, fname)
         if isinstance(data, nib.Nifti1Image):
             img = data
@@ -33,15 +33,13 @@ class LymanInterface(BaseInterface):
         img.to_filename(fname)
         return img
 
-    def submit_cmdline(self, runtime, cmdline, **results):
+    def submit_cmdline(self, runtime, cmdline):
         """Submit a command-line job and capture the output."""
-
         for attr in ["stdout", "stderr", "cmdline"]:
             if not hasattr(runtime, attr):
                 setattr(runtime, attr, "")
-        if not hasattr(runtime, "returncode"):
-            runtime.returncode = 0
-        elif runtime.returncode is None:
+
+        if runtime.get("returncode", None) is None:
             runtime.returncode = 0
 
         if isinstance(cmdline, list):
@@ -68,9 +66,6 @@ class LymanInterface(BaseInterface):
             message += "Standard error:\n" + runtime.stderr + "\n"
             message += "Return code: " + str(runtime.returncode)
             raise RuntimeError(message)
-
-        for field, fname in results.items():
-            self._results[field] = fname
 
         return runtime
 
