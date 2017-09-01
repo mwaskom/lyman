@@ -14,9 +14,9 @@ from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
 
 from .. import signals  # TODO confusingly close to scipy.signal
+from ..utils import LymanInterface
 from ..mosaic import Mosaic
 from ..carpetplot import CarpetPlot
-from ..graphutils import SimpleInterface
 
 
 def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
@@ -443,7 +443,7 @@ class TimeSeriesGIF(object):
 # ---- Data input and pre-preprocessing
 
 
-class SessionInput(SimpleInterface):
+class SessionInput(LymanInterface):
 
     class input_spec(TraitedSpec):
         session = traits.Tuple()
@@ -538,7 +538,7 @@ class SessionInput(SimpleInterface):
         return runtime
 
 
-class RunInput(SimpleInterface, TimeSeriesGIF):
+class RunInput(LymanInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         run = traits.Tuple()
@@ -632,7 +632,7 @@ class RunInput(SimpleInterface, TimeSeriesGIF):
 # --- Preprocessing operations
 
 
-class CombineLinearTransforms(SimpleInterface):
+class CombineLinearTransforms(LymanInterface):
 
     class input_spec(TraitedSpec):
         ts2sb_file = traits.File(exists=True)
@@ -663,7 +663,7 @@ class CombineLinearTransforms(SimpleInterface):
         return runtime
 
 
-class FinalizeUnwarping(SimpleInterface):
+class FinalizeUnwarping(LymanInterface):
 
     class input_spec(TraitedSpec):
         raw_file = traits.File(exists=True)
@@ -821,7 +821,7 @@ class FinalizeUnwarping(SimpleInterface):
         self.submit_cmdline(runtime, cmdline)
 
 
-class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
+class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         experiment = traits.Str()
@@ -981,7 +981,7 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         return runtime
 
 
-class FinalizeTemplate(SimpleInterface):
+class FinalizeTemplate(LymanInterface):
 
     class input_spec(TraitedSpec):
         session_tuple = traits.Tuple()
@@ -1127,7 +1127,7 @@ class FinalizeTemplate(SimpleInterface):
 # --- Preprocessing quality control
 
 
-class RealignmentReport(SimpleInterface):
+class RealignmentReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         target_file = traits.File(exists=True)
@@ -1194,7 +1194,7 @@ class RealignmentReport(SimpleInterface):
         return Mosaic(self.inputs.target_file, step=2)
 
 
-class AnatRegReport(SimpleInterface):
+class AnatRegReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
@@ -1247,7 +1247,7 @@ class AnatRegReport(SimpleInterface):
         return runtime
 
 
-class CoregGIF(SimpleInterface):
+class CoregGIF(LymanInterface):
 
     class input_spec(TraitedSpec):
         in_file = traits.File(exists=True)

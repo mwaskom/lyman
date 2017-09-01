@@ -6,11 +6,11 @@ import nibabel as nib
 from nipype.interfaces.base import BaseInterface
 
 
-class SimpleInterface(BaseInterface):
+class LymanInterface(BaseInterface):
 
     def __init__(self, **inputs):
 
-        super(SimpleInterface, self).__init__(**inputs)
+        super(LymanInterface, self).__init__(**inputs)
         self._results = {}
 
     def _list_outputs(self):
