@@ -9,13 +9,12 @@ import nibabel as nib
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 
-from moss import Bunch
+from moss import Bunch  # TODO get from nipype
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals  # TODO confusingly close to scipy.signal
 from ..utils import LymanInterface, image_to_matrix, matrix_to_image
-from ..mosaic import Mosaic
-from ..carpetplot import CarpetPlot
+from ..plotting import Mosaic, CarpetPlot
 
 
 def define_model_fit_workflow(proj_info, subjects, session,

@@ -9,10 +9,9 @@ import yaml
 
 import numpy as np
 
-# TODO put this locally, not in moss
-from moss import Bunch
+from moss import Bunch  # TODO get from nipype
 
-# TODO mayne defer imports?
+# TODO maybe defer workflow imports?
 from .workflows.template import define_template_workflow
 from .workflows.preproc import define_preproc_workflow
 from .workflows.model import (define_model_fit_workflow,

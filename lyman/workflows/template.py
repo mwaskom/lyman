@@ -11,7 +11,7 @@ from nipype import Workflow, Node, IdentityInterface, Function, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 
 from ..utils import LymanInterface
-from ..mosaic import Mosaic
+from ..plotting import Mosaic
 
 
 def define_template_workflow(proj_info, subjects, qc=True):
