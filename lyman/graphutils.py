@@ -72,34 +72,3 @@ class SimpleInterface(BaseInterface):
             self._results[field] = fname
 
         return runtime
-
-
-def generate_iterables(scan_info, subjects, experiment, session=None):
-    # TODO This is preproc-specific so move it there
-    # TODO additionally we want to expand this to specify > 1 session
-    # TODO also change the order of subjects and experiment?
-    subject_iterables = subjects
-    session_iterables = dict()
-    run_iterables = dict()
-
-    for subj in subjects:
-
-        session_iterables[subj] = []
-
-        for sess in scan_info[subj]:
-
-            sess_key = subj, sess
-
-            if session is not None and sess != session:
-                continue
-
-            if experiment in scan_info[subj][sess]:
-
-                session_iterables[subj].append(sess_key)
-                run_iterables[sess_key] = []
-
-                for run in scan_info[subj][sess][experiment]:
-                    run_key = subj, sess, run
-                    run_iterables[sess_key].append(run_key)
-
-    return subject_iterables, session_iterables, run_iterables
