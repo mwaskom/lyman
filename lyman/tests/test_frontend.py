@@ -16,9 +16,9 @@ def test_determine_engine():
         if arg == "multiproc":
             args.nprocs = 4
         plugin, plugin_args = frontend.determine_engine(args)
-        yield assert_equal, plugin, plugin_str
+        assert_equal(plugin, plugin_str)
 
         if arg == "multiproc":
-            yield assert_equal, plugin_args, dict(n_procs=4)
+            assert_equal(plugin_args, dict(n_procs=4))
         elif arg == "PBS":
-            yield assert_equal, plugin_args, dict(n_procs=4, qsub_args="")
+            assert_equal(plugin_args, dict(n_procs=4, qsub_args=""))
