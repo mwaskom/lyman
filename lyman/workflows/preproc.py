@@ -1,3 +1,4 @@
+from __future__ import division
 import os
 import os.path as op
 
@@ -15,7 +16,7 @@ from nipype.interfaces import fsl, freesurfer as fs
 from .. import signals  # TODO confusingly close to scipy.signal
 from ..mosaic import Mosaic
 from ..carpetplot import CarpetPlot
-from ..graphutils import SimpleInterface, generate_iterables
+from ..graphutils import SimpleInterface, generate_iterables  # TODO move here
 
 
 def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
@@ -923,6 +924,8 @@ class FinalizeTimeseries(SimpleInterface, TimeSeriesGIF):
         tsnr_m.close()
 
         # Make a mosaic of the run mask
+        # TODO is the better QC showing the run mask over the unmasked mean
+        # image so that we can see if the brain is getting cut off?
         mask_plot = self.define_output("mask_plot", "mask.png")
         m = Mosaic(anat_img, mask_img)
         m.plot_mask()

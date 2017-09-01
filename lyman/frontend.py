@@ -1,9 +1,10 @@
 """Forward facing lyman tools with information about ecosystem."""
 import os
+import os.path as op
 import re
 import sys
 import imp
-import os.path as op
+import shutil
 import yaml
 
 import numpy as np
@@ -14,6 +15,8 @@ from moss import Bunch
 # TODO mayne defer imports?
 from .workflows.template import define_template_workflow
 from .workflows.preproc import define_preproc_workflow
+from .workflows.model import (define_model_fit_workflow,
+                              define_model_results_workflow)
 
 
 __all__ = []
@@ -112,6 +115,26 @@ def gather_experiment_info(exp_name=None, altmodel=None, args=None):
     return Bunch(exp_dict)
 
 
+def gather_model_info(experiment, model):
+
+    lyman_dir = os.environ["LYMAN_DIR"]
+
+    model_file = op.join(lyman_dir, "{}-{}.py".format(experiment, model))
+    if not op.exists(model_file):
+        model_file = op.join(lyman_dir, "{}.py".format(model))
+
+    module_name = "lyman_model_{}".format(model)
+    info = imp.load_source(module_name, model_file)
+
+    # TODO hacked to get going
+    fields = ["smooth_fwhm", "hpf_cutoff",
+              "interpolate_noise", "contrasts",
+              "save_residuals"]
+    info_dict = {k: getattr(info, k) for k in fields}
+    info_dict["name"] = model
+    return Bunch(info_dict)
+
+
 def default_experiment_parameters():
     """Return default values for experiments."""
     exp = dict(
@@ -206,35 +229,69 @@ def determine_engine(args):
     return plugin, plugin_args
 
 
-def run_workflow(wf, args=None):
+def run_workflow(wf, args, proj_info):
     """Run a workflow, if we asked to do so on the command line."""
+
+    crash_dir = op.join(proj_info.cache_dir, "crashdumps")
+    wf.config["execution"]["crashdump_dir"] = crash_dir
+
+    cache_dir = op.join(wf.base_dir, wf.name)
+    if args.clear_cache:
+        if op.exists(cache_dir):
+            shutil.rmtree(cache_dir)
+
     if args.graph:
         wf.write_graph(args.stage, "orig", "svg")
+
     else:
         plugin, plugin_args = determine_engine(args)
         wf.run(plugin, plugin_args)
 
+    # TODO remove cache directory again here
+
 
 def execute_workflow(args):
+
+    # TODO maybe this code should just be in the lyman script
 
     stage = args.stage
 
     proj_info = gather_project_info()
 
+    # TODO either both or neither of subject(s)/session(s)
+    # should be plural at this point
+
     subjects = determine_subjects(args.subject)
+    session = getattr(args, "session", None)
     qc = args.qc
 
+    if len(subjects) > 1 and session is not None:
+        raise RuntimeError("Can only specify session for single subject")
+
+    # TODO Oof this logic needs to be reworked
     if stage == "template":
         wf = define_template_workflow(proj_info, subjects, qc)
-    if stage == "preproc":
+
+    else:
         exp_info = gather_experiment_info(args.experiment)
-        session = args.session
-        if len(subjects) > 1 and session is not None:
-            raise RuntimeError("Can only specify session for single subject")
-        wf = define_preproc_workflow(proj_info, subjects, session,
-                                     exp_info, qc)
 
-    crash_dir = op.join(proj_info.cache_dir, "crashdumps")
-    wf.config["execution"]["crashdump_dir"] = crash_dir
+        if stage == "preproc":
+            wf = define_preproc_workflow(proj_info, subjects, session,
+                                         exp_info, qc)
 
-    run_workflow(wf, args)
+            run_workflow(wf, args, proj_info)
+
+        else:
+            model_info = gather_model_info(args.experiment, args.model)
+
+            if stage in ["model", "model-fit"]:
+                wf = define_model_fit_workflow(proj_info, subjects, session,
+                                               exp_info, model_info, qc)
+
+                run_workflow(wf, args, proj_info)
+
+            if stage in ["model", "model-res"]:
+                wf = define_model_results_workflow(proj_info, subjects,
+                                                   exp_info, model_info, qc)
+
+                run_workflow(wf, args, proj_info)

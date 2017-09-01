@@ -27,18 +27,32 @@ def add_experiment(parser):
                         help="experiment name")
 
 
+def add_model(parser):
+    parser.add_argument("-m", "--model",
+                        metavar="name",
+                        help="model name")
+
+
 def add_execution(parser):
     parser.add_argument("-p", "--plugin",
+                        metavar="name",
                         help="nipype execution plugin")
     parser.add_argument("-n", "--nprocs",
                         type=int,
+                        metavar="number",
                         help="size of multiprocessing pool")
     parser.add_argument("-g", "--graph",
                         action="store_true",  # TODO make this take a filename
                         help="write graph instead of executing")
+    parser.add_argument("-c", "--clear-cache",
+                        action="store_true",
+                        help="remove existing cache directory before running")
     parser.add_argument("--no-qc",
                         dest="qc", action="store_false",
                         help="don't connect qc nodes")
+
+    # TODO add a force execution option that deletes the cache dir
+    # (or sets nipype's always rerun functionality)
 
 
 # TODO add debug mode that preserves cache directory and uneccessary outputs
@@ -68,14 +82,31 @@ if __name__ == "__main__":
 
     # ---
 
-    model = subparsers.add_parser("model",
-                                  help="univariate glm")
-    add_subject(model)
-    add_experiment(model)
-    model.add_argument("-m", "--model",
-                       metavar="name",
-                       help="model name")
-    add_execution(model)
+    # TODO a nice API would be something like model, model-fit, and model-res
+    # We typically will want to do both, but want flexibility not to
+    model_all = subparsers.add_parser("model",
+                                      help=("fit univariate GLM "
+                                            "and estimate contrasts"))
+    add_subject(model_all)
+    add_experiment(model_all)
+    add_model(model_all)
+    add_session(model_all)
+    add_execution(model_all)
+
+    model_fit = subparsers.add_parser("model-fit",
+                                      help="fit univariate GLM")
+    add_subject(model_fit)
+    add_experiment(model_fit)
+    add_model(model_fit)
+    add_session(model_fit)
+    add_execution(model_fit)
+
+    model_res = subparsers.add_parser("model-res",
+                                      help="estimate univariate contrats")
+    add_subject(model_res)
+    add_experiment(model_res)
+    add_model(model_res)
+    add_execution(model_res)
 
     # ---
 

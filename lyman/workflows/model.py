@@ -1,563 +1,684 @@
-"""Timeseries model using FSL's gaussian least squares."""
-import re
+from __future__ import division
+import os
 import os.path as op
+
 import numpy as np
-from scipy import stats, signal
 import pandas as pd
 import nibabel as nib
-import matplotlib.pyplot as plt
-from moss import glm
-from moss.mosaic import Mosaic
-import seaborn as sns
 
-from nipype import Node, MapNode, Workflow, IdentityInterface
-from nipype.interfaces import fsl
-from nipype.interfaces.base import (BaseInterface,
-                                    BaseInterfaceInputSpec,
-                                    InputMultiPath, OutputMultiPath,
-                                    TraitedSpec, File, traits,
-                                    isdefined)
-import lyman
-from lyman.tools import ManyOutFiles, SaveParameters, nii_to_png
+from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
+from nipype.interfaces.base import traits, TraitedSpec
+
+from moss import Bunch
+from moss import glm as mossglm  # TODO move into lyman
+
+from .. import glm, signals  # TODO confusingly close to scipy.signal
+from ..utils import image_to_matrix, matrix_to_image
+from ..mosaic import Mosaic
+from ..carpetplot import CarpetPlot
+from ..graphutils import SimpleInterface
 
 
-def create_timeseries_model_workflow(name="model", exp_info=None):
+def define_model_fit_workflow(proj_info, subjects, session,
+                              exp_info, model_info, qc=True):
 
-    # Default experiment parameters for generating graph image, testing, etc.
-    if exp_info is None:
-        exp_info = lyman.default_experiment_parameters()
+    # --- Workflow parameterization and data input
 
-    # Define constant inputs
-    inputs = ["realign_file", "nuisance_file", "artifact_file", "timeseries"]
+    # We just need two levels of iterables here: one subject-level and
+    # one "flat" run-level iterable (i.e. all runs collapsing over
+    # sessions). But we want to be able to specify sessions to process.
 
-    # Possibly add the design and regressor files to the inputs
-    if exp_info["design_name"] is not None:
-        inputs.append("design_file")
-    if exp_info["regressor_file"] is not None:
-        inputs.append("regressor_file")
+    scan_info = proj_info.scan_info
+    experiment = exp_info.name
+    model = model_info.name
 
-    # Define the workflow inputs
-    inputnode = Node(IdentityInterface(inputs), "inputs")
+    iterables = generate_iterables(scan_info, experiment, subjects, session)
+    subject_iterables, run_iterables = iterables
 
-    # Set up the experimental design
-    modelsetup = MapNode(ModelSetup(exp_info=exp_info),
-                         ["timeseries", "realign_file",
-                          "nuisance_file", "artifact_file"],
-                         "modelsetup")
+    subject_source = Node(IdentityInterface(["subject"]),
+                          name="subject_source",
+                          iterables=("subject", subject_iterables))
 
-    # For some nodes, make it possible to request extra memory
-    mem_request = {"qsub_args": "-l h_vmem=%dG" % exp_info["memory_request"]}
+    run_source = Node(IdentityInterface(["subject", "run"]),
+                      name="run_source",
+                      itersource=("subject_source", "subject"),
+                      iterables=("run", run_iterables))
 
-    # Use film_gls to estimate the timeseries model
-    modelestimate = MapNode(fsl.FILMGLS(smooth_autocorr=True,
-                                        mask_size=5,
-                                        threshold=100),
-                            ["design_file", "in_file", "tcon_file"],
-                            "modelestimate")
-    modelestimate.plugin_args = mem_request
+    data_input = Node(ModelFitInput(experiment=experiment,
+                                    model=model,
+                                    analysis_dir=proj_info.analysis_dir),
+                      "data_input")
 
-    # Compute summary statistics about the model fit
-    modelsummary = MapNode(ModelSummary(),
-                           ["design_matrix_pkl",
-                            "timeseries",
-                            "pe_files"],
-                           "modelsummary")
-    modelsummary.plugin_args = mem_request
+    # --- Data filtering and model fitting
 
-    # Save the experiment info for this run
-    # Save the experiment info for this run
-    saveparams = MapNode(SaveParameters(exp_info=exp_info),
-                         "in_file", "saveparams")
+    fit_model = Node(ModelFit(data_dir=proj_info.data_dir,
+                              exp_info=exp_info,
+                              model_info=model_info),
+                     "fit_model")
 
-    # Report on the results of the model
-    # Note: see below for a conditional iterfield
-    modelreport = MapNode(ModelReport(),
-                          ["timeseries", "sigmasquareds_file",
-                           "tsnr_file", "r2_files"],
-                          "modelreport")
+    # --- Data output
 
-    # Define the workflow outputs
-    outputnode = Node(IdentityInterface(["results",
-                                         "copes",
-                                         "varcopes",
-                                         "zstats",
-                                         "r2_files",
-                                         "ss_files",
-                                         "tsnr_file",
-                                         "report",
-                                         "design_mat",
-                                         "contrast_mat",
-                                         "design_pkl",
-                                         "design_report",
-                                         "json_file"]),
-                      "outputs")
+    data_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                                parameterization=False),
+                       "data_output")
 
-    # Define the workflow and connect the nodes
-    model = Workflow(name=name)
-    model.connect([
-        (inputnode, modelsetup,
-            [("realign_file", "realign_file"),
-             ("nuisance_file", "nuisance_file"),
-             ("artifact_file", "artifact_file"),
-             ("timeseries", "timeseries")]),
-        (inputnode, modelestimate,
-            [("timeseries", "in_file")]),
-        (inputnode, saveparams,
-            [("timeseries", "in_file")]),
-        (modelsetup, modelestimate,
-            [("design_matrix_file", "design_file"),
-             ("contrast_file", "tcon_file")]),
-        (modelsetup, modelsummary,
-            [("design_matrix_pkl", "design_matrix_pkl")]),
-        (inputnode, modelsummary,
-            [("timeseries", "timeseries")]),
-        (modelestimate, modelsummary,
-            [("param_estimates", "pe_files")]),
-        (inputnode, modelreport,
-            [("timeseries", "timeseries")]),
-        (modelestimate, modelreport,
-            [("sigmasquareds", "sigmasquareds_file")]),
-        (modelsummary, modelreport,
-            [("r2_files", "r2_files"),
-             ("tsnr_file", "tsnr_file")]),
-        (modelsetup, outputnode,
-            [("design_matrix_file", "design_mat"),
-             ("contrast_file", "contrast_mat"),
-             ("design_matrix_pkl", "design_pkl"),
-             ("report", "design_report")]),
-        (saveparams, outputnode,
-            [("json_file", "json_file")]),
-        (modelestimate, outputnode,
-            [("results_dir", "results"),
-             ("copes", "copes"),
-             ("varcopes", "varcopes"),
-             ("zstats", "zstats")]),
-        (modelsummary, outputnode,
-            [("r2_files", "r2_files"),
-             ("ss_files", "ss_files"),
-             ("tsnr_file", "tsnr_file")]),
-        (modelreport, outputnode,
-            [("out_files", "report")]),
-        ])
+    # === Assemble pipeline
 
-    if exp_info["design_name"] is not None:
-        model.connect(inputnode, "design_file",
-                      modelsetup, "design_file")
-    if exp_info["regressor_file"] is not None:
-        model.connect(inputnode, "regressor_file",
-                      modelsetup, "regressor_file")
-    if exp_info["contrasts"]:
-        model.connect(modelestimate, "zstats",
-                      modelreport, "zstat_files")
-        modelreport.iterfield.append("zstat_files")
+    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    workflow = Workflow(name="model_fit", base_dir=cache_base)
 
-    return model, inputnode, outputnode
+    # Connect processing nodes
+
+    processing_edges = [
+
+        (subject_source, run_source,
+            [("subject", "subject")]),
+        (subject_source, data_input,
+            [("subject", "subject")]),
+        (run_source, data_input,
+            [("run", "run_tuple")]),
+
+        (data_input, fit_model,
+            [("subject", "subject"),
+             ("session", "session"),
+             ("run", "run"),
+             ("seg_file", "seg_file"),
+             ("surf_file", "surf_file"),
+             ("mask_file", "mask_file"),
+             ("ts_file", "ts_file"),
+             ("noise_file", "noise_file"),
+             ("mc_file", "mc_file")]),
+
+        (data_input, data_output,
+            [("output_path", "container")]),
+        (fit_model, data_output,
+            [("mask_file", "@mask"),
+             ("beta_file", "@beta"),
+             ("error_file", "@error"),
+             ("ols_file", "@ols"),
+             ("resid_file", "@resid"),
+             ("design_file", "@design")]),
+
+    ]
+    workflow.connect(processing_edges)
+
+    qc_edges = [
+
+        (fit_model, data_output,
+            [("design_plot", "qc.@design_plot"),
+             ("resid_plot", "qc.@resid_plot"),
+             ("error_plot", "qc.@error_plot")]),
+
+    ]
+    if qc:
+        workflow.connect(qc_edges)
+
+    return workflow
+
+
+def define_model_results_workflow(proj_info, subjects,
+                                  exp_info, model_info, qc=True):
+
+    # TODO I am copying a lot from above ...
+
+    # --- Workflow parameterization and data input
+
+    # We just need two levels of iterables here: one subject-level and
+    # one "flat" run-level iterable (i.e. all runs collapsing over
+    # sessions). Unlike in the model fit workflow, we always want to process
+    # all sessions.
+
+    scan_info = proj_info.scan_info
+    experiment = exp_info.name
+    model = model_info.name
+
+    iterables = generate_iterables(scan_info, experiment, subjects)
+    subject_iterables, run_iterables = iterables
+
+    subject_source = Node(IdentityInterface(["subject"]),
+                          name="subject_source",
+                          iterables=("subject", subject_iterables))
+
+    run_source = Node(IdentityInterface(["subject", "run"]),
+                      name="run_source",
+                      itersource=("subject_source", "subject"),
+                      iterables=("run", run_iterables))
+
+    data_input = Node(ModelResultsInput(experiment=experiment,
+                                        model=model,
+                                        analysis_dir=proj_info.analysis_dir),
+                      "data_input")
+
+    # --- Run-level contrast estimation
+
+    estimate_contrasts = Node(EstimateContrasts(model_info=model_info),
+                              "estimate_contrasts")
+
+    # --- Subject-level contrast estimation
+
+    model_results = JoinNode(ModelResults(model_info=model_info),
+                             name="model_results",
+                             joinsource="run_source",
+                             joinfield=["contrast_files",
+                                        "variance_files"])
+
+    # --- Data output
+
+    run_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                               parameterization=False),
+                      "run_output")
+
+    results_path = Node(ModelResultsPath(analysis_dir=proj_info.analysis_dir,
+                                         experiment=experiment,
+                                         model=model),
+                        "results_path")
+
+    subject_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+                                   parameterization=False),
+                          "subject_output")
+
+    # === Assemble pipeline
+
+    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    workflow = Workflow(name="model_results", base_dir=cache_base)
+
+    # Connect processing nodes
+
+    processing_edges = [
+
+        (subject_source, run_source,
+            [("subject", "subject")]),
+        (subject_source, data_input,
+            [("subject", "subject")]),
+        (run_source, data_input,
+            [("run", "run_tuple")]),
+
+        (data_input, estimate_contrasts,
+            [("mask_file", "mask_file"),
+             ("beta_file", "beta_file"),
+             ("error_file", "error_file"),
+             ("ols_file", "ols_file")]),
+
+        (data_input, model_results,
+            [("anat_file", "anat_file")]),
+        (estimate_contrasts, model_results,
+            [("contrast_file", "contrast_files"),
+             ("variance_file", "variance_files")]),
+
+        (data_input, run_output,
+            [("output_path", "container")]),
+        (estimate_contrasts, run_output,
+            [("contrast_file", "@contrast"),
+             ("variance_file", "@variance"),
+             ("tstat_file", "@tstat")]),
+
+        (subject_source, results_path,
+            [("subject", "subject")]),
+        (results_path, subject_output,
+            [("output_path", "container")]),
+        (model_results, subject_output,
+            [("result_directories", "@results")]),
+
+    ]
+    workflow.connect(processing_edges)
+
+    return workflow
 
 
 # =========================================================================== #
+# Custom processing code
+# =========================================================================== #
 
 
-class ModelSetupInput(BaseInterfaceInputSpec):
+def generate_iterables(scan_info, experiment, subjects, sessions=None):
 
-    exp_info = traits.Dict()
-    timeseries = File(exists=True)
-    design_file = File(exists=True)
-    realign_file = File(exists=True)
-    nuisance_file = File(exists=True)
-    artifact_file = File(exists=True)
-    regressor_file = File(exists=True)
+    subject_iterables = subjects
+    run_iterables = {}
+    for subject in subjects:
+        run_iterables[subject] = []
+        for session in scan_info[subject]:
+            if sessions is not None and session not in sessions:
+                continue
+            sess_runs = scan_info[subject][session].get(experiment, [])
+            run_tuples = [(session, run) for run in sess_runs]
+            run_iterables[subject].extend(run_tuples)
 
-
-class ModelSetupOutput(TraitedSpec):
-
-    design_matrix_file = File(exists=True)
-    contrast_file = File(exists=True)
-    design_matrix_pkl = File(exists=True)
-    report = OutputMultiPath(File(exists=True))
+    return subject_iterables, run_iterables
 
 
-class ModelSetup(BaseInterface):
-
-    input_spec = ModelSetupInput
-    output_spec = ModelSetupOutput
-
-    def _run_interface(self, runtime):
-
-        # Get all the information for the design
-        design_kwargs = self.build_design_information()
-
-        # Initialize the design matrix object
-        X = glm.DesignMatrix(**design_kwargs)
-
-        # Report on the design
-        self.design_report(self.inputs.exp_info, X, design_kwargs)
-
-        # Write out the design object as a pkl to pass to the report function
-        X.to_pickle("design.pkl")
-
-        # Finally, write out the design files in FSL format
-        X.to_fsl_files("design", self.inputs.exp_info["contrasts"])
-
-        return runtime
-
-    def build_design_information(self):
-
-        # Load in the design information
-        exp_info = self.inputs.exp_info
-        tr = self.inputs.exp_info["TR"]
-
-        # Derive the length of the scan and run number from the timeseries
-        ntp = nib.load(self.inputs.timeseries).shape[-1]
-        run = int(re.search("run_(\d+)", self.inputs.timeseries).group(1))
-
-        # Get the experimental design
-        if isdefined(self.inputs.design_file):
-            design = pd.read_csv(self.inputs.design_file)
-            design = design[design["run"] == run]
-        else:
-            design = None
-
-        # Get confound information to add to the model
-        confounds = []
-        sources = exp_info["confound_sources"]
-        bad_sources = set(sources) - set(["motion", "wm", "brain"])
-        if bad_sources:
-            msg = ("Invalid confound source specification: {}"
-                   .format(list(bad_sources)))
-            raise ValueError(msg)
-
-        # Get the motion correction parameters
-        if "motion" in sources:
-            realign = pd.read_csv(self.inputs.realign_file)
-            realign = realign.filter(regex="rot|trans").apply(stats.zscore)
-            confounds.append(realign)
-
-        # Get the anatomical nuisance sources
-        nuisance = pd.read_csv(self.inputs.nuisance_file).apply(stats.zscore)
-        if "wm" in sources:
-            wm = nuisance.filter(regex="wm")
-            confounds.append(wm)
-        if "brain" in sources:
-            brain = nuisance["brain"]
-            confounds.append(brain)
-
-        # Combine the different confound sources
-        if confounds:
-            confounds = pd.concat(confounds, axis=1)
-        else:
-            confounds = None
-
-        # Get the image artifacts
-        if exp_info["remove_artifacts"]:
-            artifacts = pd.read_csv(self.inputs.artifact_file).max(axis=1)
-        else:
-            artifacts = None
-
-        # Get the additional model regressors
-        if isdefined(self.inputs.regressor_file):
-            regressors = pd.read_csv(self.inputs.regressor_file)
-            regressors = regressors[regressors["run"] == run]
-            regressors = regressors.drop("run", axis=1)
-            if exp_info["regressor_names"] is not None:
-                regressors = regressors[exp_info["regressor_names"]]
-            regressors.index = np.arange(ntp) * tr
-        else:
-            regressors = None
-
-        # Set up the HRF model
-        hrf = getattr(glm, exp_info["hrf_model"])
-        hrf = hrf(exp_info["temporal_deriv"], tr, **exp_info["hrf_params"])
-
-        # Build a dict of keyword arguments for the design matrix
-        design_kwargs = dict(design=design,
-                             hrf_model=hrf,
-                             ntp=ntp,
-                             tr=tr,
-                             confounds=confounds,
-                             artifacts=artifacts,
-                             regressors=regressors,
-                             condition_names=exp_info["condition_names"],
-                             confound_pca=exp_info["confound_pca"],
-                             hpf_cutoff=exp_info["hpf_cutoff"])
-
-        return design_kwargs
-
-    def design_report(self, exp_info, X, design_kwargs):
-        """Generate static images summarizing the design."""
-        # Plot the design itself
-        design_png = op.abspath("design.png")
-        X.plot(fname=design_png, close=True)
-
-        with sns.axes_style("whitegrid"):
-            # Plot the eigenvalue spectrum
-            svd_png = op.abspath("design_singular_values.png")
-            X.plot_singular_values(fname=svd_png, close=True)
-
-            # Plot the correlations between design elements and confounds
-            corr_png = op.abspath("design_correlation.png")
-            if design_kwargs["design"] is None:
-                with open(corr_png, "wb"):
-                    pass
-            else:
-                X.plot_confound_correlation(fname=corr_png, close=True)
-
-        # Build a list of images sumarrizing the model
-        report = [design_png, corr_png, svd_png]
-
-        # Now plot the information loss from the high-pass filter
-        design_kwargs["hpf_cutoff"] = None
-        X_unfiltered = glm.DesignMatrix(**design_kwargs)
-        tr = design_kwargs["tr"]
-        ntp = design_kwargs["ntp"]
-
-        # Plot for each contrast
-        for i, (name, cols, weights) in enumerate(exp_info["contrasts"], 1):
-
-            # Compute the contrast predictors
-            C = X.contrast_vector(cols, weights)
-            y_filt = X.design_matrix.dot(C)
-            y_unfilt = X_unfiltered.design_matrix.dot(C)
-
-            # Compute the spectral density for filtered and unfiltered
-            fs, pxx_filt = signal.welch(y_filt, 1. / tr, nperseg=ntp)
-            fs, pxx_unfilt = signal.welch(y_unfilt, 1. / tr, nperseg=ntp)
-
-            # Draw the spectral density
-            with sns.axes_style("whitegrid"):
-                f, ax = plt.subplots(figsize=(9, 3))
-            ax.fill_between(fs, pxx_unfilt, color="#C41E3A")
-            if exp_info["hpf_cutoff"] is not None:
-                ax.axvline(1.0 / exp_info["hpf_cutoff"],
-                           c=".3", ls=":", lw=1.5)
-            ax.fill_between(fs, pxx_filt, color=".5")
-
-            # Label the plot
-            ax.set(xlabel="Frequency",
-                   ylabel="Spectral Density",
-                   xlim=(0, .15))
-            plt.tight_layout()
-
-            # Save the plot
-            fname = op.abspath("cope%d_filter.png" % i)
-            f.savefig(fname, dpi=100)
-            plt.close(f)
-            report.append(fname)
-
-        # Store the report files for later
-        self.report_files = report
-
-    def _list_outputs(self):
-
-        outputs = self._outputs().get()
-        outputs["report"] = self.report_files
-        outputs["contrast_file"] = op.abspath("design.con")
-        outputs["design_matrix_pkl"] = op.abspath("design.pkl")
-        outputs["design_matrix_file"] = op.abspath("design.mat")
-        return outputs
+# --- Workflow inputs
 
 
-class ModelSummaryInput(BaseInterfaceInputSpec):
+class ModelFitInput(SimpleInterface):
 
-    design_matrix_pkl = File(exists=True)
-    timeseries = File(exists=True)
-    pe_files = InputMultiPath(File(exists=True))
+    class input_spec(TraitedSpec):
+        experiment = traits.Str()
+        model = traits.Str()
+        analysis_dir = traits.Directory(exists=True)
+        subject = traits.Str()
+        run_tuple = traits.Tuple(traits.Str(), traits.Str())
 
-
-class ModelSummaryOutput(TraitedSpec):
-
-    r2_files = OutputMultiPath(File(exists=True))
-    ss_files = OutputMultiPath(File(exists=True))
-    tsnr_file = File(exists=True)
-
-
-class ModelSummary(BaseInterface):
-
-    input_spec = ModelSummaryInput
-    output_spec = ModelSummaryOutput
+    class output_spec(TraitedSpec):
+        subject = traits.Str()
+        session = traits.Str()
+        run = traits.Str()
+        seg_file = traits.File(exists=True)
+        surf_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        ts_file = traits.File(exists=True)
+        noise_file = traits.File(Exists=True)
+        mc_file = traits.File(exists=True)
+        output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
-        # Load the design matrix object
-        X = glm.DesignMatrix.from_pickle(self.inputs.design_matrix_pkl)
+        subject = self.inputs.subject
+        session, run = self.inputs.run_tuple
+        run_key = "{}_{}".format(session, run)
 
-        # Load and de-mean the timeseries
-        ts_img = nib.load(self.inputs.timeseries)
-        ts_aff, ts_header = ts_img.get_affine(), ts_img.get_header()
-        y = ts_img.get_data()
-        ybar = y.mean(axis=-1)[..., np.newaxis]
-        y -= ybar
-        self.y = y
+        experiment = self.inputs.experiment
+        model = self.inputs.model
+        anal_dir = self.inputs.analysis_dir
 
-        # Store the image attributes
-        self.affine = ts_aff
-        self.header = ts_header
+        template_path = op.join(anal_dir, subject, "template")
+        timeseries_path = op.join(anal_dir, subject, experiment,
+                                  "timeseries", run_key)
 
-        # Load the parameter estimates, make 4D, and concatenate
-        pes = [nib.load(f).get_data() for f in self.inputs.pe_files]
-        pes = [pe[..., np.newaxis] for pe in pes]
-        pes = np.concatenate(pes, axis=-1)
+        results = dict(
 
-        # Compute and save the total sum of squares
-        self.sstot = np.sum(np.square(y), axis=-1)
-        self.save_image(self.sstot, "sstot")
+            subject=subject,
+            session=session,
+            run=run,
 
-        # Compute the full model r squared
-        yhat_full = self.dot_by_slice(X, pes)
-        ss_full, r2_full = self.compute_r2(yhat_full)
-        self.save_image(ss_full, "ssres_full")
-        self.save_image(r2_full, "r2_full")
-        del yhat_full, r2_full
+            seg_file=op.join(template_path, "seg.nii.gz"),
+            surf_file=op.join(template_path, "surf.nii.gz"),
 
-        # Compute the main model r squared
-        yhat_main = self.dot_by_slice(X, pes, "main")
-        ss_main, r2_main = self.compute_r2(yhat_main)
-        self.save_image(ss_main, "ssres_main")
-        self.save_image(r2_main, "r2_main")
-        del yhat_main, r2_main
+            mask_file=op.join(timeseries_path, "mask.nii.gz"),
+            ts_file=op.join(timeseries_path, "func.nii.gz"),
+            noise_file=op.join(timeseries_path, "noise.nii.gz"),
+            mc_file=op.join(timeseries_path, "mc.csv"),
 
-        # Compute the confound model r squared
-        yhat_confound = self.dot_by_slice(X, pes, "confound")
-        _, r2_confound = self.compute_r2(yhat_confound)
-        self.save_image(r2_confound, "r2_confound")
-        del yhat_confound, r2_confound
-
-        # Compute and save the residual tSNR
-        std = np.sqrt(ss_full / len(y))
-        tsnr = np.squeeze(ybar) / std
-        tsnr = np.nan_to_num(tsnr)
-        self.save_image(tsnr, "tsnr")
+            output_path=op.join(anal_dir, subject, experiment, model, run_key)
+        )
+        self._results.update(results)
 
         return runtime
 
-    def save_image(self, data, fname):
-        """Save data to the output structure."""
-        img = nib.Nifti1Image(data, self.affine, self.header)
-        img.to_filename(fname + ".nii.gz")
 
-    def dot_by_slice(self, X, pes, component=None):
-        """Broadcast a dot product by image slices to balance speed/memory."""
-        if component is not None:
-            pes = pes * getattr(X, component + "_vector").T[np.newaxis,
-                                                            np.newaxis, :, :]
-        # Set up the output data structure
-        n_x, n_y, n_z, n_pe = pes.shape
-        n_t = X.design_matrix.shape[0]
-        out = np.empty((n_x, n_y, n_z, n_t))
+class ModelResultsInput(SimpleInterface):
 
-        # Do the dot product, broadcasted for each Z slice
-        for k in range(n_z):
-            slice_pe = pes[:, :, k, :].reshape(-1, n_pe).T
-            slice_dot = X.design_matrix.values.dot(slice_pe)
-            out[:, :, k, :] = slice_dot.T.reshape(n_x, n_y, n_t)
+    class input_spec(TraitedSpec):
+        experiment = traits.Str()
+        model = traits.Str()
+        analysis_dir = traits.Directory(exists=True)
+        subject = traits.Str()
+        run_tuple = traits.Tuple(traits.Str(), traits.Str())
 
-        return out
-
-    def compute_r2(self, yhat):
-        """Efficiently compute the coefficient of variation."""
-        ssres = np.zeros_like(self.sstot)
-        n_frames = yhat.shape[-1]
-        for tr in range(n_frames):
-            ssres += np.square(yhat[..., tr] - self.y[..., tr])
-        r2 = 1 - ssres / self.sstot
-        return ssres, r2
-
-    def _list_outputs(self):
-
-        outputs = self._outputs().get()
-
-        outputs["r2_files"] = [op.abspath("r2_full.nii.gz"),
-                               op.abspath("r2_main.nii.gz"),
-                               op.abspath("r2_confound.nii.gz")]
-        outputs["ss_files"] = [op.abspath("sstot.nii.gz"),
-                               op.abspath("ssres_full.nii.gz"),
-                               op.abspath("ssres_main.nii.gz")]
-        outputs["tsnr_file"] = op.abspath("tsnr.nii.gz")
-
-        return outputs
-
-
-class ModelReportInput(BaseInterfaceInputSpec):
-
-    timeseries = File(exists=True)
-    sigmasquareds_file = File(exists=True)
-    tsnr_file = File(exists=True)
-    zstat_files = InputMultiPath(File(exists=True))
-    r2_files = InputMultiPath(File(exists=True))
-
-
-class ModelReport(BaseInterface):
-
-    input_spec = ModelReportInput
-    output_spec = ManyOutFiles
+    class output_spec(TraitedSpec):
+        subject = traits.Str()
+        session = traits.Str()
+        run = traits.Str()
+        anat_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        beta_file = traits.File(exists=True)
+        ols_file = traits.File(exists=True)
+        error_file = traits.File(exists=True)
+        output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
-        # Load the sigmasquareds and use it to infer the model mask
-        var_img = nib.load(self.inputs.sigmasquareds_file).get_data()
-        self.mask = (var_img > 0).astype(np.int16)
+        subject = self.inputs.subject
+        session, run = self.inputs.run_tuple
+        run_key = "{}_{}".format(session, run)
 
-        # Load the timeseries and take the mean over time for a background
-        ts_img = nib.load(self.inputs.timeseries)
-        self.mean = nib.Nifti1Image(ts_img.get_data().mean(axis=-1),
-                                    ts_img.get_affine(),
-                                    ts_img.get_header())
+        experiment = self.inputs.experiment
+        model = self.inputs.model
+        analysis_dir = self.inputs.analysis_dir
 
-        # Set up the output list
-        self.out_files = []
+        template_path = op.join(analysis_dir, subject, "template")
+        model_path = op.join(analysis_dir, subject, experiment, model, run_key)
 
-        # Plot the data
-        self.plot_residuals()
-        self.plot_rsquareds()
-        self.plot_tsnr()
-        if isdefined(self.inputs.zstat_files):
-            self.plot_zstats()
+        results = dict(
+
+            subject=subject,
+            session=session,
+            run=run,
+
+            anat_file=op.join(template_path, "anat.nii.gz"),
+
+            mask_file=op.join(model_path, "mask.nii.gz"),
+            beta_file=op.join(model_path, "beta.nii.gz"),
+            ols_file=op.join(model_path, "ols.nii.gz"),
+            error_file=op.join(model_path, "error.nii.gz"),
+
+            output_path=model_path,
+        )
+        self._results.update(results)
 
         return runtime
 
-    def plot_residuals(self):
-        """Plot the variance of the model residuals across time."""
-        ss = self.inputs.sigmasquareds_file
-        m = Mosaic(self.mean, ss, self.mask, step=1)
-        m.plot_overlay("cube:.8:.2", 0, alpha=.6, fmt="%d")
-        png_name = nii_to_png(ss)
-        m.savefig(png_name)
-        m.close()
-        self.out_files.append(png_name)
 
-    def plot_tsnr(self):
+# --- Model estimation code
 
-        tsnr = self.inputs.tsnr_file
-        m = Mosaic(self.mean, tsnr, self.mask, step=1)
-        m.plot_overlay("cube:1.9:.5", 0, alpha=1, fmt="%d")
-        png_name = nii_to_png(tsnr)
-        m.savefig(png_name)
-        m.close()
-        self.out_files.append(png_name)
 
-    def plot_rsquareds(self):
-        """Plot the full, main, and confound R squared maps."""
-        cmaps = ["cube:2:0", "cube:2.6:0", "cube:1.5:0"]
-        for r2_file, cmap in zip(self.inputs.r2_files, cmaps):
-            m = Mosaic(self.mean, r2_file, self.mask, step=1)
-            m.plot_overlay(cmap, 0, alpha=.6)
-            png_name = nii_to_png(r2_file)
-            m.savefig(png_name)
-            m.close()
-            self.out_files.append(png_name)
+class ModelFit(SimpleInterface):
 
-    def plot_zstats(self):
-        """Plot the positive and negative z stats with a low threshold."""
-        for z_file in self.inputs.zstat_files:
-            m = Mosaic(self.mean, z_file, self.mask, step=1)
-            m.plot_activation(pos_cmap="Reds_r", neg_cmap="Blues",
-                              thresh=1.7, alpha=.85)
-            png_name = nii_to_png(z_file)
-            m.savefig(png_name)
-            m.close()
-            self.out_files.append(png_name)
+    class input_spec(TraitedSpec):
+        subject = traits.Str()
+        session = traits.Str()
+        run = traits.Str()
+        data_dir = traits.Directory(exists=True)
+        exp_info = traits.Dict()
+        model_info = traits.Dict()
+        seg_file = traits.File(exists=True)
+        surf_file = traits.File(exists=True)
+        ts_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        noise_file = traits.File(exists=True)
+        mc_file = traits.File(exists=True)
 
-    def _list_outputs(self):
+    class output_spec(TraitedSpec):
+        mask_file = traits.File(exists=True)
+        beta_file = traits.File(exists=True)
+        error_file = traits.File(exists=True)
+        ols_file = traits.File(exists=True)
+        resid_file = traits.File()
+        design_file = traits.File(exists=True)
+        resid_plot = traits.File(exists=True)
+        design_plot = traits.File(exists=True)
+        error_plot = traits.File(exists=True)
 
-        outputs = self._outputs().get()
-        outputs["out_files"] = self.out_files
-        return outputs
+    def _run_interface(self, runtime):
+
+        subject = self.inputs.subject
+        session = self.inputs.session
+        run = self.inputs.run
+        exp_info = Bunch(self.inputs.exp_info)
+        model_info = Bunch(self.inputs.model_info)
+        data_dir = self.inputs.data_dir
+
+        # Load the timeseries
+        ts_img = nib.load(self.inputs.ts_file)
+        affine, header = ts_img.affine, ts_img.header
+
+        # Load the anatomical segmentation and fine analysis mask
+        run_mask = nib.load(self.inputs.mask_file).get_data() > 0
+        seg_img = nib.load(self.inputs.seg_file)
+        seg = seg_img.get_data()
+        mask = (seg > 0) & (seg < 5) & run_mask
+        n_vox = mask.sum()
+        mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
+
+        # Load the noise segmentation
+        # TODO implement noisy voxel removal
+        noise = nib.load(self.inputs.noise_file)
+
+        # Spatially filter the data
+        # TODO implement surface smoothing
+        # Using simple volumetric smoothing for now to get things running
+        fwhm = model_info.smooth_fwhm
+        ts_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise)
+
+        # Compute the mean image for later
+        # TODO limit to gray matter voxels?
+        data = ts_img.get_data()
+        mean = data.mean(axis=-1)
+        mean_img = nib.Nifti1Image(mean, affine, header)
+
+        # Temporally filter the data
+        n_tp = ts_img.shape[-1]
+        hpf_matrix = glm.highpass_filter_matrix(n_tp,
+                                                model_info.hpf_cutoff,
+                                                exp_info.tr)
+        data[mask] = np.dot(hpf_matrix, data[mask].T).T
+
+        # TODO remove the mean from the data
+        # data[gray_mask] += mean[gray_mask, np.newaxis]
+        data[~mask] = 0
+
+        # Define confound regressons from various sources
+        # TODO
+        mc_data = pd.read_csv(self.inputs.mc_file)
+
+        # Detect artifact frames
+        # TODO
+
+        # Convert to percent signal change?
+        # TODO
+
+        # Build the design matrix
+        # TODO move out of moss and simplify
+        design_file = op.join(data_dir, subject, "design",
+                              model_info.name + ".csv")
+        design = pd.read_csv(design_file)
+        run_rows = (design.session == session) & (design.run == run)
+        design = design.loc[run_rows]
+        # TODO better error when this fails (maybe check earlier too)
+        assert len(design) > 0
+        dmat = mossglm.DesignMatrix(design, ntp=n_tp, tr=exp_info.tr)
+        X = dmat.design_matrix.values
+
+        # Save out the design matrix
+        design_file = self.define_output("design_file", "design.csv")
+        dmat.design_matrix.to_csv(design_file)
+
+        # Prewhiten the data
+        assert not np.isnan(data).any()
+        ts_img = nib.Nifti1Image(data, affine)
+        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
+
+        # Fit the final model
+        B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
+
+        # TODO should we re-compute the tSNR on the residuals?
+
+        # Convert outputs to image format
+        beta_img = matrix_to_image(B.T, mask_img)
+        error_img = matrix_to_image(SS, mask_img)
+        XtXinv_flat = XtXinv.reshape(n_vox, -1)
+        ols_img = matrix_to_image(XtXinv_flat.T, mask_img)
+        resid_img = matrix_to_image(E, mask_img, ts_img)
+
+        # Write out the results
+        self.write_image("mask_file", "mask.nii.gz", mask_img)
+        self.write_image("beta_file", "beta.nii.gz", beta_img)
+        self.write_image("error_file", "error.nii.gz", error_img)
+        self.write_image("ols_file", "ols.nii.gz", ols_img)
+        if model_info.save_residuals:
+            self.write_image("resid_file", "resid.nii.gz", resid_img)
+
+        # Make some QC plots
+        # We want a version of the resid data with an intact mean so that
+        # the carpet plot can compute percent signal change.
+        # (Maybe carpetplot should accept a mean image and handle that
+        # internally)?
+        # TODO standarize the representation of mean in this method
+        resid_data = np.zeros(ts_img.shape, np.float32)
+        resid_data += np.expand_dims(mean * mask, axis=-1)
+        resid_data[mask] += E.T
+        resid_img = nib.Nifti1Image(resid_data, affine, header)
+
+        resid_plot = self.define_output("resid_plot", "resid.png")
+        p = CarpetPlot(resid_img, seg_img, mc_data)
+        p.savefig(resid_plot)
+        p.close()
+
+        # Plot the deisgn matrix
+        # TODO update when improving design matrix code
+        design_plot = self.define_output("design_plot", "design.png")
+        dmat.plot(fname=design_plot, close=True)
+
+        # Plot the sigma squares image for QC
+        error_plot = self.define_output("error_plot", "error.png")
+        error_m = Mosaic(mean_img, error_img, mask_img)
+        error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
+        error_m.savefig(error_plot)
+        error_m.close()
+
+        # mask image qc
+
+        return runtime
+
+
+class EstimateContrasts(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        exp_info = traits.Dict()
+        model_info = traits.Dict()
+        mask_file = traits.File(exists=True)
+        beta_file = traits.File(exists=True)
+        ols_file = traits.File(exists=True)
+        error_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        contrast_file = traits.File(exists=True)
+        variance_file = traits.File(exists=True)
+        tstat_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Load model fit outputs
+        mask_img = nib.load(self.inputs.mask_file)
+        beta_img = nib.load(self.inputs.beta_file)
+        error_img = nib.load(self.inputs.error_file)
+        ols_img = nib.load(self.inputs.ols_file)
+
+        B = image_to_matrix(beta_img, mask_img)
+        SS = image_to_matrix(error_img, mask_img)
+        XtXinv = image_to_matrix(ols_img, mask_img)
+
+        # Reshape the matrix form data to what the glm functions expect
+        # TODO the shape/orientation of model parameter matrices needs some
+        # more thinking / standardization
+        B = B.T
+        n_vox, n_ev = B.shape
+        XtXinv = XtXinv.reshape(n_ev, n_ev, n_vox).T
+
+        # Obtain list of contrast matrices
+        # C = model_info.contrasts
+        # TODO how are we going to do this? Hardcode for now.
+        # TODO do we want to enforce vectors or do we ever want F stats
+        C = [np.array([1, 0, 0, 0]),
+             np.array([0, 1, 0, 0]),
+             np.array([0, 0, 1, 0]),
+             np.array([0, 0, 0, 1]),
+             np.array([1, -1, 0, 0]),
+             np.array([0, 0, 1, -1])]
+
+        # Estimate the contrasts, variances, and statistics in each voxel
+        G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
+        contrast_img = matrix_to_image(G.T, mask_img)
+        variance_img = matrix_to_image(V.T, mask_img)
+        tstat_img = matrix_to_image(T.T, mask_img)
+
+        # Write out the output files
+        self.write_image("contrast_file", "contrast.nii.gz", contrast_img)
+        self.write_image("variance_file", "variance.nii.gz", variance_img)
+        self.write_image("tstat_file", "tstat.nii.gz", tstat_img)
+
+        return runtime
+
+
+class ModelResults(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        model_info = traits.Dict()
+        anat_file = traits.File(exists=True)
+        contrast_files = traits.List(traits.File(exists=True))
+        variance_files = traits.List(traits.File(exists=True))
+
+    class output_spec(TraitedSpec):
+        result_directories = traits.List(traits.Directory(exists=True))
+
+    def _run_interface(self, runtime):
+
+        model_info = Bunch(self.inputs.model_info)
+
+        # Load the anatomical template to get image geometry information
+        anat_img = nib.load(self.inputs.anat_file)
+        affine, header = anat_img.affine, anat_img.header
+
+        # TODO define contrasts properly accounting for missing EVs
+        result_directories = []
+        for i, contrast in enumerate(model_info.contrasts):
+
+            result_directories.append(op.abspath(contrast))
+            os.makedirs(op.join(contrast, "qc"))
+
+            con_frames = []
+            var_frames = []
+
+            # Load the parameter and variance data for each run/contrast.
+            con_images = map(nib.load, self.inputs.contrast_files)
+            var_images = map(nib.load, self.inputs.variance_files)
+
+            # Files are input as a list of 4D images where list entries are
+            # runs and the last axis is contrast; we want to concatenate runs
+            # for each contrast, so we need to transpose" the ordering.
+            for con_img, var_img in zip(con_images, var_images):
+                con_frames.append(con_img.get_data()[..., i])
+                var_frames.append(var_img.get_data()[..., i])
+
+            con_data = np.stack(con_frames, axis=-1)
+            var_data = np.stack(var_frames, axis=-1)
+
+            # Define a mask as voxels with nonzero variance in each run
+            # and extract voxel data as arrays
+            mask = (var_data > 0).all(axis=-1)
+            mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
+            con = con_data[mask]
+            var = var_data[mask]
+
+            # Compute the higher-level fixed effects parameters
+            con_ffx, var_ffx, t_ffx = glm.contrast_fixed_effects(con, var)
+
+            # Convert to image volume format
+            con_img = matrix_to_image(con_ffx.T, mask_img)
+            var_img = matrix_to_image(var_ffx.T, mask_img)
+            t_img = matrix_to_image(t_ffx.T, mask_img)
+
+            # Write out output images
+            con_img.to_filename(op.join(contrast, "contrast.nii.gz"))
+            var_img.to_filename(op.join(contrast, "variance.nii.gz"))
+            t_img.to_filename(op.join(contrast, "tstat.nii.gz"))
+            mask_img.to_filename(op.join(contrast, "mask.nii.gz"))
+
+            # Contrast t statistic overlay
+            stat_m = Mosaic(anat_img, t_img, mask_img, show_mask=True)
+            stat_m.plot_overlay("coolwarm", -10, 10)
+            stat_m.savefig(op.join(contrast, "qc", "tstat.png"))
+
+            # Analysis mask
+            mask_m = Mosaic(anat_img, mask_img)
+            mask_m.plot_mask()
+            mask_m.savefig(op.join(contrast, "qc", "mask.png"))
+
+        # Output a list of directories with results.
+        # This makes the connections in the workflow more opaque, but it
+        # simplifies placing files in subdirectories named after contrasts.
+        self._results["result_directories"] = result_directories
+
+        return runtime
+
+
+class ModelResultsPath(SimpleInterface):
+
+    class input_spec(TraitedSpec):
+        analysis_dir = traits.Directory(exists=True)
+        subject = traits.Str()
+        experiment = traits.Str()
+        model = traits.Str()
+
+    class output_spec(TraitedSpec):
+        output_path = traits.Directory()
+
+    def _run_interface(self, runtime):
+
+        self._results["output_path"] = op.join(
+            self.inputs.analysis_dir,
+            self.inputs.subject,
+            self.inputs.experiment,
+            self.inputs.model,
+            "results"
+        )
+        return runtime
