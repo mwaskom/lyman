@@ -17,8 +17,8 @@ from ..utils import LymanInterface, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot
 
 
-def define_model_fit_workflow(proj_info, subjects, session,
-                              exp_info, model_info, qc=True):
+def define_model_fit_workflow(proj_info, exp_info, model_info,
+                              subjects, sessions, qc=True):
 
     # --- Workflow parameterization and data input
 
@@ -30,7 +30,7 @@ def define_model_fit_workflow(proj_info, subjects, session,
     experiment = exp_info.name
     model = model_info.name
 
-    iterables = generate_iterables(scan_info, experiment, subjects, session)
+    iterables = generate_iterables(scan_info, experiment, subjects, sessions)
     subject_iterables, run_iterables = iterables
 
     subject_source = Node(IdentityInterface(["subject"]),
@@ -114,8 +114,8 @@ def define_model_fit_workflow(proj_info, subjects, session,
     return workflow
 
 
-def define_model_results_workflow(proj_info, subjects,
-                                  exp_info, model_info, qc=True):
+def define_model_results_workflow(proj_info, exp_info, model_info,
+                                  subjects, qc=True):
 
     # TODO I am copying a lot from above ...
 

@@ -30,7 +30,7 @@ class TestLymanInterface(object):
         c = a + b
 
         ifc = TestInterface(a=a, b=b)
-        assert hasattr(ifc, "_results")
+        assert ifc._results == {}
 
         res = ifc.run()
         assert ifc._results == {"c": c}
@@ -40,11 +40,11 @@ class TestLymanInterface(object):
 
         orig_dir = tmpdir.chdir()
 
-        ifc = utils.LymanInterface()
-        field_name = "out_file"
-        file_name = "out_file.txt"
-
         try:
+
+            ifc = utils.LymanInterface()
+            field_name = "out_file"
+            file_name = "out_file.txt"
 
             abspath_file_name = tmpdir.join(file_name)
             out = ifc.define_output(field_name, file_name)

@@ -11,15 +11,15 @@ def lyman_info(tmpdir):
     # TODO probably get these from default info functions
     scan_info = {
         "subj01": {
-            "exp_alpha": {
-                "sess01": ["run01", "run02"],
-                "sess02": ["run01"],
-            },
+            "sess01":
+                {"exp_alpha": ["run01", "run02"]},
+            "sess02":
+                {"exp_alpha": ["run01"],
+                 "exp_beta": ["run01", "run02", "run03"]},
         },
         "subj02": {
-            "exp_alpha": {
-                "sess01": ["run01", "run02", "run02"],
-            }
+            "sess01":
+                {"exp_alpha": ["run01", "run02", "run03"]}
         },
     }
     proj_info = Bunch(
@@ -34,7 +34,7 @@ def lyman_info(tmpdir):
     )
 
     subjects = ["subj01", "subj02"]
-    session = None
+    sessions = None
 
     exp_info = Bunch(name="exp_alpha")
 
@@ -43,7 +43,7 @@ def lyman_info(tmpdir):
     return dict(
         proj_info=proj_info,
         subjects=subjects,
-        session=session,
+        sessions=sessions,
         exp_info=exp_info,
         model_info=model_info,
     )

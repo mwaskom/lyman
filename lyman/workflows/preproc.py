@@ -18,7 +18,7 @@ from ..utils import LymanInterface
 from ..visualizations import Mosaic, CarpetPlot
 
 
-def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
+def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
 
     # proj_info will be a bunch or other object with data_dir, etc. fields
 
@@ -29,7 +29,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
     scan_info = proj_info.scan_info
     experiment = exp_info.name
 
-    iterables = generate_iterables(scan_info, subjects, experiment, session)
+    iterables = generate_iterables(scan_info, experiment, subjects, sessions)
     subject_iterables, session_iterables, run_iterables = iterables
 
     subject_iterables = subjects
@@ -349,9 +349,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 # =========================================================================== #
 
 
-def generate_iterables(scan_info, subjects, experiment, session=None):
+def generate_iterables(scan_info, experiment, subjects, sessions=None):
 
-    # TODO additionally we want to expand this to specify > 1 session
     # TODO also change the order of subjects and experiment?
     subject_iterables = subjects
     session_iterables = dict()
@@ -365,7 +364,7 @@ def generate_iterables(scan_info, subjects, experiment, session=None):
 
             sess_key = subj, sess
 
-            if session is not None and sess != session:
+            if sessions is not None and sess not in sessions:
                 continue
 
             if experiment in scan_info[subj][sess]:
