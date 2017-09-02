@@ -168,12 +168,10 @@ class DefineTemplateSpace(LymanInterface):
         self.submit_cmdline(runtime, cmdline)
 
         # Write out QC mosaics
-        t1w_plot = self.define_output("t1w_plot", "T1w.png")
-        Mosaic(t1w_file).savefig(t1w_plot, close=True)
+        self.write_visualization("t1w_plot", "T1w.png", Mosaic(t1w_file))
 
         if have_t2w:
-            t2w_plot = self.define_output("t2w_plot", "T2w.png")
-            Mosaic(t2w_file).savefig(t2w_plot, close=True)
+            self.write_visualization("t2w_plot", "T2w.png", Mosaic(t2w_file))
 
         return runtime
 
@@ -308,28 +306,22 @@ class AnatomicalSegmentation(LymanInterface):
         # --- Generate QC mosaics
 
         # Anatomical segmentation
-
-        seg_plot = self.define_output("seg_plot", "seg.png")
-        seg_cmap = mpl.colors.ListedColormap(
+        seg_cmap = mpl.colors.ListedColormap(  # TODO get from seg lut
             ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
              '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
          )
         m_seg = Mosaic(template_img, seg_img, mask_img,
                        step=2, tight=True, show_mask=False)
         m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
-        m_seg.savefig(seg_plot, close=True)
+        self.write_visualization("seg_plot", "seg.png", m_seg)
 
         # Brain mask
-
-        mask_plot = self.define_output("mask_plot", "mask.png")
         m_mask = Mosaic(template_img, mask_img, mask_img,
                         step=2, tight=True, show_mask=False)
         m_mask.plot_mask()
-        m_mask.savefig(mask_plot, close=True)
+        self.write_visualization("mask_plot", "mask.png", m_mask)
 
         # Surface ribbon
-
-        surf_plot = self.define_output("surf_plot", "surf.png")
         ribbon = np.zeros(template_img.shape)
         ribbon[surf[..., 0] > 0] = 1
         ribbon[surf[..., 1] > 0] = 2
@@ -337,6 +329,6 @@ class AnatomicalSegmentation(LymanInterface):
         m_surf = Mosaic(template_img, ribbon, mask_img,
                         step=2, tight=True, show_mask=False)
         m_surf.plot_overlay(ribbon_cmap, 1, 2, thresh=.5, fmt=None)
-        m_surf.savefig(surf_plot, close=True)
+        self.write_visualization("surf_plot", "surf.png", m_surf)
 
         return runtime

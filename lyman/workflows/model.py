@@ -496,9 +496,8 @@ class ModelFit(LymanInterface):
         resid_data[mask] += E.T
         resid_img = nib.Nifti1Image(resid_data, affine, header)
 
-        resid_plot = self.define_output("resid_plot", "resid.png")
         p = CarpetPlot(resid_img, seg_img, mc_data)
-        p.savefig(resid_plot, close=True)
+        self.write_visualization("resid_plot", "resid.png", p)
 
         # Plot the deisgn matrix
         # TODO update when improving design matrix code
@@ -506,12 +505,9 @@ class ModelFit(LymanInterface):
         dmat.plot(fname=design_plot, close=True)
 
         # Plot the sigma squares image for QC
-        error_plot = self.define_output("error_plot", "error.png")
         error_m = Mosaic(mean_img, error_img, mask_img)
         error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
-        error_m.savefig(error_plot, close=True)
-
-        # mask image qc
+        self.write_visualization("error_plot", "error.png", error_m)
 
         return runtime
 

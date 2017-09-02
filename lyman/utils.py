@@ -33,6 +33,11 @@ class LymanInterface(BaseInterface):
         img.to_filename(fname)
         return img
 
+    def write_visualization(self, field, fname, viz):
+        """Write a visualization to disk and assign path to output field."""
+        fname = self.define_output(field, fname)
+        viz.savefig(fname, close=True)
+
     def submit_cmdline(self, runtime, cmdline):
         """Submit a command-line job and capture the output."""
         for attr in ["stdout", "stderr", "cmdline"]:

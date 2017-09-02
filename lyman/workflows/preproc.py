@@ -734,10 +734,9 @@ class FinalizeUnwarping(LymanInterface):
                          mask_data, affine, header)
 
         # Generate a QC image of the warpfield
-        warp_plot = self.define_output("warp_plot", "warp.png")
         m = Mosaic(raw_img, warp_data_y)
         m.plot_overlay("coolwarm", vmin=-6, vmax=6, alpha=.75)
-        m.savefig(warp_plot, close=True)
+        self.write_visualization("warp_plot", "warp.png", m)
 
         # Generate a QC gif of the unwarping performance
         self.generate_unwarp_gif(runtime, raw_img_frames, corr_img_frames)
@@ -927,40 +926,35 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         mc_data.to_csv(mc_file, index=False)
 
         # Make a carpet plot of the final timeseries
-        out_png = self.define_output("out_png", "func.png")
         p = CarpetPlot(out_img, seg_img, mc_data)
-        p.savefig(out_png, close=True)
+        self.write_visualization("out_png", "func.png", p)
 
         # Make a GIF movie of the final timeseries
         out_gif = self.define_output("out_gif", "func.gif")
         self.write_time_series_gif(runtime, out_img, out_gif)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
-        mean_plot = self.define_output("mean_plot", "mean.png")
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(anat_img, norm_mean)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
-        mean_m.savefig(mean_plot, close=True)
+        self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
         tsnr_m = Mosaic(anat_img, tsnr)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
-        tsnr_m.savefig(tsnr_plot, close=True)
+        self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a mosaic of the run mask
         # TODO is the better QC showing the run mask over the unmasked mean
         # image so that we can see if the brain is getting cut off?
-        mask_plot = self.define_output("mask_plot", "mask.png")
-        m = Mosaic(anat_img, mask_img)
-        m.plot_mask()
-        m.savefig(mask_plot, close=True)
+        mask_m = Mosaic(anat_img, mask_img)
+        mask_m.plot_mask()
+        self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a mosaic of the noisy voxels
-        noise_plot = self.define_output("noise_plot", "noise.png")
-        m = Mosaic(anat_img, noise_img, mask_img, show_mask=False)
-        m.plot_mask(alpha=1)
-        m.savefig(noise_plot, close=True)
+        noise_m = Mosaic(anat_img, noise_img, mask_img, show_mask=False)
+        noise_m.plot_mask(alpha=1)
+        self.write_visualization("noise_plot", "noise.png", noise_m)
 
         # Spec out the root path for the timeseries outputs
         subject, session, run = self.inputs.run_tuple
@@ -1068,37 +1062,33 @@ class FinalizeTemplate(LymanInterface):
                                     tsnr_data, affine, header)
 
         # Write static mosaic image
-        out_plot = self.define_output("out_plot", "func.png")
-        Mosaic(out_img).savefig(out_plot, close=True)
+        m = Mosaic(out_img)
+        self.write_visualization("out_plot", "func.png", m)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
         # TODO copied from timeseries interface!
-        mean_plot = self.define_output("mean_plot", "mean.png")
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(anat_img, norm_mean, mask_img, show_mask=False)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
-        mean_m.savefig(mean_plot, close=True)
+        self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
         tsnr_m = Mosaic(anat_img, tsnr_img, mask_img, show_mask=False)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
-        tsnr_m.savefig(tsnr_plot, close=True)
+        self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a QC plot of the run mask
         # TODO should this emphasize areas where runs don't overlap?
-        mask_plot = self.define_output("mask_plot", "mask.png")
-        m = Mosaic(anat_img, mask_img)
-        m.plot_mask()
-        m.savefig(mask_plot, close=True)
+        mask_m = Mosaic(anat_img, mask_img)
+        mask_m.plot_mask()
+        self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a QC plot of the session noise mask
-        noise_plot = self.define_output("noise_plot", "noise.png")
-        m = Mosaic(anat_img, noise_img)
-        m.plot_mask(alpha=1)
-        m.savefig(noise_plot, close=True)
+        noise_m = Mosaic(anat_img, noise_img)
+        noise_m.plot_mask(alpha=1)
+        self.write_visualization("noise_plot", "noise.png", noise_m)
 
         # Spec out the root path for the template outputs
         experiment = self.inputs.experiment
@@ -1136,9 +1126,8 @@ class RealignmentReport(LymanInterface):
         plt.close(f)
 
         # Plot the target image
-        target_plot = self.define_output("target_plot", "mc_target.png")
         m = self.plot_target()
-        m.savefig(target_plot, close=True)
+        self.write_visualization("target_plot", "mc_target.png", m)
 
         return runtime
 
@@ -1218,14 +1207,12 @@ class AnatRegReport(LymanInterface):
 
         # Make a mosaic of the registration from func to wm seg
         # TODO this should be an OrthoMosaic when that is implemented
-        out_file = self.define_output("out_file", "reg.png")
-
         m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
         m.plot_mask_edges()
         if cost is not None:
             m.fig.suptitle("Final cost: {:.2f}".format(cost),
                            size=10, color="white")
-        m.savefig(out_file, close=True)
+        self.write_visualization("out_file", "reg.png", m)
 
         return runtime
 
