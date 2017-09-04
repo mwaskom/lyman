@@ -105,6 +105,10 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
     combine_postmats = Node(fsl.ConvertXFM(concat_xfm=True),
                             "combine_postmats")
 
+    # Transform Jacobian images into the template space
+    transform_jacobian = Node(fsl.ApplyWarp(relwarp=True),
+                              "transform_jacobian")
+
     # Apply rigid transforms and nonlinear warpfield to time series frames
     restore_timeseries = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
                                  ["in_file", "premat"],
@@ -204,6 +208,13 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
         (session_input, combine_postmats,
             [("reg_file", "in_file2")]),
 
+        (run_input, transform_jacobian,
+            [("anat_file", "ref_file")]),
+        (finalize_unwarping, transform_jacobian,
+            [("jacobian_file", "in_file")]),
+        (combine_postmats, transform_jacobian,
+            [("out_file", "premat")]),
+
         (run_input, restore_timeseries,
             [("ts_frames", "in_file")]),
         (run_input, restore_timeseries,
@@ -219,10 +230,8 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
              ("anat_file", "anat_file"),
              ("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
-        (combine_postmats, finalize_timeseries,
-            [("out_file", "reg_file")]),
-        (finalize_unwarping, finalize_timeseries,
-            [("jacobian_file", "jacobian_file")]),
+        (transform_jacobian, finalize_timeseries,
+            [("out_file", "jacobian_file")]),
         (restore_timeseries, finalize_timeseries,
             [("out_file", "in_files")]),
 
@@ -238,10 +247,8 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
             [("session_tuple", "session_tuple"),
              ("seg_file", "seg_file"),
              ("anat_file", "anat_file")]),
-        (combine_postmats, finalize_template,
-            [("out_file", "reg_file")]),
-        (finalize_unwarping, finalize_template,
-            [("jacobian_file", "jacobian_file")]),
+        (transform_jacobian, finalize_template,
+            [("out_file", "jacobian_file")]),
         (restore_template, finalize_template,
             [("out_file", "in_files")]),
 
@@ -729,13 +736,13 @@ class FinalizeUnwarping(LymanInterface):
         corr_data = corr_img_frames.get_data()
 
         # Jacobian modulate the corrected image
-        corr_img_frames = nib.Nifti1Image(corr_data * jac_data,
-                                          affine, header)
+        corr_mod_data = corr_data * jac_data
+        corr_img_frames = nib.Nifti1Image(corr_mod_data, affine, header)
 
         # Average the corrected image over the final dimension and write
-        corr_data_avg = corr_data.mean(axis=-1)
+        corr_mod_data = corr_mod_data.mean(axis=-1)
         self.write_image("corrected_file", "func.nii.gz",
-                         corr_data_avg, affine, header)
+                         corr_mod_data, affine, header)
 
         # Save the jacobian images using the raw geometry
         self.write_image("jacobian_file", "jacobian.nii.gz",
@@ -856,7 +863,6 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         anat_file = traits.File(exists=True)
         in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         jacobian_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
@@ -896,17 +902,8 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         # Zero-out data outside the mask
         data[~mask] = 0
 
-        # Transform the jacobian image into template space
-        jacobian_file = "jacobian.nii.gz"
-        cmdline = ["applywarp",
-                   "-i", self.inputs.jacobian_file,
-                   "-r", self.inputs.in_files[0],
-                   "-o", jacobian_file,
-                   "--premat=" + self.inputs.reg_file]
-        self.submit_cmdline(runtime, cmdline)
-
         # Jacobian modulate each frame of the timeseries image
-        jacobian_img = nib.load(jacobian_file)
+        jacobian_img = nib.load(self.inputs.jacobian_file)
         jacobian = jacobian_img.get_data()[..., [0]]
         data *= jacobian
 
@@ -916,8 +913,8 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         data = data * scale_value
 
         # Remove linear but not constant trend
-        mean = data.mean(axis=-1, keepdims=True)
-        data[mask] = signal.detrend(data[mask])
+        mask_mean = data[mask].mean(axis=-1, keepdims=True)
+        data[mask] = signal.detrend(data[mask], axis=-1) + mask_mean
 
         # Save out the final time series
         out_img = self.write_image("out_file", "func.nii.gz",
@@ -1000,16 +997,15 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
 class FinalizeTemplate(LymanInterface):
 
     class input_spec(TraitedSpec):
-        session_tuple = traits.Tuple()
         experiment = traits.Str()
+        session_tuple = traits.Tuple()
         in_files = traits.List(traits.File(exists=True))
-        reg_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
         anat_file = traits.File(exists=True)
         jacobian_file = traits.File(exists=True)
+        mask_files = traits.List(traits.File(exists=True))
         mean_files = traits.List(traits.File(exists=True))
         tsnr_files = traits.List(traits.File(exsits=True))
-        mask_files = traits.List(traits.File(exists=True))
         noise_files = traits.List(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
@@ -1046,17 +1042,8 @@ class FinalizeTemplate(LymanInterface):
         # Zero-out data outside the mask
         data[~mask] = 0
 
-        # Transform the jacobian image into template space
-        jacobian_file = "jacobian.nii.gz"
-        cmdline = ["applywarp",
-                   "-i", self.inputs.jacobian_file,
-                   "-r", self.inputs.in_files[0],
-                   "-o", jacobian_file,
-                   "--premat=" + self.inputs.reg_file]
-        self.submit_cmdline(runtime, cmdline)
-
         # Jacobian modulate each frame of the template image
-        jacobian_img = nib.load(jacobian_file)
+        jacobian_img = nib.load(self.inputs.jacobian_file)
         jacobian = jacobian_img.get_data()
         data *= jacobian
 
@@ -1085,7 +1072,7 @@ class FinalizeTemplate(LymanInterface):
         mean_img = self.write_image("mean_file", "mean.nii.gz",
                                     mean, affine, header)
 
-        # Load each run's tsnr image and take its tsnr
+        # Load each run's tsnr image and take its mean
         tsnr_img = nib.concat_images(self.inputs.tsnr_files)
         tsnr_data = tsnr_img.get_data().mean(axis=-1)
         tsnr_data[~mask] = 0
