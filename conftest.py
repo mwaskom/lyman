@@ -3,7 +3,16 @@ from moss import Bunch  # TODO change to lyman version when implemented
 
 
 @pytest.fixture()
+def execdir(tmpdir):
+
+    origdir = tmpdir.chdir()
+    yield tmpdir
+    origdir.chdir()
+
+
+@pytest.fixture()
 def lyman_info(tmpdir):
+
     data_dir = tmpdir.mkdir("data")
     analysis_dir = tmpdir.mkdir("analysis")
     cache_dir = tmpdir.mkdir("cache")

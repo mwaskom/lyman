@@ -37,63 +37,47 @@ class TestLymanInterface(object):
         assert ifc._results == {"c": c}
         assert res.outputs.c == c
 
-    def test_output_definition(self, tmpdir):
+    def test_output_definition(self, execdir):
 
-        orig_dir = tmpdir.chdir()
+        ifc = utils.LymanInterface()
+        field_name = "out_file"
+        file_name = "out_file.txt"
 
-        try:
+        abspath_file_name = execdir.join(file_name)
+        out = ifc.define_output(field_name, file_name)
 
-            ifc = utils.LymanInterface()
-            field_name = "out_file"
-            file_name = "out_file.txt"
+        assert out == abspath_file_name
+        assert ifc._results == {field_name: abspath_file_name}
 
-            abspath_file_name = tmpdir.join(file_name)
-            out = ifc.define_output(field_name, file_name)
+    def test_write_image(self, execdir):
 
-            assert out == abspath_file_name
-            assert ifc._results == {field_name: abspath_file_name}
+        field_name = "out_file"
+        file_name = "out_file.nii"
+        abspath_file_name = execdir.join(file_name)
 
-        finally:
-            orig_dir.chdir()
+        data = np.random.randn(12, 8, 4)
+        affine = np.eye(4)
+        img = nib.Nifti1Image(data, affine)
 
-    def test_write_image(self, tmpdir):
+        # Test writing with an image
+        ifc = utils.LymanInterface()
+        img_out = ifc.write_image(field_name, file_name, img)
 
-        orig_dir = tmpdir.chdir()
+        assert ifc._results == {field_name: abspath_file_name}
+        assert isinstance(img_out, nib.Nifti1Image)
+        assert np.array_equal(img_out.get_data(), data)
+        assert np.array_equal(img_out.affine, affine)
 
-        try:
+        # Test writing with data and affine
+        ifc = utils.LymanInterface()
+        img_out = ifc.write_image(field_name, file_name, data, affine)
 
-            field_name = "out_file"
-            file_name = "out_file.nii"
-            abspath_file_name = tmpdir.join(file_name)
+        assert ifc._results == {field_name: abspath_file_name}
+        assert isinstance(img_out, nib.Nifti1Image)
+        assert np.array_equal(img_out.get_data(), data)
+        assert np.array_equal(img_out.affine, affine)
 
-            data = np.random.randn(12, 8, 4)
-            affine = np.eye(4)
-            img = nib.Nifti1Image(data, affine)
-
-            # Test writing with an image
-            ifc = utils.LymanInterface()
-            img_out = ifc.write_image(field_name, file_name, img)
-
-            assert ifc._results == {field_name: abspath_file_name}
-            assert isinstance(img_out, nib.Nifti1Image)
-            assert np.array_equal(img_out.get_data(), data)
-            assert np.array_equal(img_out.affine, affine)
-
-            # Test writing with data and affine
-            ifc = utils.LymanInterface()
-            img_out = ifc.write_image(field_name, file_name, data, affine)
-
-            assert ifc._results == {field_name: abspath_file_name}
-            assert isinstance(img_out, nib.Nifti1Image)
-            assert np.array_equal(img_out.get_data(), data)
-            assert np.array_equal(img_out.affine, affine)
-
-        finally:
-            orig_dir.chdir()
-
-    def test_write_visualization(self, tmpdir):
-
-        orig_dir = tmpdir.chdir()
+    def test_write_visualization(self, execdir):
 
         class Visualization(object):
             self.closed = False
@@ -104,70 +88,58 @@ class TestLymanInterface(object):
                 if close:
                     self.closed = True
 
-        try:
+        out_field = "test_file"
+        out_path = "test.png"
 
-            out_field = "test_file"
-            out_path = "test.png"
+        viz = Visualization()
+        ifc = utils.LymanInterface()
+        ifc.write_visualization(out_field, out_path, viz)
 
-            viz = Visualization()
+        assert op.exists("test.png")
+        assert ifc._results == {out_field: op.join(execdir, out_path)}
+        assert viz.closed
+
+    def test_submit_cmdline(self, execdir):
+
+        msg = "test"
+        runtime = Bunch(returncode=None,
+                        cwd=str(execdir),
+                        environ={"msg": msg})
+
+        ifc = utils.LymanInterface()
+        cmdline_a = ["echo", "$msg"]
+
+        runtime = ifc.submit_cmdline(runtime, cmdline_a)
+
+        stdout = "\n{}\n".format(msg + "\n")
+        assert runtime.stdout == stdout
+
+        stderr = "\n\n"
+        assert runtime.stderr == stderr
+
+        cmdline = "\n{}\n".format(" ".join(cmdline_a))
+        assert runtime.cmdline == cmdline
+        assert runtime.returncode == 0
+
+        with pytest.raises(RuntimeError):
+
             ifc = utils.LymanInterface()
-            ifc.write_visualization(out_field, out_path, viz)
+            fname = "not_a_file"
+            cmdline_b = ["cat", fname]
 
-            assert op.exists("test.png")
-            assert ifc._results == {out_field: op.join(tmpdir, out_path)}
-            assert viz.closed
+            runtime = ifc.submit_cmdline(runtime, cmdline_b)
 
-        finally:
-            orig_dir.chdir()
+        stdout = stdout + "\n\n"
+        assert runtime.stdout == stdout
 
-    def test_submit_cmdline(self, tmpdir):
+        stderr = stderr + ("\ncat: {}: No such file or directory\n\n"
+                           .format(fname))
+        assert runtime.stderr == stderr
 
-        orig_dir = tmpdir.chdir()
+        cmdline = cmdline + "\n{}\n".format(" ".join(cmdline_b))
+        assert runtime.cmdline == cmdline
 
-        try:
-
-            msg = "test"
-            runtime = Bunch(returncode=None,
-                            cwd=str(tmpdir),
-                            environ={"msg": msg})
-
-            ifc = utils.LymanInterface()
-            cmdline_a = ["echo", "$msg"]
-
-            runtime = ifc.submit_cmdline(runtime, cmdline_a)
-
-            stdout = "\n{}\n".format(msg + "\n")
-            assert runtime.stdout == stdout
-
-            stderr = "\n\n"
-            assert runtime.stderr == stderr
-
-            cmdline = "\n{}\n".format(" ".join(cmdline_a))
-            assert runtime.cmdline == cmdline
-            assert runtime.returncode == 0
-
-            with pytest.raises(RuntimeError):
-
-                ifc = utils.LymanInterface()
-                fname = "not_a_file"
-                cmdline_b = ["cat", fname]
-
-                runtime = ifc.submit_cmdline(runtime, cmdline_b)
-
-            stdout = stdout + "\n\n"
-            assert runtime.stdout == stdout
-
-            stderr = stderr + ("\ncat: {}: No such file or directory\n\n"
-                               .format(fname))
-            assert runtime.stderr == stderr
-
-            cmdline = cmdline + "\n{}\n".format(" ".join(cmdline_b))
-            assert runtime.cmdline == cmdline
-
-            assert runtime.returncode == 1
-
-        finally:
-            orig_dir.chdir()
+        assert runtime.returncode == 1
 
 
 class TestImageMatrixConversion(object):

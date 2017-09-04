@@ -127,3 +127,7 @@ class TestPreprocWorkflow(object):
                 [("subj01", "sess02", "run01")]},
         )
         assert iterables == expected_iterables
+
+    def test_combine_linaer_transforms(self, execdir):
+
+        pass
