@@ -1,3 +1,4 @@
+import os.path as op
 import numpy as np
 import nibabel as nib
 
@@ -86,6 +87,35 @@ class TestLymanInterface(object):
             assert isinstance(img_out, nib.Nifti1Image)
             assert np.array_equal(img_out.get_data(), data)
             assert np.array_equal(img_out.affine, affine)
+
+        finally:
+            orig_dir.chdir()
+
+    def test_write_visualization(self, tmpdir):
+
+        orig_dir = tmpdir.chdir()
+
+        class Visualization(object):
+            self.closed = False
+
+            def savefig(self, fname, close):
+                with open(fname, "w"):
+                    pass
+                if close:
+                    self.closed = True
+
+        try:
+
+            out_field = "test_file"
+            out_path = "test.png"
+
+            viz = Visualization()
+            ifc = utils.LymanInterface()
+            ifc.write_visualization(out_field, out_path, viz)
+
+            assert op.exists("test.png")
+            assert ifc._results == {out_field: op.join(tmpdir, out_path)}
+            assert viz.closed
 
         finally:
             orig_dir.chdir()

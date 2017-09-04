@@ -103,7 +103,7 @@ class TestPreprocWorkflow(object):
         # -- Test different experiment
 
         iterables = preproc.generate_iterables(
-            scan_info, "exp_beta", ["subj01"],
+            scan_info, "exp_beta", ["subj01", "subj02"],
         )
         expected_iterables = (
             ["subj01"],

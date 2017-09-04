@@ -350,31 +350,63 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
 
 
 def generate_iterables(scan_info, experiment, subjects, sessions=None):
+    """Return lists of variables for preproc workflow iterables.
 
-    # TODO also change the order of subjects and experiment?
-    subject_iterables = subjects
-    session_iterables = dict()
-    run_iterables = dict()
+    Parameters
+    ----------
+    scan_info : nested dictionaries
+        A nested dictionary structure with the following key levels:
+            - subject ids
+            - session ids
+            - experiment names
+        Where the inner values are lists of run ids.
+    experiment : string
+        Name of the experiment to generate iterables for.
+    subjects : list of strings
+        List of subject ids to generate iterables for.
+    sessions : list of strings, optional
+        List of sessions to generate iterables for.
+
+    Returns
+    -------
+    subject_iterables: list of strings
+        A list of the subjects with runs for this experiment.
+    session_iterables : dict
+        A dictionary where keys are subject ids and values are lists of
+        (subject id, session id) pairs
+    run_iterables : dict
+        A dictionary where keys are (subject id, session id) pairs and values
+        lists of (subject id, session id, run id) pairs.
+
+    """
+    subject_iterables = []
+    session_iterables = {}
+    run_iterables = {}
 
     for subj in subjects:
 
-        session_iterables[subj] = []
+        subject_session_iterables = []
 
         for sess in scan_info[subj]:
 
-            sess_key = subj, sess
+            session_run_iterables = []
 
             if sessions is not None and sess not in sessions:
                 continue
 
             if experiment in scan_info[subj][sess]:
 
-                session_iterables[subj].append(sess_key)
-                run_iterables[sess_key] = []
-
                 for run in scan_info[subj][sess][experiment]:
-                    run_key = subj, sess, run
-                    run_iterables[sess_key].append(run_key)
+                    session_run_iterables.append((subj, sess, run))
+
+            if session_run_iterables:
+                sess_key = subj, sess
+                subject_session_iterables.append(sess_key)
+                run_iterables[sess_key] = session_run_iterables
+
+        if subject_session_iterables:
+            subject_iterables.append(subj)
+            session_iterables[subj] = subject_session_iterables
 
     return subject_iterables, session_iterables, run_iterables
 
@@ -886,7 +918,6 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         # Remove linear but not constant trend
         mean = data.mean(axis=-1, keepdims=True)
         data[mask] = signal.detrend(data[mask])
-        data += mean
 
         # Save out the final time series
         out_img = self.write_image("out_file", "func.nii.gz",

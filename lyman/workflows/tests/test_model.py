@@ -4,7 +4,7 @@ import nipype
 from .. import model
 
 
-class TestModelFitWorkflow(object):
+class TestModelWorkflows(object):
 
     def test_model_fit_workflow_creation(self, lyman_info):
 
@@ -126,7 +126,7 @@ class TestModelFitWorkflow(object):
         # -- Test different experiment
 
         iterables = model.generate_iterables(
-            scan_info, "exp_beta", ["subj01"],
+            scan_info, "exp_beta", ["subj01", "subj02"],
         )
         expected_iterables = (
             ["subj01"],
@@ -148,3 +148,23 @@ class TestModelFitWorkflow(object):
                 [("sess02", "run01")]},
         )
         assert iterables == expected_iterables
+
+    def test_model_results_path(self):
+
+        analysis_dir = op.realpath(".")
+        subject = "subj01"
+        experiment = "exp_a"
+        model_name = "model_alpha"
+
+        ifc = model.ModelResultsPath(
+            analysis_dir=analysis_dir,
+            subject=subject,
+            experiment=experiment,
+            model=model_name,
+        )
+
+        res = ifc.run()
+        expected_path = op.join(analysis_dir, subject,
+                                experiment, model_name, "results")
+
+        assert res.outputs.output_path == expected_path

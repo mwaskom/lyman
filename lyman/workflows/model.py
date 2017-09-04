@@ -229,17 +229,51 @@ def define_model_results_workflow(proj_info, exp_info, model_info,
 
 
 def generate_iterables(scan_info, experiment, subjects, sessions=None):
+    """Return lists of variables for model workflow iterables.
 
-    subject_iterables = subjects
+    Parameters
+    ----------
+    scan_info : nested dictionaries
+        A nested dictionary structure with the following key levels:
+            - subject ids
+            - session ids
+            - experiment names
+        Where the inner values are lists of run ids.
+    experiment : string
+        Name of the experiment to generate iterables for.
+    subjects : list of strings
+        List of subject ids to generate iterables for.
+    sessions : list of strings, optional
+        List of sessions to generate iterables for.
+
+    Returns
+    -------
+    subject_iterables: list of strings
+        A list of the subjects with runs for this experiment.
+    run_iterables : dict
+        A dictionary where keys are subject ids and values of lists of
+        (session id, run id) pairs.
+
+    """
+    subject_iterables = []
     run_iterables = {}
+
     for subject in subjects:
-        run_iterables[subject] = []
+
+        subject_run_iterables = []
+
         for session in scan_info[subject]:
+
             if sessions is not None and session not in sessions:
                 continue
+
             sess_runs = scan_info[subject][session].get(experiment, [])
             run_tuples = [(session, run) for run in sess_runs]
-            run_iterables[subject].extend(run_tuples)
+            subject_run_iterables.extend(run_tuples)
+
+        if subject_run_iterables:
+            subject_iterables.append(subject)
+            run_iterables[subject] = subject_run_iterables
 
     return subject_iterables, run_iterables
 
