@@ -149,10 +149,6 @@ class TestModelWorkflows(object):
         )
         assert iterables == expected_iterables
 
-    def test_model_fit_input(self):
-
-        pass
-
     def test_model_results_path(self):
 
         analysis_dir = op.realpath(".")
@@ -172,3 +168,60 @@ class TestModelWorkflows(object):
                                 experiment, model_name, "results")
 
         assert res.outputs.output_path == expected_path
+
+    def test_model_fit_input(self, timeseries):
+
+        subject = timeseries["subject"]
+        run_tuple = session, run = timeseries["session"], timeseries["run"]
+
+        exp_name = timeseries["exp_info"].name
+        model_name = timeseries["model_info"].name
+
+        res = model.ModelFitInput(
+            experiment=exp_name,
+            model=model_name,
+            analysis_dir=str(timeseries["analysis_dir"]),
+            subject=subject,
+            run_tuple=run_tuple,
+        ).run()
+
+        assert res.outputs.subject == subject
+        assert res.outputs.session == session
+        assert res.outputs.run == run
+        assert res.outputs.seg_file == timeseries["seg_file"]
+        assert res.outputs.surf_file == timeseries["surf_file"]
+        assert res.outputs.mask_file == timeseries["mask_file"]
+        assert res.outputs.ts_file == timeseries["ts_file"]
+        assert res.outputs.noise_file == timeseries["noise_file"]
+        assert res.outputs.mc_file == timeseries["mc_file"]
+        assert res.outputs.output_path == timeseries["model_dir"]
+
+    def test_model_results_input(self, modelfit):
+
+        subject = modelfit["subject"]
+        run_tuple = session, run = modelfit["session"], modelfit["run"]
+
+        exp_name = modelfit["exp_info"].name
+        model_name = modelfit["model_info"].name
+
+        res = model.ModelResultsInput(
+            experiment=exp_name,
+            model=model_name,
+            analysis_dir=str(modelfit["analysis_dir"]),
+            subject=subject,
+            run_tuple=run_tuple,
+        ).run()
+
+        assert res.outputs.subject == subject
+        assert res.outputs.session == session
+        assert res.outputs.run == run
+        assert res.outputs.anat_file == modelfit["anat_file"]
+        assert res.outputs.mask_file == modelfit["mask_file"]
+        assert res.outputs.beta_file == modelfit["beta_file"]
+        assert res.outputs.ols_file == modelfit["ols_file"]
+        assert res.outputs.error_file == modelfit["error_file"]
+        assert res.outputs.output_path == modelfit["model_dir"]
+
+    def test_model_fit(self, timeseries):
+
+        pass

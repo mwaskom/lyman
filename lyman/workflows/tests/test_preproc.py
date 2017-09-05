@@ -150,10 +150,12 @@ class TestPreprocWorkflow(object):
 
         # --- Generate random test data
 
-        run_tuple = subject, session, run = "subj01", "sess01", "run01"
-        experiment = "exp_alpha"
-        sb_template = "{session}_{experiment}_{run}_ref.nii.gz"
-        ts_template = "{session}_{experiment}_{run}.nii.gz"
+        subject = template["subject"]
+        session, run = "sess01", "run01"
+        run_tuple = subject, session, run
+        exp_name = template["exp_info"].name
+        sb_template = template["proj_info"].sb_template
+        ts_template = template["proj_info"].ts_template
         crop_frames = 2
 
         affine = np.array([[-2, 0, 0, 10],
@@ -161,13 +163,12 @@ class TestPreprocWorkflow(object):
                            [0, 1, 2, 5],
                            [0, 0, 0, 1]])
 
-        data_dir = execdir.mkdir("data")
-        func_dir = data_dir.mkdir(subject).mkdir("func")
+        func_dir = template["data_dir"].join(subject).join("func")
 
         shape = 12, 8, 4
         n_frames = 10
 
-        keys = dict(experiment=experiment, session=session, run=run)
+        keys = dict(experiment=exp_name, session=session, run=run)
 
         sb_data = rs.randint(10, 20, shape).astype(np.int16)
         sb_file = str(func_dir.join(sb_template.format(**keys)))
@@ -181,11 +182,11 @@ class TestPreprocWorkflow(object):
 
         res = preproc.RunInput(
             run=run_tuple,
-            data_dir=data_dir,
+            data_dir=template["data_dir"],
             analysis_dir=template["analysis_dir"],
-            experiment=experiment,
+            experiment=exp_name,
             sb_template=sb_template,
-            ts_template=ts_template,
+            ts_template=template["proj_info"].ts_template,
             crop_frames=crop_frames,
         ).run()
 
@@ -238,13 +239,14 @@ class TestPreprocWorkflow(object):
         random_seed = sum(map(ord, "session_input"))
         rs = np.random.RandomState(random_seed)
 
-        session_tuple = subject, session = "subj01", "sess01"
+        subject = template["subject"]
+        session = "sess01"
+        session_tuple = subject, session
 
-        fm_template = "{session}_{encoding}.nii.gz"
-        phase_encoding = "ap"
+        fm_template = template["proj_info"].fm_template
+        phase_encoding = template["proj_info"].phase_encoding
 
-        data_dir = execdir.mkdir("data")
-        func_dir = data_dir.mkdir(subject).mkdir("func")
+        func_dir = template["data_dir"].join(subject).join("func")
 
         shape = (12, 8, 4)
         n_frames = 3
@@ -268,7 +270,7 @@ class TestPreprocWorkflow(object):
 
         res = preproc.SessionInput(
             session=session_tuple,
-            data_dir=data_dir,
+            data_dir=template["data_dir"],
             analysis_dir=template["analysis_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
@@ -320,7 +322,7 @@ class TestPreprocWorkflow(object):
         phase_encoding = phase_encoding[::-1]
         res = preproc.SessionInput(
             session=session_tuple,
-            data_dir=data_dir,
+            data_dir=template["data_dir"],
             analysis_dir=template["analysis_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
