@@ -253,6 +253,8 @@ def execute_workflow(args):
 
     # TODO maybe this code should just be in the lyman script
 
+    # TODO add no-run argument to let the tests get into this code
+
     stage = args.stage
 
     proj_info = gather_project_info()
@@ -267,6 +269,7 @@ def execute_workflow(args):
     # TODO Oof this logic needs to be reworked
     if stage == "template":
         wf = define_template_workflow(proj_info, subjects, qc)
+        run_workflow(wf, args, proj_info)
 
     else:
         exp_info = gather_experiment_info(args.experiment)

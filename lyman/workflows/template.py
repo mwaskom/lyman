@@ -64,8 +64,6 @@ def define_template_workflow(proj_info, subjects, qc=True):
             [("anat_file", "@anat"),
              ("t1w_file", "@t1w"),
              ("t2w_file", "@t2w"),
-             ("func2anat_dat", "@func2anat_dat"),
-             ("anat2func_dat", "@anat2func_dat"),
              ("func2anat_mat", "@func2anat_mat"),
              ("anat2func_mat", "@anat2func_mat")]),
         (anat_segment, template_output,
@@ -121,6 +119,10 @@ class DefineTemplateSpace(LymanInterface):
         t2w_plot = traits.File()
 
     def _run_interface(self, runtime):
+
+        # TODO This interface makes calls to external packages but should not
+        # be too difficult to do in pure Python. It's worth thinking about
+        # doing so to facilitate automated testing.
 
         subjects_dir = os.environ["SUBJECTS_DIR"]
         self.mri_dir = op.join(subjects_dir, self.inputs.subject, "mri")
