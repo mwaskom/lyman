@@ -33,6 +33,7 @@ before_script:
   #    pip install https://github.com/dcramer/pyflakes/tarball/master;
   #    make lint;
   #  fi
+    - echo "backend: Agg" >> matplotlibrc
 
 script:
     - make test
