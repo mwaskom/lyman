@@ -143,7 +143,7 @@ class TestPreprocWorkflow(object):
         )
         assert iterables == expected_iterables
 
-    def test_run_input(self, execdir):
+    def test_run_input(self, execdir, template):
 
         random_seed = sum(map(ord, "run_input"))
         rs = np.random.RandomState(random_seed)
@@ -151,8 +151,6 @@ class TestPreprocWorkflow(object):
         # --- Generate random test data
 
         run_tuple = subject, session, run = "subj01", "sess01", "run01"
-        data_dir = execdir.mkdir("data")
-        analysis_dir = execdir.mkdir("analysis")
         experiment = "exp_alpha"
         sb_template = "{session}_{experiment}_{run}_ref.nii.gz"
         ts_template = "{session}_{experiment}_{run}.nii.gz"
@@ -163,6 +161,7 @@ class TestPreprocWorkflow(object):
                            [0, 1, 2, 5],
                            [0, 0, 0, 1]])
 
+        data_dir = execdir.mkdir("data")
         func_dir = data_dir.mkdir(subject).mkdir("func")
 
         shape = 12, 8, 4
@@ -178,29 +177,12 @@ class TestPreprocWorkflow(object):
         ts_file = str(func_dir.join(ts_template.format(**keys)))
         nib.save(nib.Nifti1Image(ts_data, affine), ts_file)
 
-        template_dir = analysis_dir.mkdir(subject).mkdir("template")
-
-        reg_file = str(template_dir.join("anat2func.mat"))
-        np.savetxt(reg_file, np.random.randn(4, 4))
-
-        seg_data = rs.randint(0, 7, shape)
-        seg_file = str(template_dir.join("seg.nii.gz"))
-        nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
-
-        anat_data = rs.randint(0, 100, shape)
-        anat_file = str(template_dir.join("anat.nii.gz"))
-        nib.save(nib.Nifti1Image(anat_data, affine), anat_file)
-
-        mask_data = rs.randint(0, 1, shape)
-        mask_file = str(template_dir.join("mask.nii.gz"))
-        nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
-
         # --- Run the interface
 
         res = preproc.RunInput(
             run=run_tuple,
             data_dir=data_dir,
-            analysis_dir=analysis_dir,
+            analysis_dir=template["analysis_dir"],
             experiment=experiment,
             sb_template=sb_template,
             ts_template=ts_template,
@@ -224,10 +206,10 @@ class TestPreprocWorkflow(object):
         assert res.outputs.ts_plot == execdir.join("raw.gif")
         assert res.outputs.ts_frames == ts_frames
 
-        assert res.outputs.reg_file == reg_file
-        assert res.outputs.seg_file == seg_file
-        assert res.outputs.anat_file == anat_file
-        assert res.outputs.mask_file == mask_file
+        assert res.outputs.reg_file == template["reg_file"]
+        assert res.outputs.seg_file == template["seg_file"]
+        assert res.outputs.anat_file == template["anat_file"]
+        assert res.outputs.mask_file == template["mask_file"]
 
         # Test the output timeseries
         std_affine = np.array([[2, 0, 0, -12],
@@ -251,17 +233,17 @@ class TestPreprocWorkflow(object):
         # Test that qc files exists
         assert op.exists(res.outputs.ts_plot)
 
-    def test_session_input(self, execdir):
+    def test_session_input(self, execdir, template):
 
         random_seed = sum(map(ord, "session_input"))
         rs = np.random.RandomState(random_seed)
 
         session_tuple = subject, session = "subj01", "sess01"
-        data_dir = execdir.mkdir("data")
-        analysis_dir = execdir.mkdir("analysis")
 
         fm_template = "{session}_{encoding}.nii.gz"
         phase_encoding = "ap"
+
+        data_dir = execdir.mkdir("data")
         func_dir = data_dir.mkdir(subject).mkdir("func")
 
         shape = (12, 8, 4)
@@ -282,29 +264,12 @@ class TestPreprocWorkflow(object):
             fieldmap_files.append(fname)
             nib.save(nib.Nifti1Image(data, affine), fname)
 
-        template_dir = analysis_dir.mkdir(subject).mkdir("template")
-
-        reg_file = str(template_dir.join("anat2func.mat"))
-        np.savetxt(reg_file, np.random.randn(4, 4))
-
-        seg_data = rs.randint(0, 7, shape)
-        seg_file = str(template_dir.join("seg.nii.gz"))
-        nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
-
-        anat_data = rs.randint(0, 100, shape)
-        anat_file = str(template_dir.join("anat.nii.gz"))
-        nib.save(nib.Nifti1Image(anat_data, affine), anat_file)
-
-        mask_data = rs.randint(0, 1, shape)
-        mask_file = str(template_dir.join("mask.nii.gz"))
-        nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
-
         # --- Run the interface
 
         res = preproc.SessionInput(
             session=session_tuple,
             data_dir=data_dir,
-            analysis_dir=analysis_dir,
+            analysis_dir=template["analysis_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
         ).run()
@@ -323,10 +288,10 @@ class TestPreprocWorkflow(object):
         assert res.outputs.fm_file == execdir.join("fieldmap.nii.gz")
         assert res.outputs.fm_frames == out_frames
 
-        assert res.outputs.reg_file == reg_file
-        assert res.outputs.seg_file == seg_file
-        assert res.outputs.anat_file == anat_file
-        assert res.outputs.mask_file == mask_file
+        assert res.outputs.reg_file == template["reg_file"]
+        assert res.outputs.seg_file == template["seg_file"]
+        assert res.outputs.anat_file == template["anat_file"]
+        assert res.outputs.mask_file == template["mask_file"]
 
         # Test the output images
         std_affine = np.array([[2, 0, 0, -12],
@@ -356,7 +321,7 @@ class TestPreprocWorkflow(object):
         res = preproc.SessionInput(
             session=session_tuple,
             data_dir=data_dir,
-            analysis_dir=analysis_dir,
+            analysis_dir=template["analysis_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
         ).run()
@@ -474,7 +439,7 @@ class TestPreprocWorkflow(object):
         assert op.exists(res.outputs.warp_plot)
         assert op.exists(res.outputs.unwarp_gif)
 
-    def test_finalize_timeseries(self, execdir):
+    def test_finalize_timeseries(self, execdir, template):
 
         # --- Generate input data
 
@@ -489,22 +454,9 @@ class TestPreprocWorkflow(object):
         affine[:3, :3] *= 2
         target = 10000
 
-        anat_data = rs.uniform(0, 10, shape)
-        anat_file = "anat.nii.gz"
-        nib.save(nib.Nifti1Image(anat_data, affine), anat_file)
-
         fov = np.arange(np.product(shape)).reshape(shape) != 11
         in_data = [rs.normal(500, 10, shape) * fov for _ in range(n_tp)]
         in_files = self.save_image_frames(in_data, affine, "func")
-
-        seg_data = rs.randint(0, 8, shape)
-        seg_file = "seg.nii.gz"
-        nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
-
-        mask = rs.uniform(0, 1, shape) > .1
-        mask_data = mask.astype(np.int)
-        mask_file = "mask.nii.gz"
-        nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
 
         jacobian_data = rs.uniform(.5, 1.5, shape + (6,))
         jacobian_file = "jacobian.nii.gz"
@@ -519,11 +471,11 @@ class TestPreprocWorkflow(object):
         res = preproc.FinalizeTimeseries(
             experiment=experiment,
             run_tuple=run_tuple,
-            anat_file=anat_file,
             in_files=in_files,
-            seg_file=seg_file,
-            mask_file=mask_file,
             jacobian_file=jacobian_file,
+            anat_file=template["anat_file"],
+            seg_file=template["seg_file"],
+            mask_file=template["mask_file"],
             mc_file=mc_file,
         ).run()
 
@@ -552,7 +504,9 @@ class TestPreprocWorkflow(object):
         out_img_out = nib.load(res.outputs.out_file)
         out_data_out = out_img_out.get_data()
 
-        func_mask = mask & fov
+        mask = nib.load(template["mask_file"]).get_data()
+        func_mask = mask.astype(np.bool) & fov
+
         out_data = np.stack(in_data, axis=-1)
         out_data *= jacobian_data[..., [0]]
         out_data *= np.expand_dims(func_mask, -1)
@@ -595,7 +549,7 @@ class TestPreprocWorkflow(object):
         assert op.exists(res.outputs.mask_plot)
         assert op.exists(res.outputs.noise_plot)
 
-    def test_finalize_template(self, execdir):
+    def test_finalize_template(self, execdir, template):
 
         # --- Generate input data
 
@@ -611,16 +565,8 @@ class TestPreprocWorkflow(object):
         affine[:3, :3] *= 2
         target = 10000
 
-        anat_data = rs.uniform(0, 10, shape)
-        anat_file = "anat.nii.gz"
-        nib.save(nib.Nifti1Image(anat_data, affine), anat_file)
-
         in_data = [rs.normal(500, 10, shape) for _ in range(n_frames)]
         in_files = self.save_image_frames(in_data, affine, "func")
-
-        seg_data = rs.randint(0, 8, shape)
-        seg_file = "seg.nii.gz"
-        nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
 
         mask_data = [rs.choice([0, 1], shape, True, [.1, .9])
                      for _ in range(n_runs)]
@@ -646,8 +592,8 @@ class TestPreprocWorkflow(object):
             session_tuple=session_tuple,
             experiment=experiment,
             in_files=in_files,
-            seg_file=seg_file,
-            anat_file=anat_file,
+            seg_file=template["seg_file"],
+            anat_file=template["anat_file"],
             jacobian_file=jacobian_file,
             mask_files=mask_files,
             mean_files=mean_files,

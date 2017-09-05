@@ -149,6 +149,10 @@ class TestModelWorkflows(object):
         )
         assert iterables == expected_iterables
 
+    def test_model_fit_input(self):
+
+        pass
+
     def test_model_results_path(self):
 
         analysis_dir = op.realpath(".")

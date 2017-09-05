@@ -25,6 +25,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
     # --- Definition of functinoal template space
 
     define_template = Node(DefineTemplateSpace(data_dir=proj_info.data_dir,
+                                               # TODO should be project param
                                                voxel_size=(2, 2, 2)),
                            "define_template")
 
