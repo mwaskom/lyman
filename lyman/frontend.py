@@ -241,10 +241,10 @@ def run_workflow(wf, args, proj_info):
 
     if args.graph:
         wf.write_graph(args.stage, "orig", "svg")
-
     else:
         plugin, plugin_args = determine_engine(args)
-        wf.run(plugin, plugin_args)
+        if args.run:
+            wf.run(plugin, plugin_args)
 
     # TODO remove cache directory again here
 
@@ -252,8 +252,6 @@ def run_workflow(wf, args, proj_info):
 def execute_workflow(args):
 
     # TODO maybe this code should just be in the lyman script
-
-    # TODO add no-run argument to let the tests get into this code
 
     stage = args.stage
 
