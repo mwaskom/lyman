@@ -1,5 +1,4 @@
 from argparse import Namespace
-from nose.tools import assert_equal
 
 from .. import frontend
 
@@ -16,9 +15,9 @@ def test_determine_engine():
         if arg == "multiproc":
             args.nprocs = 4
         plugin, plugin_args = frontend.determine_engine(args)
-        assert_equal(plugin, plugin_str)
+        assert plugin == plugin_str
 
         if arg == "multiproc":
-            assert_equal(plugin_args, dict(n_procs=4))
+            assert plugin_args == dict(n_procs=4)
         elif arg == "PBS":
-            assert_equal(plugin_args, dict(n_procs=4, qsub_args=""))
+            assert plugin_args == dict(n_procs=4, qsub_args="")

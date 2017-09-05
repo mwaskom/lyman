@@ -20,8 +20,8 @@ def check_dependencies():
 
     # Just make sure dependencies exist, I haven't rigorously
     # tested what the minimal versions that will work are
-    needed_deps = ["numpy", "pandas", "matplotlib", "seaborn",
-                   "scipy", "sklearn", "skimage", "pandas",
+    # TODO just do install_requires
+    needed_deps = ["numpy", "pandas", "matplotlib", "scipy",
                    "nibabel", "nipype"]
     missing_deps = []
     for dep in needed_deps:
@@ -31,9 +31,7 @@ def check_dependencies():
             missing_deps.append(dep)
 
     if missing_deps:
-        missing = (", ".join(missing_deps)
-                   .replace("sklearn", "scikit-learn")
-                   .replace("skimage", "scikit-image"))
+        missing = ", ".join(missing_deps)
         raise ImportError("Missing dependencies: %s" % missing)
 
 if __name__ == "__main__":
@@ -57,7 +55,7 @@ if __name__ == "__main__":
         version=VERSION,
         url=URL,
         download_url=DOWNLOAD_URL,
-        install_requires=["moss>=0.5"],
+        install_requires=[],
         packages=['lyman',
                   'lyman.tests',
                   'lyman.workflows',

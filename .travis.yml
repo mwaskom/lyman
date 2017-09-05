@@ -12,7 +12,7 @@ before_install:
   - conda config --set always_yes yes --set changeps1 no
   - conda update -q conda
   - conda info -a
-  - export FSLDIR=`pwd`/testing
+  - export FSLDIR=`pwd`/testing  # TODO do we need this?
   - export SUBJECTS_DIR=`pwd`/testing
 
 install:
@@ -20,10 +20,8 @@ install:
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
   - pip install -r testing/pip_requirements.txt
-  - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then
-      conda install --yes configparser;
-    fi
-  - pip install git+https://github.com/nipy/nipype
+  - pip install git+https://github.com/nipy/nipype  # Needed until nipype 0.14
+  - pip install moss==0.5.0  # Needed until overhaul is finished
   - pip install .
 
 before_script:
