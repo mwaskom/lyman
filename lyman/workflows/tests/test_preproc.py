@@ -12,6 +12,14 @@ from .. import preproc
 
 class TestPreprocWorkflow(object):
 
+    def save_image_frames(self, data_list, affine, fstem):
+
+        n = len(data_list)
+        filenames = ["{}{}.nii.gz".format(fstem, i) for i in range(n)]
+        for frame, fname in zip(data_list, filenames):
+            nib.save(nib.Nifti1Image(frame, affine), fname)
+        return filenames
+
     def test_preproc_workflow_creation(self, lyman_info):
 
         proj_info = lyman_info["proj_info"]
@@ -135,6 +143,234 @@ class TestPreprocWorkflow(object):
         )
         assert iterables == expected_iterables
 
+    def test_run_input(self, execdir):
+
+        random_seed = sum(map(ord, "run_input"))
+        rs = np.random.RandomState(random_seed)
+
+        # --- Generate random test data
+
+        run_tuple = subject, session, run = "subj01", "sess01", "run01"
+        data_dir = execdir.mkdir("data")
+        analysis_dir = execdir.mkdir("analysis")
+        experiment = "exp_alpha"
+        sb_template = "{session}_{experiment}_{run}_ref.nii.gz"
+        ts_template = "{session}_{experiment}_{run}.nii.gz"
+        crop_frames = 2
+
+        affine = np.array([[-2, 0, 0, 10],
+                           [0, -2, -1, 10],
+                           [0, 1, 2, 5],
+                           [0, 0, 0, 1]])
+
+        func_dir = data_dir.mkdir(subject).mkdir("func")
+
+        shape = 12, 8, 4
+        n_frames = 10
+
+        keys = dict(experiment=experiment, session=session, run=run)
+
+        sb_data = rs.randint(10, 20, shape).astype(np.int16)
+        sb_file = str(func_dir.join(sb_template.format(**keys)))
+        nib.save(nib.Nifti1Image(sb_data, affine), sb_file)
+
+        ts_data = rs.normal(10, 20, shape + (n_frames,))
+        ts_file = str(func_dir.join(ts_template.format(**keys)))
+        nib.save(nib.Nifti1Image(ts_data, affine), ts_file)
+
+        template_dir = analysis_dir.mkdir(subject).mkdir("template")
+
+        reg_file = str(template_dir.join("anat2func.mat"))
+        np.savetxt(reg_file, np.random.randn(4, 4))
+
+        seg_data = rs.randint(0, 7, shape)
+        seg_file = str(template_dir.join("seg.nii.gz"))
+        nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
+
+        anat_data = rs.randint(0, 100, shape)
+        anat_file = str(template_dir.join("anat.nii.gz"))
+        nib.save(nib.Nifti1Image(anat_data, affine), anat_file)
+
+        mask_data = rs.randint(0, 1, shape)
+        mask_file = str(template_dir.join("mask.nii.gz"))
+        nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
+
+        # --- Run the interface
+
+        res = preproc.RunInput(
+            run=run_tuple,
+            data_dir=data_dir,
+            analysis_dir=analysis_dir,
+            experiment=experiment,
+            sb_template=sb_template,
+            ts_template=ts_template,
+            crop_frames=crop_frames,
+        ).run()
+
+        # --- Test the outputs
+
+        assert res.outputs.run_tuple == run_tuple
+        assert res.outputs.subject == subject
+        assert res.outputs.session == session
+        assert res.outputs.run == run
+
+        # Test outputs paths
+        framedir = execdir.join("frames")
+        ts_frames = [str(framedir.join("frame{:04d}.nii.gz".format(i)))
+                     for i in range(n_frames - crop_frames)]
+
+        assert res.outputs.ts_file == execdir.join("ts.nii.gz")
+        assert res.outputs.sb_file == execdir.join("sb.nii.gz")
+        assert res.outputs.ts_plot == execdir.join("raw.gif")
+        assert res.outputs.ts_frames == ts_frames
+
+        assert res.outputs.reg_file == reg_file
+        assert res.outputs.seg_file == seg_file
+        assert res.outputs.anat_file == anat_file
+        assert res.outputs.mask_file == mask_file
+
+        # Test the output timeseries
+        std_affine = np.array([[2, 0, 0, -12],
+                               [0, 2, -1, -4],
+                               [0, -1, 2, 12],
+                               [0, 0, 0, 1]])
+
+        ts_img_out = nib.load(res.outputs.ts_file)
+
+        assert np.array_equal(ts_img_out.affine, std_affine)
+        assert ts_img_out.header.get_data_dtype() == np.dtype(np.float32)
+
+        ts_data_out = ts_img_out.get_data()
+        ts_data = ts_data[::-1, ::-1, :, crop_frames:].astype(np.float32)
+        assert np.array_equal(ts_data_out, ts_data)
+
+        for i, frame_fname in enumerate(res.outputs.ts_frames):
+            frame_data = nib.load(frame_fname).get_data()
+            assert np.array_equal(frame_data, ts_data[..., i])
+
+        # Test that qc files exists
+        assert op.exists(res.outputs.ts_plot)
+
+    def test_session_input(self, execdir):
+
+        random_seed = sum(map(ord, "session_input"))
+        rs = np.random.RandomState(random_seed)
+
+        session_tuple = subject, session = "subj01", "sess01"
+        data_dir = execdir.mkdir("data")
+        analysis_dir = execdir.mkdir("analysis")
+
+        fm_template = "{session}_{encoding}.nii.gz"
+        phase_encoding = "ap"
+        func_dir = data_dir.mkdir(subject).mkdir("func")
+
+        shape = (12, 8, 4)
+        n_frames = 3
+
+        affine = np.array([[-2, 0, 0, 10],
+                           [0, -2, -1, 10],
+                           [0, 1, 2, 5],
+                           [0, 0, 0, 1]])
+
+        fieldmap_data = []
+        fieldmap_files = []
+        for encoding in [phase_encoding, phase_encoding[::-1]]:
+            fm_keys = dict(session=session, encoding=encoding)
+            fname = str(func_dir.join(fm_template.format(**fm_keys)))
+            data = rs.randint(10, 25, shape + (n_frames,)).astype(np.int16)
+            fieldmap_data.append(data)
+            fieldmap_files.append(fname)
+            nib.save(nib.Nifti1Image(data, affine), fname)
+
+        template_dir = analysis_dir.mkdir(subject).mkdir("template")
+
+        reg_file = str(template_dir.join("anat2func.mat"))
+        np.savetxt(reg_file, np.random.randn(4, 4))
+
+        seg_data = rs.randint(0, 7, shape)
+        seg_file = str(template_dir.join("seg.nii.gz"))
+        nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
+
+        anat_data = rs.randint(0, 100, shape)
+        anat_file = str(template_dir.join("anat.nii.gz"))
+        nib.save(nib.Nifti1Image(anat_data, affine), anat_file)
+
+        mask_data = rs.randint(0, 1, shape)
+        mask_file = str(template_dir.join("mask.nii.gz"))
+        nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
+
+        # --- Run the interface
+
+        res = preproc.SessionInput(
+            session=session_tuple,
+            data_dir=data_dir,
+            analysis_dir=analysis_dir,
+            fm_template=fm_template,
+            phase_encoding=phase_encoding,
+        ).run()
+
+        # --- Test the outputs
+
+        assert res.outputs.session_tuple == session_tuple
+        assert res.outputs.subject == subject
+        assert res.outputs.session == session
+
+        # Test the output paths
+        frame_template = "fieldmap_{:02d}.nii.gz"
+        out_frames = [execdir.join(frame_template.format(i))
+                      for i in range(n_frames * 2)]
+
+        assert res.outputs.fm_file == execdir.join("fieldmap.nii.gz")
+        assert res.outputs.fm_frames == out_frames
+
+        assert res.outputs.reg_file == reg_file
+        assert res.outputs.seg_file == seg_file
+        assert res.outputs.anat_file == anat_file
+        assert res.outputs.mask_file == mask_file
+
+        # Test the output images
+        std_affine = np.array([[2, 0, 0, -12],
+                               [0, 2, -1, -4],
+                               [0, -1, 2, 12],
+                               [0, 0, 0, 1]])
+
+        out_fm_img = nib.load(res.outputs.fm_file)
+        assert np.array_equal(out_fm_img.affine, std_affine)
+
+        fm_data = np.concatenate(fieldmap_data,
+                                 axis=-1).astype(np.float32)[::-1, ::-1]
+        fm_data_out = out_fm_img.get_data()
+        assert np.array_equal(fm_data_out, fm_data)
+
+        for i, frame in enumerate(out_frames):
+            frame_data_out = nib.load(str(frame)).get_data()
+            assert np.array_equal(frame_data_out, fm_data[..., i])
+
+        # Test the output phase encoding information
+        phase_encode_codes = ["y"] * n_frames + ["y-"] * n_frames
+        assert res.outputs.phase_encoding == phase_encode_codes
+        assert res.outputs.readout_times == [1] * (n_frames * 2)
+
+        # Test reversed phase encoding
+        phase_encoding = phase_encoding[::-1]
+        res = preproc.SessionInput(
+            session=session_tuple,
+            data_dir=data_dir,
+            analysis_dir=analysis_dir,
+            fm_template=fm_template,
+            phase_encoding=phase_encoding,
+        ).run()
+
+        # Test the output images
+        fm_data = np.concatenate(fieldmap_data[::-1],
+                                 axis=-1).astype(np.float32)[::-1, ::-1]
+        fm_data_out = nib.load(res.outputs.fm_file).get_data()
+        assert np.array_equal(fm_data_out, fm_data)
+
+        for i, frame in enumerate(out_frames):
+            frame_data_out = nib.load(str(frame)).get_data()
+            assert np.array_equal(frame_data_out, fm_data[..., i])
+
     def test_combine_linear_transforms(self, execdir):
 
         a, b, c, d = np.random.randn(4, 4, 4)
@@ -155,14 +391,6 @@ class TestPreprocWorkflow(object):
 
         assert np.loadtxt(res.outputs.ts2fm_file) == pytest.approx(ab)
         assert np.loadtxt(res.outputs.fm2temp_file) == pytest.approx(cd)
-
-    def save_image_frames(self, data_list, affine, fstem):
-
-        n = len(data_list)
-        filenames = ["{}{}.nii.gz".format(fstem, i) for i in range(n)]
-        for frame, fname in zip(data_list, filenames):
-            nib.save(nib.Nifti1Image(frame, affine), fname)
-        return filenames
 
     def test_finalize_unwarping(self, execdir):
 
@@ -502,13 +730,48 @@ class TestPreprocWorkflow(object):
         assert op.exists(res.outputs.params_plot)
         assert op.exists(res.outputs.target_plot)
 
+    def test_anat_reg_report(self, execdir):
+
+        subject_id = "subj01"
+        data_dir = execdir.mkdir("data")
+        mri_dir = data_dir.mkdir(subject_id).mkdir("mri")
+
+        shape = (12, 8, 4)
+        affine = np.eye(4)
+
+        cost_file = "cost.txt"
+        cost_array = np.random.uniform(0, 1, 5)
+        np.savetxt(cost_file, cost_array)
+
+        in_data = np.random.normal(100, 5, shape)
+        in_file = "func.nii.gz"
+        nib.save(nib.Nifti1Image(in_data, affine), in_file)
+
+        wm_data = np.random.randint(0, 2, shape).astype("uint8")
+        wm_file = mri_dir.join("wm.mgz")
+        nib.save(nib.MGHImage(wm_data, affine), str(wm_file))
+
+        aseg_data = np.random.randint(0, 5, shape).astype("uint8")
+        aseg_file = mri_dir.join("aseg.mgz")
+        nib.save(nib.MGHImage(aseg_data, affine), str(aseg_file))
+
+        res = preproc.AnatRegReport(
+            subject_id=subject_id,
+            data_dir=data_dir,
+            in_file=in_file,
+            cost_file=cost_file,
+        ).run()
+
+        assert res.outputs.out_file == execdir.join("reg.png")
+        assert op.exists(res.outputs.out_file)
+
     def test_coreg_gif(self, execdir):
 
         in_data = np.random.uniform(0, 100, (12, 8, 4))
         in_file = "in.nii.gz"
         nib.save(nib.Nifti1Image(in_data, np.eye(4)), in_file)
 
-        ref_data = np.random.uniform(0, 100, (12, 8, 4))
+        ref_data = np.random.uniform(0, 100, (12, 8, 4, 3))
         ref_file = "ref.nii.gz"
         nib.save(nib.Nifti1Image(ref_data, np.eye(4)), ref_file)
 

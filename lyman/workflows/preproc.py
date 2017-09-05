@@ -77,11 +77,12 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
 
     fm2anat = Node(fs.BBRegister(init="fsl",
                                  contrast_type="t2",
+                                 registered_file=True,
                                  out_fsl_file="sess2anat.mat",
                                  out_reg_file="sess2anat.dat"),
                    "fm2anat")
 
-    fm2anat_qc = Node(AnatRegReport(), "fm2anat_qc")
+    fm2anat_qc = Node(AnatRegReport(data_dir=proj_info.data_dir), "fm2anat_qc")
 
     # --- Registration of SBRef to SE-EPI (with distortions)
 
@@ -299,10 +300,8 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
 
         (session_input, fm2anat_qc,
             [("subject", "subject_id")]),
-        (finalize_unwarping, fm2anat_qc,
-            [("corrected_file", "in_file")]),
         (fm2anat, fm2anat_qc,
-            [("out_reg_file", "reg_file"),
+            [("registered_file", "in_file"),
              ("min_cost_file", "cost_file")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
@@ -486,7 +485,7 @@ class SessionInput(LymanInterface):
         data_dir = traits.Directory(exists=True)
         analysis_dir = traits.Directory(exists=True)
         fm_template = traits.Str()
-        phase_encoding = traits.Str()
+        phase_encoding = traits.Either("ap", "pa")
 
     class output_spec(TraitedSpec):
         session_tuple = traits.Tuple()
@@ -515,8 +514,6 @@ class SessionInput(LymanInterface):
             pos_pe, neg_pe = "ap", "pa"
         elif pe == "pa":
             pos_pe, neg_pe = "pa", "ap"
-        else:
-            raise ValueError("Phase encoding must be 'ap' or 'pa'")
 
         # Spec out full paths to the pair of fieldmap files
         keys = dict(subject=subject, session=session)
@@ -1189,29 +1186,17 @@ class AnatRegReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
+        data_dir = traits.Directory(exists=True)
         in_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
         cost_file = traits.File(exists=True)
-        out_file = traits.File()
 
     class output_spec(TraitedSpec):
         out_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        # Use the registration to transform the input file
-        registered_file = "func_in_anat.nii.gz"
-        cmdline = ["mri_vol2vol",
-                   "--mov", self.inputs.in_file,
-                   "--reg", self.inputs.reg_file,
-                   "--o", registered_file,
-                   "--fstarg",
-                   "--cubic"]
-
-        self.submit_cmdline(runtime, cmdline)
-
         # Load the WM segmentation and a brain mask
-        mri_dir = op.join(os.environ["SUBJECTS_DIR"],
+        mri_dir = op.join(self.inputs.data_dir,
                           self.inputs.subject_id, "mri")
 
         wm_file = op.join(mri_dir, "wm.mgz")
@@ -1225,7 +1210,7 @@ class AnatRegReport(LymanInterface):
 
         # Make a mosaic of the registration from func to wm seg
         # TODO this should be an OrthoMosaic when that is implemented
-        m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
+        m = Mosaic(self.inputs.in_file, wm_data, mask, step=3, show_mask=False)
         m.plot_mask_edges()
         if cost is not None:
             m.fig.suptitle("Final cost: {:.2f}".format(cost),
