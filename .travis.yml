@@ -22,7 +22,11 @@ install:
   - conda install --yes --file testing/conda_requirements.txt
   - pip install -r testing/pip_requirements.txt
   - pip install git+https://github.com/nipy/nipype  # Needed until nipype 0.14
-  - pip install moss==0.5.0  # Needed until overhaul is finished
+
+  # Needed until overhal is finished
+  - conda install --yes seaborn scikit-learn
+  - pip install moss==0.5.0
+
   - pip install .
 
 before_script:
