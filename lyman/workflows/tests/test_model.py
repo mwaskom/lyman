@@ -1,4 +1,6 @@
 import os.path as op
+import pandas as pd
+import nibabel as nib
 import nipype
 
 from .. import model
@@ -222,6 +224,88 @@ class TestModelWorkflows(object):
         assert res.outputs.error_file == modelfit["error_file"]
         assert res.outputs.output_path == modelfit["model_dir"]
 
-    def test_model_fit(self, timeseries):
+    def test_model_fit(self, execdir, timeseries):
 
-        pass
+        res = model.ModelFit(
+            subject=timeseries["subject"],
+            session=timeseries["session"],
+            run=timeseries["run"],
+            data_dir=timeseries["data_dir"],
+            exp_info=timeseries["exp_info"],
+            model_info=timeseries["model_info"],
+            seg_file=timeseries["seg_file"],
+            surf_file=timeseries["surf_file"],
+            ts_file=timeseries["ts_file"],
+            mask_file=timeseries["mask_file"],
+            noise_file=timeseries["noise_file"],
+            mc_file=timeseries["mc_file"],
+        ).run()
+
+        # Test output file names
+        assert res.outputs.mask_file == execdir.join("mask.nii.gz")
+        assert res.outputs.beta_file == execdir.join("beta.nii.gz")
+        assert res.outputs.error_file == execdir.join("error.nii.gz")
+        assert res.outputs.ols_file == execdir.join("ols.nii.gz")
+        assert res.outputs.resid_file == execdir.join("resid.nii.gz")
+        assert res.outputs.design_file == execdir.join("design.csv")
+        assert res.outputs.resid_plot == execdir.join("resid.png")
+        assert res.outputs.design_plot == execdir.join("design.png")
+        assert res.outputs.error_plot == execdir.join("error.png")
+
+        n_x, n_y, n_z = timeseries["vol_shape"]
+        n_tp = timeseries["n_tp"]
+        n_params = timeseries["n_params"]
+
+        # Test output image shapes
+        mask_img = nib.load(res.outputs.mask_file)
+        assert mask_img.shape == (n_x, n_y, n_z)
+
+        beta_img = nib.load(res.outputs.beta_file)
+        assert beta_img.shape == (n_x, n_y, n_z, n_params)
+
+        error_img = nib.load(res.outputs.error_file)
+        assert error_img.shape == (n_x, n_y, n_z)
+
+        ols_img = nib.load(res.outputs.ols_file)
+        assert ols_img.shape == (n_x, n_y, n_z, n_params ** 2)
+
+        resid_img = nib.load(res.outputs.resid_file)
+        assert resid_img.shape == (n_x, n_y, n_z, n_tp)
+
+        design = pd.read_csv(res.outputs.design_file)
+        assert design.shape == (n_tp, n_params)
+
+    def test_estimate_contrasts(self, execdir, modelfit):
+
+        res = model.EstimateContrasts(
+            exp_info=modelfit["exp_info"],
+            model_info=modelfit["model_info"],
+            mask_file=modelfit["mask_file"],
+            beta_file=modelfit["beta_file"],
+            ols_file=modelfit["ols_file"],
+            error_file=modelfit["error_file"],
+        ).run()
+
+        # Test output file names
+        assert res.outputs.contrast_file == execdir.join("contrast.nii.gz")
+        assert res.outputs.variance_file == execdir.join("variance.nii.gz")
+        assert res.outputs.tstat_file == execdir.join("tstat.nii.gz")
+
+        # Test output image shapes
+        # TODO this needs to be fixed once contrasts info is finished
+
+        # TODO we should also test "missing" contrast behavior here
+
+    def test_model_rsults(self, execdir, modelres):
+
+        res = model.ModelResults(
+            model_info=modelres["model_info"],
+            anat_file=modelres["anat_file"],
+            contrast_files=[modelres["contrast_file"]],
+            variance_files=[modelres["variance_file"]],
+        ).run()
+
+        result_directories = [
+            execdir.join(c) for c in modelres["model_info"].contrasts
+        ]
+        assert res.outputs.result_directories == result_directories

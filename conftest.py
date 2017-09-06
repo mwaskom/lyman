@@ -48,16 +48,41 @@ def lyman_info(tmpdir):
         sb_template="{session}_{experiment}_{run}_sbref.nii.gz",
     )
 
-    exp_info = Bunch(name="exp_alpha")
+    exp_info = Bunch(
+        name="exp_alpha",
+        tr=1.5,
+    )
 
-    model_info = Bunch(name="model_a")
+    model_info = Bunch(
+        name="model_a",
+        smooth_fwhm=2,
+        hpf_cutoff=10,
+        save_residuals=True,
+
+        # TODO FIX
+        contrasts=["a", "b", "a-b"]
+    )
 
     subjects = ["subj01", "subj02"]
     sessions = None
 
+    design = pd.DataFrame(dict(
+        onset=[0, 6, 12, 18, 24],
+        condition=["a", "b", "c", "b", "a"],
+        session="sess01",
+        run="run01",
+    ))
+
     for subject in subjects:
+
         subject_dir = data_dir.mkdir(subject)
         subject_dir.mkdir("func")
+        design_dir = subject_dir.mkdir("design")
+        design.to_csv(design_dir.join("model_a.csv"))
+
+    vol_shape = 12, 8, 4
+    n_tp = 20
+    n_params = len(design["condition"].unique())
 
     return dict(
         proj_info=proj_info,
@@ -67,6 +92,10 @@ def lyman_info(tmpdir):
         model_info=model_info,
         analysis_dir=analysis_dir,
         data_dir=data_dir,
+
+        vol_shape=vol_shape,
+        n_tp=n_tp,
+        n_params=n_params,
     )
 
 
@@ -81,7 +110,7 @@ def template(lyman_info):
     random_seed = sum(map(ord, "template"))
     rs = np.random.RandomState(random_seed)
 
-    shape = 12, 8, 4
+    vol_shape = lyman_info["vol_shape"]
     affine = np.array([[-2, 0, 0, 10],
                        [0, -2, -1, 10],
                        [0, 1, 2, 5],
@@ -90,11 +119,11 @@ def template(lyman_info):
     reg_file = str(template_dir.join("anat2func.mat"))
     np.savetxt(reg_file, np.random.randn(4, 4))
 
-    seg_data = rs.randint(0, 7, shape)
+    seg_data = rs.randint(0, 7, vol_shape)
     seg_file = str(template_dir.join("seg.nii.gz"))
     nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
 
-    anat_data = rs.randint(0, 100, shape)
+    anat_data = rs.randint(0, 100, vol_shape)
     anat_file = str(template_dir.join("anat.nii.gz"))
     nib.save(nib.Nifti1Image(anat_data, affine), anat_file)
 
@@ -103,14 +132,14 @@ def template(lyman_info):
     nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
 
     surf_ids = np.arange(1, (seg_data == 1).sum() + 1)
-    surf_data = np.zeros(shape + (2,), np.int)
+    surf_data = np.zeros(vol_shape + (2,), np.int)
     surf_data[seg_data == 1, 0] = surf_ids
     surf_data[seg_data == 1, 1] = surf_ids
     surf_file = str(template_dir.join("surf.nii.gz"))
     nib.save(nib.Nifti1Image(surf_data, affine), surf_file)
 
     lyman_info.update(
-        shape=shape,
+        vol_shape=vol_shape,
         subject=subject,
         reg_file=reg_file,
         seg_file=seg_file,
@@ -133,10 +162,10 @@ def timeseries(template):
     exp_name = template["exp_info"].name
     model_name = template["model_info"].name
 
-    shape = template["shape"]
-    n_tp = 10
+    vol_shape = template["vol_shape"]
+    n_tp = template["n_tp"]
     affine = np.eye(4)
-    affine[:3, :3] = 2
+    affine[:3, :3] *= 2
 
     timeseries_dir = (template["analysis_dir"]
                       .join(template["subject"])
@@ -151,15 +180,16 @@ def timeseries(template):
                  .mkdir("{}_{}".format(session, run)))
 
     mask_data = nib.load(template["seg_file"]).get_data() > 0
-    mask_data &= rs.uniform(0, 1, shape) > .05
+    mask_data &= rs.uniform(0, 1, vol_shape) > .05
     mask_file = str(timeseries_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data.astype(np.int), affine), mask_file)
 
-    ts_data = rs.normal(shape + (n_tp,)) * mask_data[..., np.newaxis]
+    ts_shape = vol_shape + (n_tp,)
+    ts_data = rs.normal(100, 5, ts_shape) * mask_data[..., np.newaxis]
     ts_file = str(timeseries_dir.join("func.nii.gz"))
     nib.save(nib.Nifti1Image(ts_data, affine), ts_file)
 
-    noise_data = rs.choice([0, 1], shape, p=[.95, .05])
+    noise_data = rs.choice([0, 1], vol_shape, p=[.95, .05])
     noise_file = str(timeseries_dir.join("noise.nii.gz"))
     nib.save(nib.Nifti1Image(noise_data, affine), noise_file)
 
@@ -186,12 +216,12 @@ def timeseries(template):
 @pytest.fixture()
 def modelfit(timeseries):
 
-    random_seed = sum(map(ord, "timeseries"))
+    random_seed = sum(map(ord, "modelfit"))
     rs = np.random.RandomState(random_seed)
 
-    shape = timeseries["shape"]
+    vol_shape = timeseries["vol_shape"]
     affine = timeseries["affine"]
-    n_params = 3
+    n_params = timeseries["n_params"]
 
     model_dir = timeseries["model_dir"]
 
@@ -201,17 +231,17 @@ def modelfit(timeseries):
     mask_file = str(model_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
 
-    beta_data = rs.normal(0, 1, shape + (n_params,))
+    beta_data = rs.normal(0, 1, vol_shape + (n_params,))
     beta_file = str(model_dir.join("beta.nii.gz"))
     nib.save(nib.Nifti1Image(beta_data, affine), beta_file)
 
-    ols_data = rs.normal(0, 1, shape + (n_params, n_params))
+    ols_data = rs.uniform(0, 1, vol_shape + (n_params, n_params))
     ols_data += ols_data.transpose(0, 1, 2, 4, 3)
-    ols_data = ols_data.reshape(-1, n_params ** 2)
+    ols_data = ols_data.reshape(vol_shape + (n_params ** 2,))
     ols_file = str(model_dir.join("ols.nii.gz"))
     nib.save(nib.Nifti1Image(ols_data, affine), ols_file)
 
-    error_data = rs.uniform(0, 5, shape + (n_params,))
+    error_data = rs.uniform(0, 5, vol_shape)
     error_file = str(model_dir.join("error.nii.gz"))
     nib.save(nib.Nifti1Image(error_data, affine), error_file)
 
@@ -223,3 +253,37 @@ def modelfit(timeseries):
         error_file=error_file,
     )
     return timeseries
+
+
+@pytest.fixture()
+def modelres(modelfit):
+
+    random_seed = sum(map(ord, "modelfit"))
+    rs = np.random.RandomState(random_seed)
+
+    vol_shape = modelfit["vol_shape"]
+    affine = modelfit["affine"]
+    n_params = modelfit["n_params"]
+    # TODO Fix this when constrast definition is done
+    n_contrasts = n_params
+
+    model_dir = modelfit["model_dir"]
+
+    contrast_data = rs.normal(0, 5, vol_shape + (n_contrasts,))
+    contrast_file = str(model_dir.join("contrast.nii.gz"))
+    nib.save(nib.Nifti1Image(contrast_data, affine), contrast_file)
+
+    variance_data = rs.uniform(0, 5, vol_shape + (n_contrasts,))
+    variance_file = str(model_dir.join("variance.nii.gz"))
+    nib.save(nib.Nifti1Image(variance_data, affine), variance_file)
+
+    tstat_data = rs.normal(0, 2, vol_shape + (n_contrasts,))
+    tstat_file = str(model_dir.join("tstat.nii.gz"))
+    nib.save(nib.Nifti1Image(tstat_data, affine), tstat_file)
+
+    modelfit.update(
+        contrast_file=contrast_file,
+        variance_file=variance_file,
+        tstat_file=tstat_file,
+    )
+    return modelfit

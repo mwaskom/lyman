@@ -492,7 +492,7 @@ class ModelFit(LymanInterface):
 
         # Save out the design matrix
         design_file = self.define_output("design_file", "design.csv")
-        dmat.design_matrix.to_csv(design_file)
+        dmat.design_matrix.to_csv(design_file, index=False)
 
         # Prewhiten the data
         assert not np.isnan(data).any()
@@ -590,6 +590,9 @@ class EstimateContrasts(LymanInterface):
              np.array([0, 0, 0, 1]),
              np.array([1, -1, 0, 0]),
              np.array([0, 0, 1, -1])]
+
+        # TODO to get tests to run make this dumber but more flexible
+        C = np.eye(B.shape[1])
 
         # Estimate the contrasts, variances, and statistics in each voxel
         G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
