@@ -42,36 +42,36 @@ class TestTemplateWorkflow(object):
 
     def test_template_input(self, freesurfer):
 
-        res = TemplateInput(
+        out = TemplateInput(
             data_dir=freesurfer["data_dir"],
             subject=freesurfer["subject"]
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.norm_file == freesurfer["norm_file"]
-        assert res.outputs.wmparc_file == freesurfer["wmparc_file"]
+        assert out.norm_file == freesurfer["norm_file"]
+        assert out.wmparc_file == freesurfer["wmparc_file"]
 
         output_path = "{}/template".format(freesurfer["subject"])
-        assert res.outputs.output_path == output_path
+        assert out.output_path == output_path
 
     def test_anatomical_segmentation(self, execdir, freesurfer):
 
-        res = AnatomicalSegmentation(
+        out = AnatomicalSegmentation(
             wmparc_file=freesurfer["wmparc_file"],
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.seg_file == execdir.join("seg.nii.gz")
-        assert res.outputs.mask_file == execdir.join("mask.nii.gz")
+        assert out.seg_file == execdir.join("seg.nii.gz")
+        assert out.mask_file == execdir.join("mask.nii.gz")
 
     def test_template_report(self, execdir, template):
 
-        res = TemplateReport(
+        out = TemplateReport(
             seg_file=template["seg_file"],
             mask_file=template["mask_file"],
             surf_file=template["surf_file"],
             anat_file=template["anat_file"],
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.seg_plot == execdir.join("seg.png")
-        assert res.outputs.mask_plot == execdir.join("mask.png")
-        assert res.outputs.surf_plot == execdir.join("surf.png")
-        assert res.outputs.anat_plot == execdir.join("anat.png")
+        assert out.seg_plot == execdir.join("seg.png")
+        assert out.mask_plot == execdir.join("mask.png")
+        assert out.surf_plot == execdir.join("surf.png")
+        assert out.anat_plot == execdir.join("anat.png")

@@ -180,7 +180,7 @@ class TestPreprocWorkflow(object):
 
         # --- Run the interface
 
-        res = preproc.RunInput(
+        out = preproc.RunInput(
             run=run_tuple,
             data_dir=template["data_dir"],
             analysis_dir=template["analysis_dir"],
@@ -188,29 +188,29 @@ class TestPreprocWorkflow(object):
             sb_template=sb_template,
             ts_template=template["proj_info"].ts_template,
             crop_frames=crop_frames,
-        ).run()
+        ).run().outputs
 
         # --- Test the outputs
 
-        assert res.outputs.run_tuple == run_tuple
-        assert res.outputs.subject == subject
-        assert res.outputs.session == session
-        assert res.outputs.run == run
+        assert out.run_tuple == run_tuple
+        assert out.subject == subject
+        assert out.session == session
+        assert out.run == run
 
         # Test outputs paths
         framedir = execdir.join("frames")
         ts_frames = [str(framedir.join("frame{:04d}.nii.gz".format(i)))
                      for i in range(n_frames - crop_frames)]
 
-        assert res.outputs.ts_file == execdir.join("ts.nii.gz")
-        assert res.outputs.sb_file == execdir.join("sb.nii.gz")
-        assert res.outputs.ts_plot == execdir.join("raw.gif")
-        assert res.outputs.ts_frames == ts_frames
+        assert out.ts_file == execdir.join("ts.nii.gz")
+        assert out.sb_file == execdir.join("sb.nii.gz")
+        assert out.ts_plot == execdir.join("raw.gif")
+        assert out.ts_frames == ts_frames
 
-        assert res.outputs.reg_file == template["reg_file"]
-        assert res.outputs.seg_file == template["seg_file"]
-        assert res.outputs.anat_file == template["anat_file"]
-        assert res.outputs.mask_file == template["mask_file"]
+        assert out.reg_file == template["reg_file"]
+        assert out.seg_file == template["seg_file"]
+        assert out.anat_file == template["anat_file"]
+        assert out.mask_file == template["mask_file"]
 
         # Test the output timeseries
         std_affine = np.array([[2, 0, 0, -12],
@@ -218,7 +218,7 @@ class TestPreprocWorkflow(object):
                                [0, -1, 2, 12],
                                [0, 0, 0, 1]])
 
-        ts_img_out = nib.load(res.outputs.ts_file)
+        ts_img_out = nib.load(out.ts_file)
 
         assert np.array_equal(ts_img_out.affine, std_affine)
         assert ts_img_out.header.get_data_dtype() == np.dtype(np.float32)
@@ -227,12 +227,12 @@ class TestPreprocWorkflow(object):
         ts_data = ts_data[::-1, ::-1, :, crop_frames:].astype(np.float32)
         assert np.array_equal(ts_data_out, ts_data)
 
-        for i, frame_fname in enumerate(res.outputs.ts_frames):
+        for i, frame_fname in enumerate(out.ts_frames):
             frame_data = nib.load(frame_fname).get_data()
             assert np.array_equal(frame_data, ts_data[..., i])
 
         # Test that qc files exists
-        assert op.exists(res.outputs.ts_plot)
+        assert op.exists(out.ts_plot)
 
     def test_session_input(self, execdir, template):
 
@@ -268,32 +268,32 @@ class TestPreprocWorkflow(object):
 
         # --- Run the interface
 
-        res = preproc.SessionInput(
+        out = preproc.SessionInput(
             session=session_tuple,
             data_dir=template["data_dir"],
             analysis_dir=template["analysis_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
-        ).run()
+        ).run().outputs
 
         # --- Test the outputs
 
-        assert res.outputs.session_tuple == session_tuple
-        assert res.outputs.subject == subject
-        assert res.outputs.session == session
+        assert out.session_tuple == session_tuple
+        assert out.subject == subject
+        assert out.session == session
 
         # Test the output paths
         frame_template = "fieldmap_{:02d}.nii.gz"
         out_frames = [execdir.join(frame_template.format(i))
                       for i in range(n_frames * 2)]
 
-        assert res.outputs.fm_file == execdir.join("fieldmap.nii.gz")
-        assert res.outputs.fm_frames == out_frames
+        assert out.fm_file == execdir.join("fieldmap.nii.gz")
+        assert out.fm_frames == out_frames
 
-        assert res.outputs.reg_file == template["reg_file"]
-        assert res.outputs.seg_file == template["seg_file"]
-        assert res.outputs.anat_file == template["anat_file"]
-        assert res.outputs.mask_file == template["mask_file"]
+        assert out.reg_file == template["reg_file"]
+        assert out.seg_file == template["seg_file"]
+        assert out.anat_file == template["anat_file"]
+        assert out.mask_file == template["mask_file"]
 
         # Test the output images
         std_affine = np.array([[2, 0, 0, -12],
@@ -301,7 +301,7 @@ class TestPreprocWorkflow(object):
                                [0, -1, 2, 12],
                                [0, 0, 0, 1]])
 
-        out_fm_img = nib.load(res.outputs.fm_file)
+        out_fm_img = nib.load(out.fm_file)
         assert np.array_equal(out_fm_img.affine, std_affine)
 
         fm_data = np.concatenate(fieldmap_data,
@@ -315,23 +315,23 @@ class TestPreprocWorkflow(object):
 
         # Test the output phase encoding information
         phase_encode_codes = ["y"] * n_frames + ["y-"] * n_frames
-        assert res.outputs.phase_encoding == phase_encode_codes
-        assert res.outputs.readout_times == [1] * (n_frames * 2)
+        assert out.phase_encoding == phase_encode_codes
+        assert out.readout_times == [1] * (n_frames * 2)
 
         # Test reversed phase encoding
         phase_encoding = phase_encoding[::-1]
-        res = preproc.SessionInput(
+        out = preproc.SessionInput(
             session=session_tuple,
             data_dir=template["data_dir"],
             analysis_dir=template["analysis_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
-        ).run()
+        ).run().outputs
 
         # Test the output images
         fm_data = np.concatenate(fieldmap_data[::-1],
                                  axis=-1).astype(np.float32)[::-1, ::-1]
-        fm_data_out = nib.load(res.outputs.fm_file).get_data()
+        fm_data_out = nib.load(out.fm_file).get_data()
         assert np.array_equal(fm_data_out, fm_data)
 
         for i, frame in enumerate(out_frames):
@@ -354,10 +354,10 @@ class TestPreprocWorkflow(object):
                                               fm2anat_file="fm2anat.mat",
                                               anat2temp_file="anat2temp.mat")
 
-        res = ifc.run()
+        out = ifc.run().outputs
 
-        assert np.loadtxt(res.outputs.ts2fm_file) == pytest.approx(ab)
-        assert np.loadtxt(res.outputs.fm2temp_file) == pytest.approx(cd)
+        assert np.loadtxt(out.ts2fm_file) == pytest.approx(ab)
+        assert np.loadtxt(out.fm2temp_file) == pytest.approx(cd)
 
     def test_finalize_unwarping(self, execdir):
 
@@ -389,37 +389,37 @@ class TestPreprocWorkflow(object):
 
         # --- Run the interface
 
-        res = preproc.FinalizeUnwarping(
+        out = preproc.FinalizeUnwarping(
             raw_file=raw_file,
             corrected_file=corrected_file,
             warp_files=warp_files,
             jacobian_files=jacobian_files,
             phase_encoding=phase_encoding
-        ).run()
+        ).run().outputs
 
         # --- Test outputs
 
         # Test output filenames
-        assert res.outputs.raw_file == execdir.join("raw.nii.gz")
-        assert res.outputs.corrected_file == execdir.join("func.nii.gz")
-        assert res.outputs.warp_file == execdir.join("warp.nii.gz")
-        assert res.outputs.mask_file == execdir.join("warp_mask.nii.gz")
-        assert res.outputs.jacobian_file == execdir.join("jacobian.nii.gz")
-        assert res.outputs.warp_plot == execdir.join("warp.png")
-        assert res.outputs.unwarp_gif == execdir.join("unwarp.gif")
+        assert out.raw_file == execdir.join("raw.nii.gz")
+        assert out.corrected_file == execdir.join("func.nii.gz")
+        assert out.warp_file == execdir.join("warp.nii.gz")
+        assert out.mask_file == execdir.join("warp_mask.nii.gz")
+        assert out.jacobian_file == execdir.join("jacobian.nii.gz")
+        assert out.warp_plot == execdir.join("warp.png")
+        assert out.unwarp_gif == execdir.join("unwarp.gif")
 
         # Test that the right frame of the raw image is selected
-        raw_data_out = nib.load(res.outputs.raw_file).get_data()
+        raw_data_out = nib.load(out.raw_file).get_data()
         assert np.array_equal(raw_data_out, raw_data[..., 0])
 
         # Test that the corrected image is a temporal average
         jacobian_data = np.stack(jacobian_data, axis=-1)
         modulated_data = (corrected_data * jacobian_data).mean(axis=-1)
-        corrected_data_out = nib.load(res.outputs.corrected_file).get_data()
+        corrected_data_out = nib.load(out.corrected_file).get_data()
         assert np.array_equal(corrected_data_out, modulated_data)
 
         # Test that the warp image has the right geometry
-        warp_img_out = nib.load(res.outputs.warp_file)
+        warp_img_out = nib.load(out.warp_file)
         assert np.array_equal(warp_img_out.affine, affine)
 
         # Test that the warp image is the right frame
@@ -428,18 +428,18 @@ class TestPreprocWorkflow(object):
 
         # Test the warp mask
         warp_mask = (np.abs(warp_data[0][..., 1]) < 4).astype(np.int)
-        warp_mask_out = nib.load(res.outputs.mask_file).get_data()
+        warp_mask_out = nib.load(out.mask_file).get_data()
         assert np.array_equal(warp_mask_out, warp_mask)
 
         # Test that the jacobians have same data but new geomtery
-        jacobian_img_out = nib.load(res.outputs.jacobian_file)
+        jacobian_img_out = nib.load(out.jacobian_file)
         jacobian_data_out = jacobian_img_out.get_data()
         assert np.array_equal(jacobian_img_out.affine, affine)
         assert np.array_equal(jacobian_data_out, jacobian_data)
 
         # Test that qc plots exist
-        assert op.exists(res.outputs.warp_plot)
-        assert op.exists(res.outputs.unwarp_gif)
+        assert op.exists(out.warp_plot)
+        assert op.exists(out.unwarp_gif)
 
     def test_finalize_timeseries(self, execdir, template):
 
@@ -470,7 +470,7 @@ class TestPreprocWorkflow(object):
 
         # --- Run the interface
 
-        res = preproc.FinalizeTimeseries(
+        out = preproc.FinalizeTimeseries(
             experiment=experiment,
             run_tuple=run_tuple,
             in_files=in_files,
@@ -479,31 +479,31 @@ class TestPreprocWorkflow(object):
             seg_file=template["seg_file"],
             mask_file=template["mask_file"],
             mc_file=mc_file,
-        ).run()
+        ).run().outputs
 
         # --- Test the outputs
 
         # Test output filenames
-        assert res.outputs.out_file == execdir.join("func.nii.gz")
-        assert res.outputs.out_gif == execdir.join("func.gif")
-        assert res.outputs.out_png == execdir.join("func.png")
-        assert res.outputs.mean_file == execdir.join("mean.nii.gz")
-        assert res.outputs.mean_plot == execdir.join("mean.png")
-        assert res.outputs.tsnr_file == execdir.join("tsnr.nii.gz")
-        assert res.outputs.tsnr_plot == execdir.join("tsnr.png")
-        assert res.outputs.mask_file == execdir.join("mask.nii.gz")
-        assert res.outputs.mask_plot == execdir.join("mask.png")
-        assert res.outputs.noise_file == execdir.join("noise.nii.gz")
-        assert res.outputs.noise_plot == execdir.join("noise.png")
-        assert res.outputs.mc_file == execdir.join("mc.csv")
+        assert out.out_file == execdir.join("func.nii.gz")
+        assert out.out_gif == execdir.join("func.gif")
+        assert out.out_png == execdir.join("func.png")
+        assert out.mean_file == execdir.join("mean.nii.gz")
+        assert out.mean_plot == execdir.join("mean.png")
+        assert out.tsnr_file == execdir.join("tsnr.nii.gz")
+        assert out.tsnr_plot == execdir.join("tsnr.png")
+        assert out.mask_file == execdir.join("mask.nii.gz")
+        assert out.mask_plot == execdir.join("mask.png")
+        assert out.noise_file == execdir.join("noise.nii.gz")
+        assert out.noise_plot == execdir.join("noise.png")
+        assert out.mc_file == execdir.join("mc.csv")
 
         # Test the output path
         output_path = op.join(subject, experiment, "timeseries",
                               "{}_{}".format(session, run))
-        assert res.outputs.output_path == output_path
+        assert out.output_path == output_path
 
         # Test the output timeseries
-        out_img_out = nib.load(res.outputs.out_file)
+        out_img_out = nib.load(out.out_file)
         out_data_out = out_img_out.get_data()
 
         mask = nib.load(template["mask_file"]).get_data()
@@ -521,12 +521,12 @@ class TestPreprocWorkflow(object):
         assert out_data_out[func_mask].mean() == pytest.approx(target)
 
         # Test the output mask
-        mask_data_out = nib.load(res.outputs.mask_file).get_data()
+        mask_data_out = nib.load(out.mask_file).get_data()
         assert np.array_equal(mask_data_out, func_mask.astype(np.float))
 
         # Test the output temporal statistics
-        mean_out = nib.load(res.outputs.mean_file).get_data()
-        tsnr_out = nib.load(res.outputs.tsnr_file).get_data()
+        mean_out = nib.load(out.mean_file).get_data()
+        tsnr_out = nib.load(out.tsnr_file).get_data()
 
         with np.errstate(all="ignore"):
             mean = out_data.mean(axis=-1)
@@ -539,17 +539,17 @@ class TestPreprocWorkflow(object):
         # Test the output motion correction data
         mc_cols = ["rot_x", "rot_y", "rot_z",
                    "trans_x", "trans_y", "trans_z"]
-        mc_out = pd.read_csv(res.outputs.mc_file)
+        mc_out = pd.read_csv(out.mc_file)
         assert mc_out.columns.tolist() == mc_cols
         assert mc_out.values == pytest.approx(mc_data)
 
         # Test that the qc files exist
-        assert op.exists(res.outputs.out_gif)
-        assert op.exists(res.outputs.out_png)
-        assert op.exists(res.outputs.mean_plot)
-        assert op.exists(res.outputs.tsnr_plot)
-        assert op.exists(res.outputs.mask_plot)
-        assert op.exists(res.outputs.noise_plot)
+        assert op.exists(out.out_gif)
+        assert op.exists(out.out_png)
+        assert op.exists(out.mean_plot)
+        assert op.exists(out.tsnr_plot)
+        assert op.exists(out.mask_plot)
+        assert op.exists(out.noise_plot)
 
     def test_finalize_template(self, execdir, template):
 
@@ -590,7 +590,7 @@ class TestPreprocWorkflow(object):
 
         # --- Run the interface
 
-        res = preproc.FinalizeTemplate(
+        out = preproc.FinalizeTemplate(
             session_tuple=session_tuple,
             experiment=experiment,
             in_files=in_files,
@@ -601,33 +601,33 @@ class TestPreprocWorkflow(object):
             mean_files=mean_files,
             tsnr_files=tsnr_files,
             noise_files=noise_files,
-        ).run()
+        ).run().outputs
 
         # --- Test the outputs
 
         # Test output filenames
-        assert res.outputs.out_file == execdir.join("func.nii.gz")
-        assert res.outputs.out_plot == execdir.join("func.png")
-        assert res.outputs.mask_file == execdir.join("mask.nii.gz")
-        assert res.outputs.mask_plot == execdir.join("mask.png")
-        assert res.outputs.noise_file == execdir.join("noise.nii.gz")
-        assert res.outputs.noise_plot == execdir.join("noise.png")
-        assert res.outputs.mean_file == execdir.join("mean.nii.gz")
-        assert res.outputs.mean_plot == execdir.join("mean.png")
-        assert res.outputs.tsnr_file == execdir.join("tsnr.nii.gz")
-        assert res.outputs.tsnr_plot == execdir.join("tsnr.png")
+        assert out.out_file == execdir.join("func.nii.gz")
+        assert out.out_plot == execdir.join("func.png")
+        assert out.mask_file == execdir.join("mask.nii.gz")
+        assert out.mask_plot == execdir.join("mask.png")
+        assert out.noise_file == execdir.join("noise.nii.gz")
+        assert out.noise_plot == execdir.join("noise.png")
+        assert out.mean_file == execdir.join("mean.nii.gz")
+        assert out.mean_plot == execdir.join("mean.png")
+        assert out.tsnr_file == execdir.join("tsnr.nii.gz")
+        assert out.tsnr_plot == execdir.join("tsnr.png")
 
         # Test the output path
         output_path = op.join(subject, experiment, "template", session)
-        assert res.outputs.output_path == output_path
+        assert out.output_path == output_path
 
         # Test the mask conjunction
         mask = np.all(mask_data, axis=0)
-        mask_data_out = nib.load(res.outputs.mask_file).get_data()
+        mask_data_out = nib.load(out.mask_file).get_data()
         assert np.array_equal(mask_data_out, mask.astype(np.float))
 
         # Test the final template
-        out_data_out = nib.load(res.outputs.out_file).get_data()
+        out_data_out = nib.load(out.out_file).get_data()
 
         out_data = np.stack(in_data, axis=-1) * jacobian_data
         out_data[mask] *= target / out_data[mask].mean(axis=0, keepdims=True)
@@ -636,26 +636,26 @@ class TestPreprocWorkflow(object):
         assert np.array_equal(out_data_out, out_data)
 
         # Test the noise mask union
-        noise_data_out = nib.load(res.outputs.noise_file).get_data()
+        noise_data_out = nib.load(out.noise_file).get_data()
         noise_data = np.any(noise_data, axis=0).astype(np.float)
         assert np.array_equal(noise_data_out, noise_data)
 
         # Test the average mean image
-        mean_data_out = nib.load(res.outputs.mean_file).get_data()
+        mean_data_out = nib.load(out.mean_file).get_data()
         mean_data = np.mean(mean_data, axis=0) * mask
         assert np.array_equal(mean_data_out, mean_data)
 
         # Test the average tsnr image
-        tsnr_data_out = nib.load(res.outputs.tsnr_file).get_data()
+        tsnr_data_out = nib.load(out.tsnr_file).get_data()
         tsnr_data = np.mean(tsnr_data, axis=0) * mask
         assert np.array_equal(tsnr_data_out, tsnr_data)
 
         # Test that the qc images exist
-        assert op.exists(res.outputs.out_plot)
-        assert op.exists(res.outputs.mask_plot)
-        assert op.exists(res.outputs.mean_plot)
-        assert op.exists(res.outputs.tsnr_plot)
-        assert op.exists(res.outputs.noise_plot)
+        assert op.exists(out.out_plot)
+        assert op.exists(out.mask_plot)
+        assert op.exists(out.mean_plot)
+        assert op.exists(out.tsnr_plot)
+        assert op.exists(out.noise_plot)
 
     def test_realignment_report(self, execdir):
 
@@ -667,16 +667,16 @@ class TestPreprocWorkflow(object):
         mc_file = "mc.txt"
         np.savetxt(mc_file, mc_data)
 
-        res = preproc.RealignmentReport(
+        out = preproc.RealignmentReport(
             target_file=target_file,
             realign_params=mc_file
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.params_plot == execdir.join("mc_params.png")
-        assert res.outputs.target_plot == execdir.join("mc_target.png")
+        assert out.params_plot == execdir.join("mc_params.png")
+        assert out.target_plot == execdir.join("mc_target.png")
 
-        assert op.exists(res.outputs.params_plot)
-        assert op.exists(res.outputs.target_plot)
+        assert op.exists(out.params_plot)
+        assert op.exists(out.target_plot)
 
     def test_anat_reg_report(self, execdir):
 
@@ -703,15 +703,15 @@ class TestPreprocWorkflow(object):
         aseg_file = mri_dir.join("aseg.mgz")
         nib.save(nib.MGHImage(aseg_data, affine), str(aseg_file))
 
-        res = preproc.AnatRegReport(
+        out = preproc.AnatRegReport(
             subject_id=subject_id,
             data_dir=data_dir,
             in_file=in_file,
             cost_file=cost_file,
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.out_file == execdir.join("reg.png")
-        assert op.exists(res.outputs.out_file)
+        assert out.out_file == execdir.join("reg.png")
+        assert op.exists(out.out_file)
 
     def test_coreg_gif(self, execdir):
 
@@ -725,11 +725,11 @@ class TestPreprocWorkflow(object):
 
         out_file = "out.gif"
 
-        res = preproc.CoregGIF(
+        out = preproc.CoregGIF(
             in_file=in_file,
             ref_file=ref_file,
             out_file=out_file,
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.out_file == execdir.join(out_file)
+        assert out.out_file == execdir.join(out_file)
         assert op.exists(out_file)

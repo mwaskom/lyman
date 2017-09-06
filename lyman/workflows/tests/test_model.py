@@ -165,11 +165,11 @@ class TestModelWorkflows(object):
             model=model_name,
         )
 
-        res = ifc.run()
+        out = ifc.run().outputs
         expected_path = op.join(analysis_dir, subject,
                                 experiment, model_name, "results")
 
-        assert res.outputs.output_path == expected_path
+        assert out.output_path == expected_path
 
     def test_model_fit_input(self, timeseries):
 
@@ -179,24 +179,24 @@ class TestModelWorkflows(object):
         exp_name = timeseries["exp_info"].name
         model_name = timeseries["model_info"].name
 
-        res = model.ModelFitInput(
+        out = model.ModelFitInput(
             experiment=exp_name,
             model=model_name,
             analysis_dir=str(timeseries["analysis_dir"]),
             subject=subject,
             run_tuple=run_tuple,
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.subject == subject
-        assert res.outputs.session == session
-        assert res.outputs.run == run
-        assert res.outputs.seg_file == timeseries["seg_file"]
-        assert res.outputs.surf_file == timeseries["surf_file"]
-        assert res.outputs.mask_file == timeseries["mask_file"]
-        assert res.outputs.ts_file == timeseries["ts_file"]
-        assert res.outputs.noise_file == timeseries["noise_file"]
-        assert res.outputs.mc_file == timeseries["mc_file"]
-        assert res.outputs.output_path == timeseries["model_dir"]
+        assert out.subject == subject
+        assert out.session == session
+        assert out.run == run
+        assert out.seg_file == timeseries["seg_file"]
+        assert out.surf_file == timeseries["surf_file"]
+        assert out.mask_file == timeseries["mask_file"]
+        assert out.ts_file == timeseries["ts_file"]
+        assert out.noise_file == timeseries["noise_file"]
+        assert out.mc_file == timeseries["mc_file"]
+        assert out.output_path == timeseries["model_dir"]
 
     def test_model_results_input(self, modelfit):
 
@@ -206,27 +206,27 @@ class TestModelWorkflows(object):
         exp_name = modelfit["exp_info"].name
         model_name = modelfit["model_info"].name
 
-        res = model.ModelResultsInput(
+        out = model.ModelResultsInput(
             experiment=exp_name,
             model=model_name,
             analysis_dir=str(modelfit["analysis_dir"]),
             subject=subject,
             run_tuple=run_tuple,
-        ).run()
+        ).run().outputs
 
-        assert res.outputs.subject == subject
-        assert res.outputs.session == session
-        assert res.outputs.run == run
-        assert res.outputs.anat_file == modelfit["anat_file"]
-        assert res.outputs.mask_file == modelfit["mask_file"]
-        assert res.outputs.beta_file == modelfit["beta_file"]
-        assert res.outputs.ols_file == modelfit["ols_file"]
-        assert res.outputs.error_file == modelfit["error_file"]
-        assert res.outputs.output_path == modelfit["model_dir"]
+        assert out.subject == subject
+        assert out.session == session
+        assert out.run == run
+        assert out.anat_file == modelfit["anat_file"]
+        assert out.mask_file == modelfit["mask_file"]
+        assert out.beta_file == modelfit["beta_file"]
+        assert out.ols_file == modelfit["ols_file"]
+        assert out.error_file == modelfit["error_file"]
+        assert out.output_path == modelfit["model_dir"]
 
     def test_model_fit(self, execdir, timeseries):
 
-        res = model.ModelFit(
+        out = model.ModelFit(
             subject=timeseries["subject"],
             session=timeseries["session"],
             run=timeseries["run"],
@@ -239,57 +239,57 @@ class TestModelWorkflows(object):
             mask_file=timeseries["mask_file"],
             noise_file=timeseries["noise_file"],
             mc_file=timeseries["mc_file"],
-        ).run()
+        ).run().outputs
 
         # Test output file names
-        assert res.outputs.mask_file == execdir.join("mask.nii.gz")
-        assert res.outputs.beta_file == execdir.join("beta.nii.gz")
-        assert res.outputs.error_file == execdir.join("error.nii.gz")
-        assert res.outputs.ols_file == execdir.join("ols.nii.gz")
-        assert res.outputs.resid_file == execdir.join("resid.nii.gz")
-        assert res.outputs.design_file == execdir.join("design.csv")
-        assert res.outputs.resid_plot == execdir.join("resid.png")
-        assert res.outputs.design_plot == execdir.join("design.png")
-        assert res.outputs.error_plot == execdir.join("error.png")
+        assert out.mask_file == execdir.join("mask.nii.gz")
+        assert out.beta_file == execdir.join("beta.nii.gz")
+        assert out.error_file == execdir.join("error.nii.gz")
+        assert out.ols_file == execdir.join("ols.nii.gz")
+        assert out.resid_file == execdir.join("resid.nii.gz")
+        assert out.design_file == execdir.join("design.csv")
+        assert out.resid_plot == execdir.join("resid.png")
+        assert out.design_plot == execdir.join("design.png")
+        assert out.error_plot == execdir.join("error.png")
 
         n_x, n_y, n_z = timeseries["vol_shape"]
         n_tp = timeseries["n_tp"]
         n_params = timeseries["n_params"]
 
         # Test output image shapes
-        mask_img = nib.load(res.outputs.mask_file)
+        mask_img = nib.load(out.mask_file)
         assert mask_img.shape == (n_x, n_y, n_z)
 
-        beta_img = nib.load(res.outputs.beta_file)
+        beta_img = nib.load(out.beta_file)
         assert beta_img.shape == (n_x, n_y, n_z, n_params)
 
-        error_img = nib.load(res.outputs.error_file)
+        error_img = nib.load(out.error_file)
         assert error_img.shape == (n_x, n_y, n_z)
 
-        ols_img = nib.load(res.outputs.ols_file)
+        ols_img = nib.load(out.ols_file)
         assert ols_img.shape == (n_x, n_y, n_z, n_params ** 2)
 
-        resid_img = nib.load(res.outputs.resid_file)
+        resid_img = nib.load(out.resid_file)
         assert resid_img.shape == (n_x, n_y, n_z, n_tp)
 
-        design = pd.read_csv(res.outputs.design_file)
+        design = pd.read_csv(out.design_file)
         assert design.shape == (n_tp, n_params)
 
     def test_estimate_contrasts(self, execdir, modelfit):
 
-        res = model.EstimateContrasts(
+        out = model.EstimateContrasts(
             exp_info=modelfit["exp_info"],
             model_info=modelfit["model_info"],
             mask_file=modelfit["mask_file"],
             beta_file=modelfit["beta_file"],
             ols_file=modelfit["ols_file"],
             error_file=modelfit["error_file"],
-        ).run()
+        ).run().outputs
 
         # Test output file names
-        assert res.outputs.contrast_file == execdir.join("contrast.nii.gz")
-        assert res.outputs.variance_file == execdir.join("variance.nii.gz")
-        assert res.outputs.tstat_file == execdir.join("tstat.nii.gz")
+        assert out.contrast_file == execdir.join("contrast.nii.gz")
+        assert out.variance_file == execdir.join("variance.nii.gz")
+        assert out.tstat_file == execdir.join("tstat.nii.gz")
 
         # Test output image shapes
         # TODO this needs to be fixed once contrasts info is finished
@@ -298,14 +298,14 @@ class TestModelWorkflows(object):
 
     def test_model_rsults(self, execdir, modelres):
 
-        res = model.ModelResults(
+        out = model.ModelResults(
             model_info=modelres["model_info"],
             anat_file=modelres["anat_file"],
             contrast_files=[modelres["contrast_file"]],
             variance_files=[modelres["variance_file"]],
-        ).run()
+        ).run().outputs
 
         result_directories = [
             execdir.join(c) for c in modelres["model_info"].contrasts
         ]
-        assert res.outputs.result_directories == result_directories
+        assert out.result_directories == result_directories
