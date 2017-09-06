@@ -24,9 +24,12 @@ class TestTemplateWorkflow(object):
         assert template_out.inputs.base_directory == proj_info.analysis_dir
 
         # Check the list of nodes we expect
-        expected_nodes = ["subject_source",
-                          "anat_segment", "define_template",
-                          "template_path", "template_output"]
+        expected_nodes = ["subject_source", "template_input",
+                          "crop_image", "zoom_image", "reorient_image",
+                          "generate_reg", "invert_reg",
+                          "transform_wmparc", "anat_segment",
+                          "hemi_source", "tag_surf", "combine_hemis",
+                          "template_qc", "template_path", "template_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes
 

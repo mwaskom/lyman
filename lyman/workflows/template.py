@@ -1,14 +1,14 @@
-import os
 import os.path as op
-import shutil
 
 import numpy as np
 from scipy import ndimage
 import matplotlib as mpl
 import nibabel as nib
 
-from nipype import Workflow, Node, IdentityInterface, Function, DataSink
+from nipype import (Workflow, Node, JoinNode,
+                    IdentityInterface, Function, DataSink)
 from nipype.interfaces.base import traits, TraitedSpec
+from nipype.interfaces import fsl, freesurfer as fs
 
 from ..utils import LymanInterface
 from ..visualizations import Mosaic
@@ -22,16 +22,61 @@ def define_template_workflow(proj_info, subjects, qc=True):
                           name="subject_source",
                           iterables=("subject", subjects))
 
-    # --- Definition of functinoal template space
+    # Data input
+    template_input = Node(TemplateInput(data_dir=proj_info.data_dir),
+                          "template_input")
 
-    define_template = Node(DefineTemplateSpace(data_dir=proj_info.data_dir,
-                                               # TODO should be project param
-                                               voxel_size=(2, 2, 2)),
-                           "define_template")
+    # --- Definition of functional template space
+
+    crop_image = Node(fs.ApplyMask(args="-bb 4"), "crop_image")
+
+    zoom_image = Node(fs.MRIConvert(resample_type="cubic",
+                                    out_type="niigz",
+                                    vox_size=(2, 2, 2),  # TODO make proj param
+                                    ),
+                      "zoom_image")
+
+    reorient_image = Node(fsl.Reorient2Std(out_file="anat.nii.gz"),
+                          "reorient_image")
+
+    generate_reg = Node(fs.Tkregister2(fsl_out="anat2func.mat",
+                                       reg_file="anat2func.dat",
+                                       reg_header=True),
+                        "generate_reg")
+
+    invert_reg = Node(fs.Tkregister2(reg_file="func2anat.dat",
+                                     reg_header=True),
+                      "invert_reg")
 
     # --- Segementation of anatomical tissue in functional space
 
+    transform_wmparc = Node(fs.ApplyVolTransform(inverse=True,
+                                                 interp="nearest",
+                                                 args="--keep-precision"),
+                            "transform_wmparc")
+
     anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
+
+    # --- Identification of surface vertices
+
+    hemi_source = Node(IdentityInterface(["hemi"]), "hemi_source",
+                       iterables=("hemi", ["lh", "rh"]))
+
+    tag_surf = Node(fs.Surface2VolTransform(surf_name="graymid",
+                                            transformed_file="ribbon.nii.gz",
+                                            vertexvol_file="vertices.nii.gz",
+                                            mkmask=True),
+                    "tag_surf")
+
+    combine_hemis = JoinNode(fsl.Merge(dimension="t",
+                                       merged_file="surf.nii.gz"),
+                             name="combine_hemis",
+                             joinsource="hemi_source",
+                             joinfield="in_files")
+
+    # --- Template QC
+
+    template_qc = Node(TemplateReport(), "template_qc")
 
     # --- Workflow ouptut
 
@@ -52,25 +97,61 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     processing_edges = [
 
-        (subject_source, define_template,
+        (subject_source, template_input,
             [("subject", "subject")]),
-        (define_template, anat_segment,
-            [("func2anat_dat", "reg_file"),
-             ("t1w_file", "template_file")]),
+        (template_input, crop_image,
+            [("norm_file", "in_file"),
+             ("wmparc_file", "mask_file")]),
+        (crop_image, zoom_image,
+            [("out_file", "in_file")]),
+        (zoom_image, reorient_image,
+            [("out_file", "in_file")]),
+
+        (subject_source, generate_reg,
+            [("subject", "subject_id")]),
+        (template_input, generate_reg,
+            [("norm_file", "moving_image")]),
+        (reorient_image, generate_reg,
+            [("out_file", "target_image")]),
+
+        (subject_source, invert_reg,
+            [("subject", "subject_id")]),
+        (template_input, invert_reg,
+            [("norm_file", "target_image")]),
+        (reorient_image, invert_reg,
+            [("out_file", "moving_image")]),
+
+        (reorient_image, transform_wmparc,
+            [("out_file", "source_file")]),
+        (template_input, transform_wmparc,
+            [("wmparc_file", "target_file")]),
+        (invert_reg, transform_wmparc,
+            [("reg_file", "reg_file")]),
+        (transform_wmparc, anat_segment,
+            [("transformed_file", "wmparc_file")]),
+
+        (hemi_source, tag_surf,
+            [("hemi", "hemi")]),
+        (invert_reg, tag_surf,
+            [("reg_file", "reg_file")]),
+        (reorient_image, tag_surf,
+            [("out_file", "template_file")]),
+        (tag_surf, combine_hemis,
+            [("vertexvol_file", "in_files")]),
+
         (subject_source, template_path,
             [("subject", "subject")]),
         (template_path, template_output,
             [("path", "container")]),
-        (define_template, template_output,
-            [("anat_file", "@anat"),
-             ("t1w_file", "@t1w"),
-             ("t2w_file", "@t2w"),
-             ("func2anat_mat", "@func2anat_mat"),
-             ("anat2func_mat", "@anat2func_mat")]),
+        (reorient_image, template_output,
+            [("out_file", "@anat")]),
+        (generate_reg, template_output,
+            [("fsl_file", "@anat2func")]),
         (anat_segment, template_output,
             [("seg_file", "@seg"),
-             ("mask_file", "@mask"),
-             ("surf_file", "@surf")]),
+             ("mask_file", "@mask")]),
+        (combine_hemis, template_output,
+            [("merged_file", "@surf")]),
 
     ]
     workflow.connect(processing_edges)
@@ -79,13 +160,19 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     qc_edges = [
 
-        (define_template, template_output,
-            [("t1w_plot", "qc.@t1w_plot"),
-             ("t2w_plot", "qc.@t2w_plot")]),
-        (anat_segment, template_output,
+        (reorient_image, template_qc,
+            [("out_file", "anat_file")]),
+        (anat_segment, template_qc,
+            [("seg_file", "seg_file"),
+             ("mask_file", "mask_file")]),
+        (combine_hemis, template_qc,
+            [("merged_file", "surf_file")]),
+
+        (template_qc, template_output,
             [("seg_plot", "qc.@seg_plot"),
              ("mask_plot", "qc.@mask_plot"),
-             ("surf_plot", "qc.@surf_plot")]),
+             ("surf_plot", "qc.@surf_plot"),
+             ("anat_plot", "qc.@anat_plot")]),
 
     ]
     if qc:
@@ -99,155 +186,40 @@ def define_template_workflow(proj_info, subjects, qc=True):
 # =========================================================================== #
 
 
-class DefineTemplateSpace(LymanInterface):
+class TemplateInput(LymanInterface):
 
     class input_spec(TraitedSpec):
         data_dir = traits.Directory(exists=True)
         subject = traits.Str()
-        voxel_size = traits.Tuple(traits.Float(),
-                                  traits.Float(),
-                                  traits.Float())
 
     class output_spec(TraitedSpec):
-        anat2func_dat = traits.File(exists=True)
-        func2anat_dat = traits.File(exists=True)
-        anat2func_mat = traits.File(exists=True)
-        func2anat_mat = traits.File(exists=True)
-        anat_file = traits.File(exists=True)
-        t1w_file = traits.File(exists=True)
-        t1w_plot = traits.File(exists=True)
-        t2w_file = traits.File()
-        t2w_plot = traits.File()
+        norm_file = traits.File(exists=True)
+        wmparc_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        # TODO This interface makes calls to external packages but should not
-        # be too difficult to do in pure Python. It's worth thinking about
-        # doing so to facilitate automated testing.
-
-        subjects_dir = os.environ["SUBJECTS_DIR"]
-        self.mri_dir = op.join(subjects_dir, self.inputs.subject, "mri")
-
-        # Transform the T1w image into template space
-        t1w_file = self.transform_image(runtime, "norm.mgz",
-                                        "t1w_file", "T1w.nii.gz")
-
-        # Duplicate the T1w file with a different name
-        anat_file = self.define_output("anat_file", "anat.nii.gz")
-        anat_file = shutil.copyfile(t1w_file, anat_file)
-
-        # Transform the T2w image into template space
-        # TODO if we use the HCP recon enhancements instead of
-        # recon-all -T2pial (which doesn't work well!) this file won't get made
-        have_t2w = op.exists(op.join(self.mri_dir, "T2w.norm.mgz"))
-        if have_t2w:
-            t2w_file = self.transform_image(runtime, "T2w.norm.mgz",
-                                            "t2w_file", "T2w.nii.gz")
-
-        # Generate an anat -> func and inverse registration matrices
-        # TODO do we need to write both tkreg and fsl format?
-        anat2func_dat = self.define_output("anat2func_dat", "anat2func.dat")
-        anat2func_mat = self.define_output("anat2func_mat", "anat2func.mat")
-        cmdline = ["tkregister2",
-                   "--mov", op.join(self.mri_dir, "norm.mgz"),
-                   "--targ", t1w_file,
-                   "--s", self.inputs.subject,
-                   "--regheader",
-                   "--reg", anat2func_dat,
-                   "--fslregout", anat2func_mat,
-                   "--noedit"]
-        self.submit_cmdline(runtime, cmdline)
-
-        func2anat_dat = self.define_output("func2anat_dat", "func2anat.dat")
-        func2anat_mat = self.define_output("func2anat_mat", "func2anat.mat")
-        cmdline = ["tkregister2",
-                   "--mov", t1w_file,
-                   "--targ", op.join(self.mri_dir, "norm.mgz"),
-                   "--s", self.inputs.subject,
-                   "--regheader",
-                   "--reg", func2anat_dat,
-                   "--fslregout", func2anat_mat,
-                   "--noedit"]
-        self.submit_cmdline(runtime, cmdline)
-
-        # Write out QC mosaics
-        self.write_visualization("t1w_plot", "T1w.png", Mosaic(t1w_file))
-
-        if have_t2w:
-            self.write_visualization("t2w_plot", "T2w.png", Mosaic(t2w_file))
-
+        mri_dir = op.join(self.inputs.data_dir, self.inputs.subject, "mri")
+        results = dict(
+            norm_file=op.join(mri_dir, "norm.mgz"),
+            wmparc_file=op.join(mri_dir, "wmparc.mgz"),
+        )
+        self._results.update(results)
         return runtime
-
-    def transform_image(self, runtime, in_fname, out_field, out_fname):
-
-        fstem, _ = op.splitext(in_fname)
-
-        # Crop the image using the aseg
-        cropped_fname = fstem + "_crop.nii.gz"
-        cmdline = ["mri_mask",
-                   "-bb", "3",
-                   op.join(self.mri_dir, in_fname),
-                   op.join(self.mri_dir, "aseg.mgz"),
-                   cropped_fname]
-        self.submit_cmdline(runtime, cmdline)
-
-        # Downsample to the desired functional resolution
-        zoomed_fname = fstem + "_crop_zoom.nii.gz"
-        cmdline = ["mri_convert",
-                   cropped_fname,
-                   zoomed_fname,
-                   "-rt", "cubic",
-                   "-vs"]
-        cmdline.extend(map(str, self.inputs.voxel_size))
-        self.submit_cmdline(runtime, cmdline)
-
-        # Reorient to cannonical orientation
-        out_file = self.define_output(out_field, out_fname)
-        cmdline = ["fslreorient2std", zoomed_fname, out_file]
-        self.submit_cmdline(runtime, cmdline)
-
-        return out_file
 
 
 class AnatomicalSegmentation(LymanInterface):
 
     class input_spec(TraitedSpec):
-        template_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
+        wmparc_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         seg_file = traits.File(exists=True)
-        seg_plot = traits.File(exists=True)
         mask_file = traits.File(exists=True)
-        mask_plot = traits.File(exists=True)
-        surf_file = traits.File(exists=True)
-        surf_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        # Define the template space geometry
-
-        template_img = nib.load(self.inputs.template_file)
-
-        # --- Coarse segmentation into anatomical components
-
-        # Transform the wmparc image into functional space
-
-        fs_fname = "wmparc.nii.gz"
-        cmdline = ["mri_vol2vol",
-                   "--nearest",
-                   "--keep-precision",
-                   "--inv",
-                   "--mov", self.inputs.template_file,
-                   "--fstarg", "wmparc.mgz",
-                   "--reg", self.inputs.reg_file,
-                   "--o", fs_fname]
-
-        self.submit_cmdline(runtime, cmdline)
-
         # Load the template-space wmparc and reclassify voxels
-
-        fs_img = nib.load(fs_fname)
+        fs_img = nib.load(self.inputs.wmparc_file)
         fs_data = fs_img.get_data()
         affine, header = fs_img.affine, fs_img.header
 
@@ -268,8 +240,7 @@ class AnatomicalSegmentation(LymanInterface):
             mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
             seg_data[mask] = seg_val
 
-        seg_img = self.write_image("seg_file", "seg.nii.gz",
-                                   seg_data, affine, header)
+        self.write_image("seg_file", "seg.nii.gz", seg_data, affine, header)
 
         # TODO Write a seg.lut for Freeview
 
@@ -281,55 +252,59 @@ class AnatomicalSegmentation(LymanInterface):
         brainmask = ndimage.binary_dilation(brainmask, iterations=2)
         brainmask = ndimage.binary_erosion(brainmask)
         brainmask = ndimage.binary_fill_holes(brainmask)
-        mask_img = self.write_image("mask_file", "mask.nii.gz",
-                                    brainmask.astype(np.int), affine, header)
+        brainmask = brainmask.astype(np.uint8)
+        self.write_image("mask_file", "mask.nii.gz", brainmask, affine, header)
 
-        # --- Surface vertex mapping
+        return runtime
 
-        hemi_files = []
-        for hemi in ["lh", "rh"]:
-            hemi_mask = "{}.ribbon.nii.gz".format(hemi)
-            hemi_file = "{}.surf.nii.gz".format(hemi)
-            cmdline = ["mri_surf2vol",
-                       "--template", self.inputs.template_file,
-                       "--reg", self.inputs.reg_file,
-                       "--surf", "graymid",
-                       "--hemi", hemi,
-                       "--mkmask",
-                       "--o", hemi_mask,
-                       "--vtxvol", hemi_file]
 
-            self.submit_cmdline(runtime, cmdline)
-            hemi_files.append(hemi_file)
+class TemplateReport(LymanInterface):
 
-        hemi_data = [nib.load(f).get_data() for f in hemi_files]
-        surf = np.stack(hemi_data, axis=-1)
-        self.write_image("surf_file", "surf.nii.gz", surf, affine, header)
+    class input_spec(TraitedSpec):
+        seg_file = traits.File(exists=True)
+        mask_file = traits.File(exists=True)
+        surf_file = traits.File(exists=True)
+        anat_file = traits.File(exists=True)
 
-        # --- Generate QC mosaics
+    class output_spec(TraitedSpec):
+        seg_plot = traits.File(exists=True)
+        mask_plot = traits.File(exists=True)
+        surf_plot = traits.File(exists=True)
+        anat_plot = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        # Anatomical template
+        mask_img = nib.load(self.inputs.mask_file)
+        anat_img = nib.load(self.inputs.anat_file)
+        m_anat = Mosaic(anat_img, step=2, tight=True)
+        self.write_visualization("anat_plot", "anat.png", m_anat)
 
         # Anatomical segmentation
+        seg_img = nib.load(self.inputs.seg_file)
         seg_cmap = mpl.colors.ListedColormap(  # TODO get from seg lut
             ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
              '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
          )
-        m_seg = Mosaic(template_img, seg_img, mask_img,
+        m_seg = Mosaic(anat_img, seg_img, mask_img,
                        step=2, tight=True, show_mask=False)
         m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
         self.write_visualization("seg_plot", "seg.png", m_seg)
 
         # Brain mask
-        m_mask = Mosaic(template_img, mask_img, mask_img,
+        m_mask = Mosaic(anat_img, mask_img, mask_img,
                         step=2, tight=True, show_mask=False)
         m_mask.plot_mask()
         self.write_visualization("mask_plot", "mask.png", m_mask)
 
         # Surface ribbon
-        ribbon = np.zeros(template_img.shape)
+        surf_img = nib.load(self.inputs.surf_file)
+        surf = surf_img.get_data()
+        ribbon = np.zeros(anat_img.shape)
         ribbon[surf[..., 0] > 0] = 1
         ribbon[surf[..., 1] > 0] = 2
         ribbon_cmap = mpl.colors.ListedColormap(["#5ebe82", "#ec966f"])
-        m_surf = Mosaic(template_img, ribbon, mask_img,
+        m_surf = Mosaic(anat_img, ribbon, mask_img,
                         step=2, tight=True, show_mask=False)
         m_surf.plot_overlay(ribbon_cmap, 1, 2, thresh=.5, fmt=None)
         self.write_visualization("surf_plot", "surf.png", m_surf)
