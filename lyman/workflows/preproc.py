@@ -18,7 +18,7 @@ from ..utils import LymanInterface
 from ..visualizations import Mosaic, CarpetPlot
 
 
-def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
+def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
 
     # proj_info will be a bunch or other object with data_dir, etc. fields
 
@@ -29,7 +29,7 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
     scan_info = proj_info.scan_info
     experiment = exp_info.name
 
-    iterables = generate_iterables(scan_info, subjects, experiment, session)
+    iterables = generate_iterables(scan_info, experiment, subjects, sessions)
     subject_iterables, session_iterables, run_iterables = iterables
 
     subject_iterables = subjects
@@ -77,11 +77,12 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
     fm2anat = Node(fs.BBRegister(init="fsl",
                                  contrast_type="t2",
+                                 registered_file=True,
                                  out_fsl_file="sess2anat.mat",
                                  out_reg_file="sess2anat.dat"),
                    "fm2anat")
 
-    fm2anat_qc = Node(AnatRegReport(), "fm2anat_qc")
+    fm2anat_qc = Node(AnatRegReport(data_dir=proj_info.data_dir), "fm2anat_qc")
 
     # --- Registration of SBRef to SE-EPI (with distortions)
 
@@ -104,6 +105,10 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
     combine_postmats = Node(fsl.ConvertXFM(concat_xfm=True),
                             "combine_postmats")
+
+    # Transform Jacobian images into the template space
+    transform_jacobian = Node(fsl.ApplyWarp(relwarp=True),
+                              "transform_jacobian")
 
     # Apply rigid transforms and nonlinear warpfield to time series frames
     restore_timeseries = MapNode(fsl.ApplyWarp(interp="spline", relwarp=True),
@@ -204,6 +209,13 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
         (session_input, combine_postmats,
             [("reg_file", "in_file2")]),
 
+        (run_input, transform_jacobian,
+            [("anat_file", "ref_file")]),
+        (finalize_unwarping, transform_jacobian,
+            [("jacobian_file", "in_file")]),
+        (combine_postmats, transform_jacobian,
+            [("out_file", "premat")]),
+
         (run_input, restore_timeseries,
             [("ts_frames", "in_file")]),
         (run_input, restore_timeseries,
@@ -219,10 +231,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
              ("anat_file", "anat_file"),
              ("seg_file", "seg_file"),
              ("mask_file", "mask_file")]),
-        (combine_postmats, finalize_timeseries,
-            [("out_file", "reg_file")]),
-        (finalize_unwarping, finalize_timeseries,
-            [("jacobian_file", "jacobian_file")]),
+        (transform_jacobian, finalize_timeseries,
+            [("out_file", "jacobian_file")]),
         (restore_timeseries, finalize_timeseries,
             [("out_file", "in_files")]),
 
@@ -238,10 +248,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
             [("session_tuple", "session_tuple"),
              ("seg_file", "seg_file"),
              ("anat_file", "anat_file")]),
-        (combine_postmats, finalize_template,
-            [("out_file", "reg_file")]),
-        (finalize_unwarping, finalize_template,
-            [("jacobian_file", "jacobian_file")]),
+        (transform_jacobian, finalize_template,
+            [("out_file", "jacobian_file")]),
         (restore_template, finalize_template,
             [("out_file", "in_files")]),
 
@@ -292,10 +300,8 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 
         (session_input, fm2anat_qc,
             [("subject", "subject_id")]),
-        (finalize_unwarping, fm2anat_qc,
-            [("corrected_file", "in_file")]),
         (fm2anat, fm2anat_qc,
-            [("out_reg_file", "reg_file"),
+            [("registered_file", "in_file"),
              ("min_cost_file", "cost_file")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
@@ -349,33 +355,64 @@ def define_preproc_workflow(proj_info, subjects, session, exp_info, qc=True):
 # =========================================================================== #
 
 
-def generate_iterables(scan_info, subjects, experiment, session=None):
+def generate_iterables(scan_info, experiment, subjects, sessions=None):
+    """Return lists of variables for preproc workflow iterables.
 
-    # TODO additionally we want to expand this to specify > 1 session
-    # TODO also change the order of subjects and experiment?
-    subject_iterables = subjects
-    session_iterables = dict()
-    run_iterables = dict()
+    Parameters
+    ----------
+    scan_info : nested dictionaries
+        A nested dictionary structure with the following key levels:
+            - subject ids
+            - session ids
+            - experiment names
+        Where the inner values are lists of run ids.
+    experiment : string
+        Name of the experiment to generate iterables for.
+    subjects : list of strings
+        List of subject ids to generate iterables for.
+    sessions : list of strings, optional
+        List of sessions to generate iterables for.
+
+    Returns
+    -------
+    subject_iterables: list of strings
+        A list of the subjects with runs for this experiment.
+    session_iterables : dict
+        A dictionary where keys are subject ids and values are lists of
+        (subject id, session id) pairs
+    run_iterables : dict
+        A dictionary where keys are (subject id, session id) pairs and values
+        lists of (subject id, session id, run id) pairs.
+
+    """
+    subject_iterables = []
+    session_iterables = {}
+    run_iterables = {}
 
     for subj in subjects:
 
-        session_iterables[subj] = []
+        subject_session_iterables = []
 
         for sess in scan_info[subj]:
 
-            sess_key = subj, sess
+            session_run_iterables = []
 
-            if session is not None and sess != session:
+            if sessions is not None and sess not in sessions:
                 continue
 
             if experiment in scan_info[subj][sess]:
 
-                session_iterables[subj].append(sess_key)
-                run_iterables[sess_key] = []
-
                 for run in scan_info[subj][sess][experiment]:
-                    run_key = subj, sess, run
-                    run_iterables[sess_key].append(run_key)
+                    session_run_iterables.append((subj, sess, run))
+
+            if session_run_iterables:
+                sess_key = subj, sess
+                subject_session_iterables.append(sess_key)
+                run_iterables[sess_key] = session_run_iterables
+
+        if subject_session_iterables:
+            subject_iterables.append(subj)
+            session_iterables[subj] = subject_session_iterables
 
     return subject_iterables, session_iterables, run_iterables
 
@@ -428,9 +465,8 @@ class TimeSeriesGIF(object):
                 text.set_text("T: {:d}".format(t))
 
             frame_png = "png/{:04d}.png".format(t)
+            f.savefig(frame_png, facecolor="0", edgecolor="0")
             pngs.append(frame_png)
-            f.savefig(frame_png,
-                      facecolor="0", edgecolor="0")
 
         cmdline = ["convert", "-loop", "0", "-delay", str(delay)]
         cmdline.extend(pngs)
@@ -449,7 +485,7 @@ class SessionInput(LymanInterface):
         data_dir = traits.Directory(exists=True)
         analysis_dir = traits.Directory(exists=True)
         fm_template = traits.Str()
-        phase_encoding = traits.Str()
+        phase_encoding = traits.Either("ap", "pa")
 
     class output_spec(TraitedSpec):
         session_tuple = traits.Tuple()
@@ -478,8 +514,6 @@ class SessionInput(LymanInterface):
             pos_pe, neg_pe = "ap", "pa"
         elif pe == "pa":
             pos_pe, neg_pe = "pa", "ap"
-        else:
-            raise ValueError("Phase encoding must be 'ap' or 'pa'")
 
         # Spec out full paths to the pair of fieldmap files
         keys = dict(subject=subject, session=session)
@@ -699,13 +733,13 @@ class FinalizeUnwarping(LymanInterface):
         corr_data = corr_img_frames.get_data()
 
         # Jacobian modulate the corrected image
-        corr_img_frames = nib.Nifti1Image(corr_data * jac_data,
-                                          affine, header)
+        corr_mod_data = corr_data * jac_data
+        corr_img_frames = nib.Nifti1Image(corr_mod_data, affine, header)
 
         # Average the corrected image over the final dimension and write
-        corr_data_avg = corr_data.mean(axis=-1)
+        corr_mod_data = corr_mod_data.mean(axis=-1)
         self.write_image("corrected_file", "func.nii.gz",
-                         corr_data_avg, affine, header)
+                         corr_mod_data, affine, header)
 
         # Save the jacobian images using the raw geometry
         self.write_image("jacobian_file", "jacobian.nii.gz",
@@ -736,11 +770,9 @@ class FinalizeUnwarping(LymanInterface):
                          mask_data, affine, header)
 
         # Generate a QC image of the warpfield
-        warp_plot = self.define_output("warp_plot", "warp.png")
         m = Mosaic(raw_img, warp_data_y)
         m.plot_overlay("coolwarm", vmin=-6, vmax=6, alpha=.75)
-        m.savefig(warp_plot)
-        m.close()
+        self.write_visualization("warp_plot", "warp.png", m)
 
         # Generate a QC gif of the unwarping performance
         self.generate_unwarp_gif(runtime, raw_img_frames, corr_img_frames)
@@ -828,7 +860,6 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         anat_file = traits.File(exists=True)
         in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         jacobian_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
@@ -868,17 +899,8 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         # Zero-out data outside the mask
         data[~mask] = 0
 
-        # Transform the jacobian image into template space
-        jacobian_file = "jacobian.nii.gz"
-        cmdline = ["applywarp",
-                   "-i", self.inputs.jacobian_file,
-                   "-r", self.inputs.in_files[0],
-                   "-o", jacobian_file,
-                   "--premat=" + self.inputs.reg_file]
-        self.submit_cmdline(runtime, cmdline)
-
         # Jacobian modulate each frame of the timeseries image
-        jacobian_img = nib.load(jacobian_file)
+        jacobian_img = nib.load(self.inputs.jacobian_file)
         jacobian = jacobian_img.get_data()[..., [0]]
         data *= jacobian
 
@@ -888,9 +910,8 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         data = data * scale_value
 
         # Remove linear but not constant trend
-        mean = data.mean(axis=-1, keepdims=True)
-        data[mask] = signal.detrend(data[mask])
-        data += mean
+        mask_mean = data[mask].mean(axis=-1, keepdims=True)
+        data[mask] = signal.detrend(data[mask], axis=-1) + mask_mean
 
         # Save out the final time series
         out_img = self.write_image("out_file", "func.nii.gz",
@@ -930,45 +951,35 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         mc_data.to_csv(mc_file, index=False)
 
         # Make a carpet plot of the final timeseries
-        out_png = self.define_output("out_png", "func.png")
         p = CarpetPlot(out_img, seg_img, mc_data)
-        p.savefig(out_png)
-        p.close()
+        self.write_visualization("out_png", "func.png", p)
 
         # Make a GIF movie of the final timeseries
         out_gif = self.define_output("out_gif", "func.gif")
         self.write_time_series_gif(runtime, out_img, out_gif)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
-        mean_plot = self.define_output("mean_plot", "mean.png")
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(anat_img, norm_mean)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
-        mean_m.savefig(mean_plot)
-        mean_m.close()
+        self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
         tsnr_m = Mosaic(anat_img, tsnr)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
-        tsnr_m.savefig(tsnr_plot)
-        tsnr_m.close()
+        self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a mosaic of the run mask
         # TODO is the better QC showing the run mask over the unmasked mean
         # image so that we can see if the brain is getting cut off?
-        mask_plot = self.define_output("mask_plot", "mask.png")
-        m = Mosaic(anat_img, mask_img)
-        m.plot_mask()
-        m.savefig(mask_plot)
-        m.close()
+        mask_m = Mosaic(anat_img, mask_img)
+        mask_m.plot_mask()
+        self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a mosaic of the noisy voxels
-        noise_plot = self.define_output("noise_plot", "noise.png")
-        m = Mosaic(anat_img, noise_img, mask_img, show_mask=False)
-        m.plot_mask(alpha=1)
-        m.savefig(noise_plot)
-        m.close()
+        noise_m = Mosaic(anat_img, noise_img, mask_img, show_mask=False)
+        noise_m.plot_mask(alpha=1)
+        self.write_visualization("noise_plot", "noise.png", noise_m)
 
         # Spec out the root path for the timeseries outputs
         subject, session, run = self.inputs.run_tuple
@@ -983,16 +994,15 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
 class FinalizeTemplate(LymanInterface):
 
     class input_spec(TraitedSpec):
-        session_tuple = traits.Tuple()
         experiment = traits.Str()
+        session_tuple = traits.Tuple()
         in_files = traits.List(traits.File(exists=True))
-        reg_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
         anat_file = traits.File(exists=True)
         jacobian_file = traits.File(exists=True)
+        mask_files = traits.List(traits.File(exists=True))
         mean_files = traits.List(traits.File(exists=True))
         tsnr_files = traits.List(traits.File(exsits=True))
-        mask_files = traits.List(traits.File(exists=True))
         noise_files = traits.List(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
@@ -1029,17 +1039,8 @@ class FinalizeTemplate(LymanInterface):
         # Zero-out data outside the mask
         data[~mask] = 0
 
-        # Transform the jacobian image into template space
-        jacobian_file = "jacobian.nii.gz"
-        cmdline = ["applywarp",
-                   "-i", self.inputs.jacobian_file,
-                   "-r", self.inputs.in_files[0],
-                   "-o", jacobian_file,
-                   "--premat=" + self.inputs.reg_file]
-        self.submit_cmdline(runtime, cmdline)
-
         # Jacobian modulate each frame of the template image
-        jacobian_img = nib.load(jacobian_file)
+        jacobian_img = nib.load(self.inputs.jacobian_file)
         jacobian = jacobian_img.get_data()
         data *= jacobian
 
@@ -1068,7 +1069,7 @@ class FinalizeTemplate(LymanInterface):
         mean_img = self.write_image("mean_file", "mean.nii.gz",
                                     mean, affine, header)
 
-        # Load each run's tsnr image and take its tsnr
+        # Load each run's tsnr image and take its mean
         tsnr_img = nib.concat_images(self.inputs.tsnr_files)
         tsnr_data = tsnr_img.get_data().mean(axis=-1)
         tsnr_data[~mask] = 0
@@ -1076,43 +1077,33 @@ class FinalizeTemplate(LymanInterface):
                                     tsnr_data, affine, header)
 
         # Write static mosaic image
-        out_plot = self.define_output("out_plot", "func.png")
         m = Mosaic(out_img)
-        m.savefig(out_plot)
-        m.close()
+        self.write_visualization("out_plot", "func.png", m)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
         # TODO copied from timeseries interface!
-        mean_plot = self.define_output("mean_plot", "mean.png")
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(anat_img, norm_mean, mask_img, show_mask=False)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
-        mean_m.savefig(mean_plot)
-        mean_m.close()
+        self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_plot = self.define_output("tsnr_plot", "tsnr.png")
         tsnr_m = Mosaic(anat_img, tsnr_img, mask_img, show_mask=False)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
-        tsnr_m.savefig(tsnr_plot)
-        tsnr_m.close()
+        self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a QC plot of the run mask
         # TODO should this emphasize areas where runs don't overlap?
-        mask_plot = self.define_output("mask_plot", "mask.png")
-        m = Mosaic(anat_img, mask_img)
-        m.plot_mask()
-        m.savefig(mask_plot)
-        m.close()
+        mask_m = Mosaic(anat_img, mask_img)
+        mask_m.plot_mask()
+        self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a QC plot of the session noise mask
-        noise_plot = self.define_output("noise_plot", "noise.png")
-        m = Mosaic(anat_img, noise_img)
-        m.plot_mask(alpha=1)
-        m.savefig(noise_plot)
-        m.close()
+        noise_m = Mosaic(anat_img, noise_img)
+        noise_m.plot_mask(alpha=1)
+        self.write_visualization("noise_plot", "noise.png", noise_m)
 
         # Spec out the root path for the template outputs
         experiment = self.inputs.experiment
@@ -1150,10 +1141,8 @@ class RealignmentReport(LymanInterface):
         plt.close(f)
 
         # Plot the target image
-        target_plot = self.define_output("target_plot", "mc_target.png")
         m = self.plot_target()
-        m.savefig(target_plot)
-        m.close()
+        self.write_visualization("target_plot", "mc_target.png", m)
 
         return runtime
 
@@ -1197,29 +1186,17 @@ class AnatRegReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
+        data_dir = traits.Directory(exists=True)
         in_file = traits.File(exists=True)
-        reg_file = traits.File(exists=True)
         cost_file = traits.File(exists=True)
-        out_file = traits.File()
 
     class output_spec(TraitedSpec):
         out_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        # Use the registration to transform the input file
-        registered_file = "func_in_anat.nii.gz"
-        cmdline = ["mri_vol2vol",
-                   "--mov", self.inputs.in_file,
-                   "--reg", self.inputs.reg_file,
-                   "--o", registered_file,
-                   "--fstarg",
-                   "--cubic"]
-
-        self.submit_cmdline(runtime, cmdline)
-
         # Load the WM segmentation and a brain mask
-        mri_dir = op.join(os.environ["SUBJECTS_DIR"],
+        mri_dir = op.join(self.inputs.data_dir,
                           self.inputs.subject_id, "mri")
 
         wm_file = op.join(mri_dir, "wm.mgz")
@@ -1233,15 +1210,12 @@ class AnatRegReport(LymanInterface):
 
         # Make a mosaic of the registration from func to wm seg
         # TODO this should be an OrthoMosaic when that is implemented
-        out_file = self.define_output("out_file", "reg.png")
-
-        m = Mosaic(registered_file, wm_data, mask, step=3, show_mask=False)
+        m = Mosaic(self.inputs.in_file, wm_data, mask, step=3, show_mask=False)
         m.plot_mask_edges()
         if cost is not None:
             m.fig.suptitle("Final cost: {:.2f}".format(cost),
                            size=10, color="white")
-        m.savefig(out_file)
-        m.close()
+        self.write_visualization("out_file", "reg.png", m)
 
         return runtime
 
@@ -1272,13 +1246,8 @@ class CoregGIF(LymanInterface):
 
     def write_mosaic_gif(self, runtime, img1, img2, fname, **kws):
 
-        m1 = Mosaic(img1, **kws)
-        m1.savefig("img1.png")
-        m1.close()
-
-        m2 = Mosaic(img2, **kws)
-        m2.savefig("img2.png")
-        m2.close()
+        Mosaic(img1, **kws).savefig("img1.png", close=True)
+        Mosaic(img2, **kws).savefig("img2.png", close=True)
 
         cmdline = ["convert", "-loop", "0", "-delay", "100",
                    "img1.png", "img2.png", fname]

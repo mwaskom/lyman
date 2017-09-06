@@ -1,9 +1,145 @@
+import os.path as op
 import numpy as np
 import nibabel as nib
+
+from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
 import pytest
 
 from .. import utils
+
+
+class TestLymanInterface(object):
+
+    def test_inheriting_interface_behavior(self):
+
+        class TestInterface(utils.LymanInterface):
+
+            class input_spec(TraitedSpec):
+                a = traits.Int()
+                b = traits.Int()
+
+            class output_spec(TraitedSpec):
+                c = traits.Int()
+
+            def _run_interface(self, runtime):
+                c = self.inputs.a + self.inputs.b
+                self._results["c"] = c
+                return runtime
+
+        a, b = 2, 3
+        c = a + b
+
+        ifc = TestInterface(a=a, b=b)
+        assert ifc._results == {}
+
+        res = ifc.run()
+        assert ifc._results == {"c": c}
+        assert res.outputs.c == c
+
+    def test_output_definition(self, execdir):
+
+        ifc = utils.LymanInterface()
+        field_name = "out_file"
+        file_name = "out_file.txt"
+
+        abspath_file_name = execdir.join(file_name)
+        out = ifc.define_output(field_name, file_name)
+
+        assert out == abspath_file_name
+        assert ifc._results == {field_name: abspath_file_name}
+
+    def test_write_image(self, execdir):
+
+        field_name = "out_file"
+        file_name = "out_file.nii"
+        abspath_file_name = execdir.join(file_name)
+
+        data = np.random.randn(12, 8, 4)
+        affine = np.eye(4)
+        img = nib.Nifti1Image(data, affine)
+
+        # Test writing with an image
+        ifc = utils.LymanInterface()
+        img_out = ifc.write_image(field_name, file_name, img)
+
+        assert ifc._results == {field_name: abspath_file_name}
+        assert isinstance(img_out, nib.Nifti1Image)
+        assert np.array_equal(img_out.get_data(), data)
+        assert np.array_equal(img_out.affine, affine)
+
+        # Test writing with data and affine
+        ifc = utils.LymanInterface()
+        img_out = ifc.write_image(field_name, file_name, data, affine)
+
+        assert ifc._results == {field_name: abspath_file_name}
+        assert isinstance(img_out, nib.Nifti1Image)
+        assert np.array_equal(img_out.get_data(), data)
+        assert np.array_equal(img_out.affine, affine)
+
+    def test_write_visualization(self, execdir):
+
+        class Visualization(object):
+            self.closed = False
+
+            def savefig(self, fname, close):
+                with open(fname, "w"):
+                    pass
+                if close:
+                    self.closed = True
+
+        out_field = "test_file"
+        out_path = "test.png"
+
+        viz = Visualization()
+        ifc = utils.LymanInterface()
+        ifc.write_visualization(out_field, out_path, viz)
+
+        assert op.exists("test.png")
+        assert ifc._results == {out_field: op.join(execdir, out_path)}
+        assert viz.closed
+
+    def test_submit_cmdline(self, execdir):
+
+        msg = "test"
+        runtime = Bunch(returncode=None,
+                        cwd=str(execdir),
+                        environ={"msg": msg})
+
+        ifc = utils.LymanInterface()
+        cmdline_a = ["echo", "$msg"]
+
+        runtime = ifc.submit_cmdline(runtime, cmdline_a)
+
+        stdout = "\n{}\n".format(msg + "\n")
+        assert runtime.stdout == stdout
+
+        stderr = "\n\n"
+        assert runtime.stderr == stderr
+
+        cmdline = "\n{}\n".format(" ".join(cmdline_a))
+        assert runtime.cmdline == cmdline
+        assert runtime.returncode == 0
+
+        with pytest.raises(RuntimeError):
+
+            ifc = utils.LymanInterface()
+            fname = "not_a_file"
+            cmdline_b = ["cat", fname]
+
+            runtime = ifc.submit_cmdline(runtime, cmdline_b)
+
+        stdout = stdout + "\n\n"
+        assert runtime.stdout == stdout
+
+        stderr = stderr + ("\ncat: {}: No such file or directory\n\n"
+                           .format(fname))
+        assert runtime.stderr == stderr
+
+        cmdline = cmdline + "\n{}\n".format(" ".join(cmdline_b))
+        assert runtime.cmdline == cmdline
+
+        assert runtime.returncode == 1
 
 
 class TestImageMatrixConversion(object):

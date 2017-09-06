@@ -9,7 +9,7 @@ import nibabel as nib
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 
-from moss import Bunch  # TODO get from nipype
+from moss import Bunch  # move into lyman
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals  # TODO confusingly close to scipy.signal
@@ -17,8 +17,8 @@ from ..utils import LymanInterface, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot
 
 
-def define_model_fit_workflow(proj_info, subjects, session,
-                              exp_info, model_info, qc=True):
+def define_model_fit_workflow(proj_info, exp_info, model_info,
+                              subjects, sessions, qc=True):
 
     # --- Workflow parameterization and data input
 
@@ -30,7 +30,7 @@ def define_model_fit_workflow(proj_info, subjects, session,
     experiment = exp_info.name
     model = model_info.name
 
-    iterables = generate_iterables(scan_info, experiment, subjects, session)
+    iterables = generate_iterables(scan_info, experiment, subjects, sessions)
     subject_iterables, run_iterables = iterables
 
     subject_source = Node(IdentityInterface(["subject"]),
@@ -114,8 +114,8 @@ def define_model_fit_workflow(proj_info, subjects, session,
     return workflow
 
 
-def define_model_results_workflow(proj_info, subjects,
-                                  exp_info, model_info, qc=True):
+def define_model_results_workflow(proj_info, exp_info, model_info,
+                                  subjects, qc=True):
 
     # TODO I am copying a lot from above ...
 
@@ -229,17 +229,51 @@ def define_model_results_workflow(proj_info, subjects,
 
 
 def generate_iterables(scan_info, experiment, subjects, sessions=None):
+    """Return lists of variables for model workflow iterables.
 
-    subject_iterables = subjects
+    Parameters
+    ----------
+    scan_info : nested dictionaries
+        A nested dictionary structure with the following key levels:
+            - subject ids
+            - session ids
+            - experiment names
+        Where the inner values are lists of run ids.
+    experiment : string
+        Name of the experiment to generate iterables for.
+    subjects : list of strings
+        List of subject ids to generate iterables for.
+    sessions : list of strings, optional
+        List of sessions to generate iterables for.
+
+    Returns
+    -------
+    subject_iterables: list of strings
+        A list of the subjects with runs for this experiment.
+    run_iterables : dict
+        A dictionary where keys are subject ids and values of lists of
+        (session id, run id) pairs.
+
+    """
+    subject_iterables = []
     run_iterables = {}
+
     for subject in subjects:
-        run_iterables[subject] = []
+
+        subject_run_iterables = []
+
         for session in scan_info[subject]:
+
             if sessions is not None and session not in sessions:
                 continue
+
             sess_runs = scan_info[subject][session].get(experiment, [])
             run_tuples = [(session, run) for run in sess_runs]
-            run_iterables[subject].extend(run_tuples)
+            subject_run_iterables.extend(run_tuples)
+
+        if subject_run_iterables:
+            subject_iterables.append(subject)
+            run_iterables[subject] = subject_run_iterables
 
     return subject_iterables, run_iterables
 
@@ -458,7 +492,7 @@ class ModelFit(LymanInterface):
 
         # Save out the design matrix
         design_file = self.define_output("design_file", "design.csv")
-        dmat.design_matrix.to_csv(design_file)
+        dmat.design_matrix.to_csv(design_file, index=False)
 
         # Prewhiten the data
         assert not np.isnan(data).any()
@@ -496,10 +530,8 @@ class ModelFit(LymanInterface):
         resid_data[mask] += E.T
         resid_img = nib.Nifti1Image(resid_data, affine, header)
 
-        resid_plot = self.define_output("resid_plot", "resid.png")
         p = CarpetPlot(resid_img, seg_img, mc_data)
-        p.savefig(resid_plot)
-        p.close()
+        self.write_visualization("resid_plot", "resid.png", p)
 
         # Plot the deisgn matrix
         # TODO update when improving design matrix code
@@ -507,13 +539,9 @@ class ModelFit(LymanInterface):
         dmat.plot(fname=design_plot, close=True)
 
         # Plot the sigma squares image for QC
-        error_plot = self.define_output("error_plot", "error.png")
         error_m = Mosaic(mean_img, error_img, mask_img)
         error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
-        error_m.savefig(error_plot)
-        error_m.close()
-
-        # mask image qc
+        self.write_visualization("error_plot", "error.png", error_m)
 
         return runtime
 
@@ -562,6 +590,9 @@ class EstimateContrasts(LymanInterface):
              np.array([0, 0, 0, 1]),
              np.array([1, -1, 0, 0]),
              np.array([0, 0, 1, -1])]
+
+        # TODO to get tests to run make this dumber but more flexible
+        C = np.eye(B.shape[1])
 
         # Estimate the contrasts, variances, and statistics in each voxel
         G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
@@ -644,12 +675,12 @@ class ModelResults(LymanInterface):
             # Contrast t statistic overlay
             stat_m = Mosaic(anat_img, t_img, mask_img, show_mask=True)
             stat_m.plot_overlay("coolwarm", -10, 10)
-            stat_m.savefig(op.join(contrast, "qc", "tstat.png"))
+            stat_m.savefig(op.join(contrast, "qc", "tstat.png"), close=True)
 
             # Analysis mask
             mask_m = Mosaic(anat_img, mask_img)
             mask_m.plot_mask()
-            mask_m.savefig(op.join(contrast, "qc", "mask.png"))
+            mask_m.savefig(op.join(contrast, "qc", "mask.png"), close=True)
 
         # Output a list of directories with results.
         # This makes the connections in the workflow more opaque, but it

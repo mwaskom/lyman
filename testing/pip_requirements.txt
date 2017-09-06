@@ -1,5 +1,2 @@
 nibabel
 nipype
-nitime
-seaborn
-git+https://github.com/mwaskom/moss

@@ -44,12 +44,15 @@ def add_execution(parser):
     parser.add_argument("-g", "--graph",
                         action="store_true",  # TODO make this take a filename
                         help="write graph instead of executing")
-    parser.add_argument("-c", "--clear-cache",
+    parser.add_argument("--clear-cache",
                         action="store_true",
                         help="remove existing cache directory before running")
     parser.add_argument("--no-qc",
                         dest="qc", action="store_false",
                         help="don't connect qc nodes")
+    parser.add_argument("--no-run",
+                        dest="run", action="store_false",
+                        help="do everything but actually execute the workflow")
 
     # TODO add debug mode that preserves cache directory and all outputs
 

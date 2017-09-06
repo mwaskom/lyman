@@ -241,10 +241,10 @@ def run_workflow(wf, args, proj_info):
 
     if args.graph:
         wf.write_graph(args.stage, "orig", "svg")
-
     else:
         plugin, plugin_args = determine_engine(args)
-        wf.run(plugin, plugin_args)
+        if args.run:
+            wf.run(plugin, plugin_args)
 
     # TODO remove cache directory again here
 
@@ -257,26 +257,24 @@ def execute_workflow(args):
 
     proj_info = gather_project_info()
 
-    # TODO either both or neither of subject(s)/session(s)
-    # should be plural at this point
-
     subjects = determine_subjects(args.subject)
-    session = getattr(args, "session", None)
+    sessions = getattr(args, "session", None)
     qc = args.qc
 
-    if len(subjects) > 1 and session is not None:
+    if len(subjects) > 1 and sessions is not None:
         raise RuntimeError("Can only specify session for single subject")
 
     # TODO Oof this logic needs to be reworked
     if stage == "template":
         wf = define_template_workflow(proj_info, subjects, qc)
+        run_workflow(wf, args, proj_info)
 
     else:
         exp_info = gather_experiment_info(args.experiment)
 
         if stage == "preproc":
-            wf = define_preproc_workflow(proj_info, subjects, session,
-                                         exp_info, qc)
+            wf = define_preproc_workflow(proj_info, exp_info,
+                                         subjects, sessions, qc)
 
             run_workflow(wf, args, proj_info)
 
@@ -284,13 +282,15 @@ def execute_workflow(args):
             model_info = gather_model_info(args.experiment, args.model)
 
             if stage in ["model", "model-fit"]:
-                wf = define_model_fit_workflow(proj_info, subjects, session,
-                                               exp_info, model_info, qc)
+                wf = define_model_fit_workflow(proj_info,
+                                               exp_info, model_info,
+                                               subjects, sessions, qc)
 
                 run_workflow(wf, args, proj_info)
 
             if stage in ["model", "model-res"]:
-                wf = define_model_results_workflow(proj_info, subjects,
-                                                   exp_info, model_info, qc)
+                wf = define_model_results_workflow(proj_info,
+                                                   exp_info, model_info,
+                                                   subjects, qc)
 
                 run_workflow(wf, args, proj_info)

@@ -1,28 +1,31 @@
 language: python
 
 python:
-  - "2.7"
   - "3.6"
 
 before_install:
-  - wget http://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh
+  - wget http://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
   - bash miniconda.sh -b -p $HOME/miniconda
   - export PATH="$HOME/miniconda/bin:$PATH"
   - hash -r
   - conda config --set always_yes yes --set changeps1 no
   - conda update -q conda
   - conda info -a
-  - export FSLDIR=`pwd`/testing
+  - export FSLDIR=`pwd`/testing  # TODO do we need this?
   - export SUBJECTS_DIR=`pwd`/testing
+  - cp testing/matplotlibrc .
 
 install:
   - conda create -q -n testenv pip python=$TRAVIS_PYTHON_VERSION
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
   - pip install -r testing/pip_requirements.txt
-  - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then
-      conda install --yes configparser;
-    fi
+  - pip install git+https://github.com/nipy/nipype  # Needed until nipype 0.14
+
+  # Needed until overhal is finished
+  - conda install --yes seaborn scikit-learn
+  - pip install moss==0.5.0
+
   - pip install .
 
 before_script:

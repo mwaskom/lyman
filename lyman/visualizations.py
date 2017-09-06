@@ -1,5 +1,4 @@
 from __future__ import division
-import os
 from six import string_types
 
 import numpy as np
@@ -12,7 +11,7 @@ import nibabel as nib
 
 class Mosaic(object):
 
-    def __init__(self, anat=None, stat=None, mask=None, n_col=9, step=2,
+    def __init__(self, anat, stat=None, mask=None, n_col=9, step=2,
                  tight=True, show_mask=True, slice_dir="axial",
                  anat_lims=None):
         """Plot a mosaic of axial slices through an MRI volume.
@@ -22,8 +21,7 @@ class Mosaic(object):
         anat : filename, nibabel image, or array
             The anatomical image that will form the background of the mosaic.
             If only an array is passed, an identity matrix will be used as
-            the affine and orientation could be incorrect. If absent, try
-            to find the FSL data and uses the MNI152 brain.
+            the affine and orientation could be incorrect.
         stat : filename, nibabel image, or array
             A statistical map to plot as an overlay (which happens by calling
             one of the methods). If only an array is passed, it is assumed
@@ -34,9 +32,10 @@ class Mosaic(object):
             image that are outside the field of view. If you want to overlay
             the mask itself, pass it to ``stat``.
         n_col : int
-            Number of columns in the mosaic.
+            Number of columns in the mosaic. This will also determine the size
+            of the figure (1 inch per column).
         step : int
-            Take every ``step`` slices along the slice_dir for the mosaic.
+            Show every ``step`` slice along the slice_dir in the mosaic.
         tight : bool
             If True, try to crop panes to focus on the brain volume.
         show_mask : bool
@@ -48,53 +47,59 @@ class Mosaic(object):
             Limits for the anatomical (background) image colormap
 
         """
+        # -- Load and reorient the anatomical image
 
-        # Load and reorient the anatomical image
-        if anat is None:
-            if "FSLDIR" in os.environ:
-                anat = os.path.join(os.environ["FSLDIR"],
-                                    "data/standard/avg152T1_brain.nii.gz")
         if isinstance(anat, string_types):
             anat_img = nib.load(anat)
+            have_orientation = True
+        elif isinstance(anat, nib.spatialimages.SpatialImage):
+            anat_img = anat
             have_orientation = True
         elif isinstance(anat, np.ndarray):
             anat_img = nib.Nifti1Image(anat, np.eye(4))
             have_orientation = False
         else:
-            anat_img = anat
-            have_orientation = True
+            raise TypeError("anat type {} not understood".format(type(anat)))
         self.anat_img = nib.as_closest_canonical(anat_img)
         self.anat_data = self.anat_img.get_data()
 
-        # Load and reorient the statistical image
-        if stat is not None:
-            if isinstance(stat, string_types):
-                stat_img = nib.load(stat)
-            elif isinstance(stat, np.ndarray):
-                if stat.dtype is np.dtype("bool"):
-                    stat = stat.astype(np.int)
-                stat_img = nib.Nifti1Image(stat,
-                                           anat_img.affine,
-                                           anat_img.header)
-            else:
-                stat_img = stat
+        # -- Load and reorient the statistical image
+
+        if isinstance(stat, string_types):
+            stat_img = nib.load(stat)
+        elif isinstance(stat, nib.spatialimages.SpatialImage):
+            stat_img = stat
+        elif isinstance(stat, np.ndarray):
+            if stat.dtype is np.dtype("bool"):
+                stat = stat.astype(np.int)
+            stat_img = nib.Nifti1Image(stat, anat_img.affine, anat_img.header)
+        elif stat is not None:
+            raise TypeError("stat type {} not understood".format(type(stat)))
+        else:
+            stat_img = None
+
+        if stat_img is not None:
             self.stat_img = nib.as_closest_canonical(stat_img)
-        # Load and reorient the mask image
+
+        # -- Load and reorient the mask image
+
+        if isinstance(mask, string_types):
+            mask_img = nib.load(mask)
+        elif isinstance(mask, nib.spatialimages.SpatialImage):
+            mask_img = mask
+        elif isinstance(mask, np.ndarray):
+            if mask.dtype is np.dtype("bool"):
+                mask = mask.astype(np.int)
+            mask_img = nib.Nifti1Image(mask, anat_img.affine, anat_img.header)
+        elif mask is not None:
+            raise TypeError("mask type {} not understood".format(type(mask)))
+        else:
+            mask_img = None
+            mask_data = None
+
         if mask is not None:
-            if isinstance(mask, string_types):
-                mask_img = nib.load(mask)
-            elif isinstance(mask, np.ndarray):
-                if mask.dtype is np.dtype("bool"):
-                    mask = mask.astype(np.int)
-                mask_img = nib.Nifti1Image(mask,
-                                           anat_img.affine,
-                                           anat_img.header)
-            else:
-                mask_img = mask
             self.mask_img = nib.as_closest_canonical(mask_img)
             mask_data = self.mask_img.get_data().astype(bool)
-        else:
-            mask_data = None
 
         if slice_dir[0] not in "sca":
             err = "Slice direction {} not understood".format(slice_dir)
@@ -107,7 +112,7 @@ class Mosaic(object):
             if mask is not None:
                 self.fov &= mask_data
         else:
-            self.fov = np.ones_like(anat_fov)
+            self.fov = np.ones_like(anat_fov, np.bool)
 
         # Save the mosaic parameters
         self.n_col = n_col
@@ -151,7 +156,8 @@ class Mosaic(object):
         nx, ny, _ = self.anat_data[slc_i, slc_j].shape
         figsize = self.n_col, (ny / nx) * n_row
         plot_kws = dict(nrows=int(n_row), ncols=int(self.n_col),
-                        figsize=figsize, facecolor="k")
+                        figsize=figsize, facecolor="0",
+                        subplot_kw=dict(xticks=[], yticks=[]))
 
         self.fig, self.axes = plt.subplots(**plot_kws)
         [ax.set_axis_off() for ax in self.axes.flat]
@@ -184,10 +190,9 @@ class Mosaic(object):
 
     def _map(self, func_name, data, ignore_value_error=False, **kwargs):
         """Apply a named function to a 3D volume of data on each axes."""
-        trans_order = dict(s=(0, 1, 2),
-                           c=(1, 0, 2),
-                           a=(2, 0, 1))[self.slice_dir[0]]
-        slices = data.transpose(*trans_order)
+        transpose_orders = dict(s=(0, 1, 2), c=(1, 0, 2), a=(2, 0, 1))
+        slice_key = self.slice_dir[0]
+        slices = data.transpose(*transpose_orders[slice_key])
         for slice, ax in zip(slices, self.axes.flat):
             func = getattr(ax, func_name)
             try:
@@ -385,7 +390,7 @@ class Mosaic(object):
         cbar_height = cbar_inches / (h + cbar_inches)
         self.fig.subplots_adjust(0, cbar_height, 1, 1)
 
-        #  Needed so things look nice in the notebook
+        # Needed so things look nice in the notebook
         bg_ax = self.fig.add_axes([0, 0, 1, cbar_height])
         bg_ax.set_axis_off()
         bg_ax.pcolormesh(np.array([[1]]), cmap="Greys", vmin=0, vmax=1)
@@ -396,9 +401,7 @@ class Mosaic(object):
         """Add colorbars for a single overlay."""
         cbar_height = self._pad_for_cbar()
         cbar_ax = self.fig.add_axes([.3, .01, .4, cbar_height - .01])
-        cbar_ax.set(xticks=[], yticks=[])
-        for side, spine in cbar_ax.spines.items():
-            spine.set_visible(False)
+        cbar_ax.set_axis_off()
 
         bar_data = np.linspace(0, 1, 256).reshape(1, 256)
         cbar_ax.pcolormesh(bar_data, cmap=cmap)
@@ -406,43 +409,36 @@ class Mosaic(object):
         if fmt is not None:
 
             fmt = "{:" + fmt + "}"
+            kws = dict(y=.005 + cbar_height * .5,
+                       color="white", size=14, va="center")
 
-            self.fig.text(.29, .005 + cbar_height * .5, fmt.format(vmin),
-                          color="white", size=14, ha="right", va="center")
-            self.fig.text(.71, .005 + cbar_height * .5, fmt.format(vmax),
-                          color="white", size=14, ha="left", va="center")
+            self.fig.text(.29, s=fmt.format(vmin), ha="right", **kws)
+            self.fig.text(.71, s=fmt.format(vmax), ha="left", **kws)
 
     def _add_double_colorbar(self, vmin, vmax, pos_cmap, neg_cmap, fmt):
         """Add colorbars for a positive and a negative overlay."""
         cbar_height = self._pad_for_cbar()
 
+        bar_data = np.linspace(0, 1, 256).reshape(1, 256)
+
         pos_ax = self.fig.add_axes([.55, .01, .3, cbar_height - .01])
-        pos_ax.set(xticks=[], yticks=[])
-        for side, spine in pos_ax.spines.items():
-            spine.set_visible(False)
+        pos_ax.set_axis_off()
+        pos_ax.pcolormesh(bar_data, cmap=pos_cmap)
 
         neg_ax = self.fig.add_axes([.15, .01, .3, cbar_height - .01])
-        neg_ax.set(xticks=[], yticks=[])
-        for side, spine in neg_ax.spines.items():
-            spine.set_visible(False)
-
-        bar_data = np.linspace(0, 1, 256).reshape(1, 256)
-        pos_ax.pcolormesh(bar_data, cmap=pos_cmap)
+        neg_ax.set_axis_off()
         neg_ax.pcolormesh(bar_data, cmap=neg_cmap)
 
         if fmt is not None:
 
             fmt = "{:" + fmt + "}"
+            kws = dict(y=.005 + cbar_height * .5,
+                       color="white", size=14, va="center")
 
-            self.fig.text(.54, .005 + cbar_height * .5, fmt.format(vmin),
-                          color="white", size=14, ha="right", va="center")
-            self.fig.text(.86, .005 + cbar_height * .5, fmt.format(vmax),
-                          color="white", size=14, ha="left", va="center")
-
-            self.fig.text(.14, .005 + cbar_height * .5, fmt.format(-vmax),
-                          color="white", size=14, ha="right", va="center")
-            self.fig.text(.46, .005 + cbar_height * .5, fmt.format(-vmin),
-                          color="white", size=14, ha="left", va="center")
+            self.fig.text(.54, s=fmt.format(vmin), ha="right", **kws)
+            self.fig.text(.86, s=fmt.format(vmax), ha="left", **kws)
+            self.fig.text(.14, s=fmt.format(-vmax), ha="right", **kws)
+            self.fig.text(.46, s=fmt.format(-vmin), ha="left", **kws)
 
     def _get_cmap(self, cmap):
         """Parse a string spec of a cubehelix palette."""
@@ -454,8 +450,7 @@ class Mosaic(object):
                 else:
                     reverse = True
                 _, start, rot = cmap.split(":")
-                cube_rgb = mpl._cm.cubehelix(s=float(start),
-                                             r=float(rot))
+                cube_rgb = mpl._cm.cubehelix(s=float(start), r=float(rot))
                 cube_cmap = mpl.colors.LinearSegmentedColormap(cmap, cube_rgb)
                 lut = cube_cmap(np.linspace(.95, 0, 256))
                 if reverse:
@@ -463,10 +458,11 @@ class Mosaic(object):
                 cmap = mpl.colors.ListedColormap(lut)
         return cmap
 
-    def savefig(self, fname, **kwargs):
-        """Save the figure."""
-        # TODO add an option to close the figure and simplify code elsewhere
-        self.fig.savefig(fname, facecolor="k", edgecolor="k", **kwargs)
+    def savefig(self, fname, close=False, **kwargs):
+        """Save the figure; optionally close it."""
+        self.fig.savefig(fname, facecolor="0", edgecolor="0", **kwargs)
+        if close:
+            self.close()
 
     def close(self):
         """Close the figure."""
@@ -566,9 +562,11 @@ class CarpetPlot(object):
         self.segdata = segdata
         self.fd = fd
 
-    def savefig(self, fname, **kwargs):
+    def savefig(self, fname, close=True, **kwargs):
 
         self.fig.savefig(fname, **kwargs)
+        if close:
+            self.close()
 
     def close(self):
 
@@ -640,7 +638,7 @@ class CarpetPlot(object):
     def setup_figure(self):
         """Initialize and organize the matplotlib objects."""
         width, height = 8, 10
-        f = plt.figure(figsize=(width, height))
+        f = plt.figure(figsize=(width, height), facecolor="0")
 
         gs = plt.GridSpec(nrows=2, ncols=2,
                           left=.07, right=.98,
@@ -708,110 +706,3 @@ class CarpetPlot(object):
                 ha="center", va="bottom", clip_on=False)
         ax.text(0, 103, "$-${}".format(vlim),
                 ha="center", va="top", clip_on=False)
-
-
-def crop(img):
-    """Closely crop a brain screenshot.
-
-    Assumes a white background and no colorbar.
-    """
-    x, y = np.argwhere((img != 255).any(axis=-1)).T
-    return img[x.min():x.max(), y.min():y.max(), :]
-
-
-def multi_panel_brain_figure(panels):
-    """Make a matplotlib figure with the brain screenshots.
-
-    Parameters
-    ----------
-    panels : list of arrays
-        Assumes the list has screenshots from the left hemisphere and then
-        screenshots of the same views from the right hemisphere. The
-        screenshots should be "cropped" for best results.
-
-    Returns
-    -------
-    f: matplotlib figure
-        Figure with the brains plotted onto it.
-
-    """
-    # Reorient the brains to be "wide"
-    plot_panels = []
-    for img in panels:
-        if (img.shape[1] < img.shape[0]):
-            img = np.rot90(img)
-        plot_panels.append(img)
-
-    # Infer the size of the figure and the axes
-    shots_per_hemi = int(len(panels) / 2)
-    sizes = np.array([p.shape for p in plot_panels[:shots_per_hemi]])
-    full_size = sizes.sum(axis=0)
-    height_ratios = sizes[:, 0] / full_size[0]
-    ratio = full_size[0] / (sizes.max(axis=0)[1] * 2)
-    figsize = (9, 9 * ratio)
-
-    # Plot the brains onto the figure
-    f, axes = plt.subplots(shots_per_hemi, 2, figsize=figsize,
-                           gridspec_kw={"height_ratios": height_ratios})
-    for ax, img in zip(axes.T.flat, plot_panels):
-        ax.imshow(img)
-        ax.set_axis_off()
-    f.subplots_adjust(0.02, 0.02, .98, .98, .05, .05)
-
-    return f
-
-
-def _add_cbar_to_ax(ax, min, max, cmap):
-    """Make a colorbar and draw it to fill an Axes."""
-    # Create dummy data and plot a heatmap
-    x = np.c_[np.linspace(0, 1, 256)].T
-    ax.pcolormesh(x, cmap=cmap)
-    ax.set(xlim=(0, 256))
-    ax.set(xticks=[], yticks=[])
-
-    # Add labels to show the min and max points of the colorbar
-    ax.annotate("{:.2g}".format(min),
-                ha="right", va="center", size=14, family="Arial",
-                xy=(-.05, .5), xycoords="axes fraction")
-    ax.annotate("{:.2g}".format(max),
-                ha="left", va="center", size=14, family="Arial",
-                xy=(1.05, .5), xycoords="axes fraction")
-
-
-def add_colorbars(f, min, max, pos_cmap="YlOrRd_r", neg_cmap=None):
-    """Add colorbars to the bottom of a brain image.
-
-    Parameters
-    ----------
-    f : matplotlib figure
-        Figure with brains that need colorbars.
-    min, max : floats
-        Min and max values for the colorbars. If positive and negative
-        colorbars are to be shown, they should have the same limits.
-    {pos, neg}_cmap : colormap names
-        Names for the colormaps to use for the positive and negative bars.
-
-    Returns
-    -------
-    f : matplotlib figure
-        Returns the figure with the colorbars added.
-    """
-    # Add space at the bottom of the figure for the colorbars
-    height = f.get_figheight()
-    f.set_figheight(height + .5)
-    edge_height = .5 / height
-    f.subplots_adjust(bottom=edge_height)
-
-    # Determine the size parameters of the bars
-    bottom, height = edge_height * .2, edge_height * .4
-    width = .35
-
-    # Plot the positive and negative colorbars
-    if pos_cmap is not None:
-        pos_ax = f.add_axes([.55, bottom, width, height])
-        _add_cbar_to_ax(pos_ax, min, max, pos_cmap)
-    if neg_cmap is not None:
-        pos_ax = f.add_axes([.10, bottom, width, height])
-        _add_cbar_to_ax(pos_ax, -max, -min, neg_cmap)
-
-    return f
