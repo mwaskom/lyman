@@ -77,6 +77,7 @@ def lyman_info(tmpdir):
 
         subject_dir = data_dir.mkdir(subject)
         subject_dir.mkdir("func")
+        subject_dir.mkdir("mri")
         design_dir = subject_dir.mkdir("design")
         design.to_csv(design_dir.join("model_a.csv"))
 
@@ -100,6 +101,36 @@ def lyman_info(tmpdir):
 
 
 @pytest.fixture()
+def freesurfer(lyman_info):
+
+    subject = "subj01"
+    mri_dir = lyman_info["data_dir"].join(subject).join("mri")
+
+    seed = sum(map(ord, "freesurfer"))
+    rs = np.random.RandomState(seed)
+    affine = np.eye(4)
+    vol_shape = lyman_info["vol_shape"]
+
+    mask = rs.choice([0, 1], vol_shape, p=[.2, .8])
+
+    norm_data = rs.randint(0, 110, vol_shape) * mask
+    norm_file = str(mri_dir.join("norm.mgz"))
+    nib.save(nib.MGHImage(norm_data.astype("uint8"), affine), norm_file)
+
+    wmparc_vals = [1000, 10, 11, 16, 8, 3000, 5001, 7, 46, 4]
+    wmparc_data = rs.choice(wmparc_vals, vol_shape) * mask
+    wmparc_file = str(mri_dir.join("wmparc.mgz"))
+    nib.save(nib.MGHImage(wmparc_data.astype("int16"), affine), wmparc_file)
+
+    lyman_info.update(
+        subject=subject,
+        norm_file=norm_file,
+        wmparc_file=wmparc_file,
+    )
+    return lyman_info
+
+
+@pytest.fixture()
 def template(lyman_info):
 
     subject = "subj01"
@@ -107,8 +138,8 @@ def template(lyman_info):
                     .mkdir(subject)
                     .mkdir("template"))
 
-    random_seed = sum(map(ord, "template"))
-    rs = np.random.RandomState(random_seed)
+    seed = sum(map(ord, "template"))
+    rs = np.random.RandomState(seed)
 
     vol_shape = lyman_info["vol_shape"]
     affine = np.array([[-2, 0, 0, 10],
@@ -153,8 +184,8 @@ def template(lyman_info):
 @pytest.fixture()
 def timeseries(template):
 
-    random_seed = sum(map(ord, "timeseries"))
-    rs = np.random.RandomState(random_seed)
+    seed = sum(map(ord, "timeseries"))
+    rs = np.random.RandomState(seed)
 
     session = "sess01"
     run = "run01"
@@ -216,8 +247,8 @@ def timeseries(template):
 @pytest.fixture()
 def modelfit(timeseries):
 
-    random_seed = sum(map(ord, "modelfit"))
-    rs = np.random.RandomState(random_seed)
+    seed = sum(map(ord, "modelfit"))
+    rs = np.random.RandomState(seed)
 
     vol_shape = timeseries["vol_shape"]
     affine = timeseries["affine"]
@@ -258,8 +289,8 @@ def modelfit(timeseries):
 @pytest.fixture()
 def modelres(modelfit):
 
-    random_seed = sum(map(ord, "modelfit"))
-    rs = np.random.RandomState(random_seed)
+    seed = sum(map(ord, "modelfit"))
+    rs = np.random.RandomState(seed)
 
     vol_shape = modelfit["vol_shape"]
     affine = modelfit["affine"]

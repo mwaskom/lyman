@@ -1,6 +1,9 @@
 import nipype
 
-from .. import template
+from ..template import (define_template_workflow,
+                        TemplateInput,
+                        AnatomicalSegmentation,
+                        TemplateReport)
 
 
 class TestTemplateWorkflow(object):
@@ -10,7 +13,7 @@ class TestTemplateWorkflow(object):
         proj_info = lyman_info["proj_info"]
         subjects = lyman_info["subjects"]
 
-        wf = template.define_template_workflow(
+        wf = define_template_workflow(
             proj_info, subjects
         )
 
@@ -29,10 +32,46 @@ class TestTemplateWorkflow(object):
                           "generate_reg", "invert_reg",
                           "transform_wmparc", "anat_segment",
                           "hemi_source", "tag_surf", "combine_hemis",
-                          "template_qc", "template_path", "template_output"]
+                          "template_qc", "template_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes
 
         # Check iterables
         subject_source = wf.get_node("subject_source")
         assert subject_source.iterables == ("subject", subjects)
+
+    def test_template_input(self, freesurfer):
+
+        res = TemplateInput(
+            data_dir=freesurfer["data_dir"],
+            subject=freesurfer["subject"]
+        ).run()
+
+        assert res.outputs.norm_file == freesurfer["norm_file"]
+        assert res.outputs.wmparc_file == freesurfer["wmparc_file"]
+
+        output_path = "{}/template".format(freesurfer["subject"])
+        assert res.outputs.output_path == output_path
+
+    def test_anatomical_segmentation(self, execdir, freesurfer):
+
+        res = AnatomicalSegmentation(
+            wmparc_file=freesurfer["wmparc_file"],
+        ).run()
+
+        assert res.outputs.seg_file == execdir.join("seg.nii.gz")
+        assert res.outputs.mask_file == execdir.join("mask.nii.gz")
+
+    def test_template_report(self, execdir, template):
+
+        res = TemplateReport(
+            seg_file=template["seg_file"],
+            mask_file=template["mask_file"],
+            surf_file=template["surf_file"],
+            anat_file=template["anat_file"],
+        ).run()
+
+        assert res.outputs.seg_plot == execdir.join("seg.png")
+        assert res.outputs.mask_plot == execdir.join("mask.png")
+        assert res.outputs.surf_plot == execdir.join("surf.png")
+        assert res.outputs.anat_plot == execdir.join("anat.png")

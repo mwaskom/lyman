@@ -5,8 +5,7 @@ from scipy import ndimage
 import matplotlib as mpl
 import nibabel as nib
 
-from nipype import (Workflow, Node, JoinNode,
-                    IdentityInterface, Function, DataSink)
+from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
 
@@ -80,13 +79,6 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     # --- Workflow ouptut
 
-    def define_template_path(subject):
-        return "{}/template".format(subject)
-
-    template_path = Node(Function("subject", "path",
-                                  define_template_path),
-                         "template_path")
-
     template_output = Node(DataSink(base_directory=proj_info.analysis_dir,
                                     parameterization=False),
                            "template_output")
@@ -139,10 +131,8 @@ def define_template_workflow(proj_info, subjects, qc=True):
         (tag_surf, combine_hemis,
             [("vertexvol_file", "in_files")]),
 
-        (subject_source, template_path,
-            [("subject", "subject")]),
-        (template_path, template_output,
-            [("path", "container")]),
+        (template_input, template_output,
+            [("output_path", "container")]),
         (reorient_image, template_output,
             [("out_file", "@anat")]),
         (generate_reg, template_output,
@@ -195,13 +185,20 @@ class TemplateInput(LymanInterface):
     class output_spec(TraitedSpec):
         norm_file = traits.File(exists=True)
         wmparc_file = traits.File(exists=True)
+        output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
+        output_path = "{}/template".format(self.inputs.subject)
         mri_dir = op.join(self.inputs.data_dir, self.inputs.subject, "mri")
+
         results = dict(
+
             norm_file=op.join(mri_dir, "norm.mgz"),
             wmparc_file=op.join(mri_dir, "wmparc.mgz"),
+
+            output_path=output_path,
+
         )
         self._results.update(results)
         return runtime
@@ -282,11 +279,12 @@ class TemplateReport(LymanInterface):
 
         # Anatomical segmentation
         seg_img = nib.load(self.inputs.seg_file)
+        seg_data = seg_img.get_data().astype(np.float)  # TODO fix in Mosaic
         seg_cmap = mpl.colors.ListedColormap(  # TODO get from seg lut
             ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
              '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
          )
-        m_seg = Mosaic(anat_img, seg_img, mask_img,
+        m_seg = Mosaic(anat_img, seg_data, mask_img,
                        step=2, tight=True, show_mask=False)
         m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
         self.write_visualization("seg_plot", "seg.png", m_seg)
