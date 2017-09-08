@@ -12,7 +12,7 @@ from nipype.interfaces.base import traits, TraitedSpec
 from moss import Bunch  # move into lyman
 from moss import glm as mossglm  # TODO move into lyman
 
-from .. import glm, signals  # TODO confusingly close to scipy.signal
+from .. import glm, signals
 from ..utils import LymanInterface, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot
 

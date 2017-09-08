@@ -96,6 +96,7 @@ def image_to_matrix(img, mask_img):
     """
     vol_data = img.get_data()
     mask = mask_img.get_data() > 0
+    check_mask(mask, vol_data)
     data = vol_data[mask].T
     return data
 
@@ -143,3 +144,26 @@ def matrix_to_image(data, mask_img, template_img=None):
     img = nib.Nifti1Image(vol_data, template_img.affine, template_img.header)
 
     return img
+
+
+def check_mask(mask, data):
+    """Check the dtype and shape of a mask array.
+
+    This will raise a TypeError if ``mask`` is not boolean or a ValueError if
+    the shape of the mask does not match the first (n - 1) dimensions of the
+    data.
+
+    Parameters
+    ----------
+    mask : boolean numpy array
+        Mask array to validate.
+    data : numpy array
+        Data that the mask will index into.
+
+    """
+    if mask.dtype != np.bool:
+        raise TypeError("mask must have boolean datatype")
+    if (mask.shape != data.shape) and (mask.shape != data.shape[:-1]):
+        msg = ("mask shape {} is not aligned with data shape {}"
+               .format(mask.shape, data.shape))
+        raise ValueError(msg)

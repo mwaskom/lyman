@@ -3,7 +3,6 @@ import os
 import os.path as op
 
 import numpy as np
-from scipy import signal
 import pandas as pd
 import matplotlib.pyplot as plt
 import nibabel as nib
@@ -13,7 +12,7 @@ from nipype import (Workflow, Node, MapNode, JoinNode,
 from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
 
-from .. import signals  # TODO confusingly close to scipy.signal
+from .. import signals
 from ..utils import LymanInterface
 from ..visualizations import Mosaic, CarpetPlot
 
@@ -910,8 +909,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         data = data * scale_value
 
         # Remove linear but not constant trend
-        mask_mean = data[mask].mean(axis=-1, keepdims=True)
-        data[mask] = signal.detrend(data[mask], axis=-1) + mask_mean
+        data[mask] = signals.detrend(data[mask], axis=-1, replace_mean=True)
 
         # Save out the final time series
         out_img = self.write_image("out_file", "func.nii.gz",

@@ -3,48 +3,100 @@ from scipy import signal, sparse, stats
 from scipy.ndimage import gaussian_filter
 import nibabel as nib
 
+from .utils import check_mask
 
-def compute_cov(data, detrend=True, mask=None):
+
+def detrend(data, axis=-1, replace_mean=False):
+    """Linearly detrend on an axis, optionally replacing the original mean.
+
+    Parameters
+    ----------
+    data : array_like
+        The input data.
+    axis : int
+        The axis along which to detrend the data.
+    replace_mean : bool
+        If True, compute the mean before detrending then add it back after.
+
+    """
+    # TODO enhance to preserve pandas index information
+    if replace_mean:
+        orig_mean = np.mean(data, axis=axis, keepdims=True)
+
+    data = signal.detrend(data, axis=axis)
+
+    if replace_mean:
+        data += orig_mean
+
+    return data
+
+
+def cv(data, axis=0, detrend=True, mask=None, keepdims=False, ddof=0):
     """Compute the temporal coefficient of variation.
 
     Parameters
     ----------
     data : numpy array
-        Timeseries data with time in the final axis.
+        Time series data.
+    axis : int
+        Axis to compute the mean and standard deviation over.
     detrend : bool
-        If True, linearly detrend the data before computing coefficient of
-        variation.
+        If True, linearly detrend the data before computing standard deviation.
+    mask : boolean array with same shape as data on all but final axis
+        If present, cv is computed only for entries that are True in the mask.
+        Only valid when the computation axis is the final axis in the data.
+        Values in the returned array outside of the mask will be 0.
+    keepdims : bool
+        If True, output will have the same dimensions as input.
+    ddof : int
+        Means delta degrees of freedom for the standard deviation.
 
     Returns
     -------
-    cov : numpy array
-        Array with the coeficient of variation
+    cv : numpy array
+        Array with the coeficient of variation values.
 
     """
     if mask is not None:
+        check_mask(mask, data)
         data = data[mask]
 
-    mean = data.mean(axis=-1)
+    mean = data.mean(axis=axis, keepdims=keepdims)
     if detrend:
-        std = signal.detrend(data).std(axis=-1)
-    else:
-        std = data.std(axis=-1)
+        data = signal.detrend(data, axis=axis)
+    std = data.std(axis=axis, keepdims=keepdims, ddof=ddof)
 
-    # Compute temporal coefficient of variation
-    cov = std / mean
-    cov[mean == 0] = 0
+    cv = std / mean
+    cv[mean == 0] = 0
 
     if mask is not None:
-        out_cov = np.zeros_like(mask, np.float)
-        out_cov[mask] = cov
-        cov = out_cov
+        out = np.zeros(mask.shape, np.float)
+        out[mask] = cv
+        if keepdims:
+            cv = np.expand_dims(out, axis=axis)
+        else:
+            cv = out
 
-    return cov
+    return cv
 
 
-def percent_change(data):
-    """Convert data to percent signal change over final axis."""
-    return (data / data.mean(axis=-1, keepdims=True) - 1) * 100
+def percent_change(data, axis=-1):
+    """Convert data to percent signal change over specified axis.
+
+    Parameters
+    ----------
+    data : numpy array
+        Input data to convert to percent signal change.
+    axis : int
+        Axis of the ``data`` array to compute mean over.
+
+    Returns
+    -------
+    pct_data : numpy array
+        Input data divided by its mean and multiplied by 100.
+
+    """
+    return (data / data.mean(axis=axis, keepdims=True) - 1) * 100
 
 
 def identify_noisy_voxels(ts, mask, neighborhood=5, threshold=1.5,
@@ -74,29 +126,87 @@ def identify_noisy_voxels(ts, mask, neighborhood=5, threshold=1.5,
     """
     data = ts.get_data()
     mask = mask.get_data().astype(bool)
+    check_mask(mask, data)
 
     # Convert sigma units from mm to voxels
     sigma = neighborhood / np.array(ts.header.get_zooms()[:3])
 
-    # Squelch divide-by-zero warnings
+    # Squelch divide-by-zero warnings  # TODO this shouldn't be necessary
     with np.errstate(all="ignore"):
 
-        # Compute temporal mean and standard deviation
-        cov = compute_cov(data, detrend, mask)
+        # Compute temporal coefficient of variation
+        data_cv = cv(data, axis=-1, detrend=detrend, mask=mask)
 
         # Smooth the cov within the cortex mask
+        # TODO use a function for this
         smooth_norm = gaussian_filter(mask.astype(np.float), sigma)
-        ribbon_cov = cov * mask
-        neighborhood_cov = gaussian_filter(ribbon_cov, sigma) / smooth_norm
+        ribbon_cv = data_cv * mask
+        neighborhood_cv = gaussian_filter(ribbon_cv, sigma) / smooth_norm
 
         # Compute the cov relative to the neighborhood
-        relative_cov = ribbon_cov / neighborhood_cov
-        relative_cov[~mask] = 0
+        relative_cv = ribbon_cv / neighborhood_cv
+        relative_cv[~mask] = 0
 
     # Define and return a mask of noisy voxels
-    noisy_voxels = relative_cov > threshold
+    noisy_voxels = relative_cv > threshold
     out = nib.Nifti1Image(noisy_voxels, ts.affine, ts.header)
     return out
+
+
+def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
+    """Filter in volume space with an isotropic gaussian kernel.
+
+    Parameters
+    ----------
+    ts : nibabel image
+        3D or 4D image data.
+    fwhm : float
+        Size of smoothing kernel in mm.
+    mask : nibabel image
+        3D binary image defining smoothing range.
+    noise : nibabel image
+        3D binary image defining noisy voxels to be interpolated out.
+    mask_output : bool
+        If True, apply the smoothing mask to the output.
+
+    Returns
+    -------
+    smooth_ts : nibabel image
+        Image like `ts` but after smoothing.
+
+    """
+    data = ts.get_data().copy()  # TODO allow inplace as an option
+    if np.ndim(data) == 3:
+        need_squeeze = True
+        data = np.expand_dims(data, 3)
+    else:
+        need_squeeze = False
+
+    # TODO use nibabel function?
+    sigma = np.divide(fwhm / 2.355, ts.header.get_zooms()[:3])
+
+    if mask is None:
+        smooth_mask = mask = norm = 1
+    else:
+        mask = mask.get_data().astype(np.bool)
+        if noise is None:
+            smooth_mask = mask.astype(np.float)
+        else:
+            noise = noise.get_data().astype(np.bool)
+            smooth_mask = (mask & ~noise).astype(np.float)
+        norm = gaussian_filter(smooth_mask, sigma)
+
+    with np.errstate(all="ignore"):
+        for f in range(data.shape[-1]):
+            data_f = gaussian_filter(data[..., f] * smooth_mask, sigma) / norm
+            if mask_output:
+                data_f[~mask] = 0
+            data[..., f] = data_f
+
+    if need_squeeze:
+        data = data.squeeze()
+
+    return nib.Nifti1Image(data, ts.affine, ts.header)
 
 
 def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
@@ -215,61 +325,5 @@ def smooth_cortex(surface, ts, vertvol, noisy_voxels=None, fwhm=2):
 
     # Smooth the data
     data[ribbon] = S * cortex_data
-
-    return nib.Nifti1Image(data, ts.affine, ts.header)
-
-
-def smooth_volume(ts, fwhm, mask=None, noise=None, mask_output=True):
-    """Filter in volume space with an isotropic gaussian kernel.
-
-    Parameters
-    ----------
-    ts : nibabel image
-        3D or 4D image data.
-    fwhm : float
-        Size of smoothing kernel in mm.
-    mask : nibabel image
-        3D binary image defining smoothing range.
-    noise : nibabel image
-        3D binary image defining noisy voxels to be interpolated out.
-    mask_output : bool
-        If True, apply the smoothing mask to the output.
-
-    Returns
-    -------
-    smooth_ts : nibabel image
-        Image like `ts` but after smoothing.
-
-    """
-    data = ts.get_data().copy()  # TODO allow inplace as an option
-    if np.ndim(data) == 3:
-        need_squeeze = True
-        data = np.expand_dims(data, 3)
-    else:
-        need_squeeze = False
-
-    # TODO use nibabel function?
-    sigma = np.divide(fwhm / 2.355, ts.header.get_zooms()[:3])
-
-    if mask is None:
-        smooth_mask = mask = norm = 1
-    else:
-        mask = mask.get_data().astype(np.bool)
-        if noise is None:
-            smooth_mask = mask.astype(np.float)
-        else:
-            noise = noise.get_data().astype(np.bool)
-            smooth_mask = (mask & ~noise).astype(np.float)
-        norm = gaussian_filter(smooth_mask, sigma)
-
-    with np.errstate(all="ignore"):
-        for f in range(data.shape[-1]):
-            data_f = gaussian_filter(data[..., f] * smooth_mask, sigma) / norm
-            if mask_output:
-                data_f[~mask] = 0
-            data[..., f] = data_f
-
-    if need_squeeze:
-        data = data.squeeze()
 
     return nib.Nifti1Image(data, ts.affine, ts.header)

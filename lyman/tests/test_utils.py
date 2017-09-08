@@ -241,3 +241,23 @@ class TestImageMatrixConversion(object):
         img_4d = utils.matrix_to_image(data_2d, mask_img_nohdr, img_template)
         assert np.array_equal(img_4d.affine, img_template.affine)
         assert img_template.header == img_template.header
+
+    def test_check_mask(self):
+
+        data_shape = 12, 8, 4
+        x = np.random.normal(0, 1, data_shape)
+
+        mask_shape = data_shape[:-1]
+        mask_correct_3d = np.random.uniform(0, 1, data_shape) > .5
+        mask_correct_2d = np.random.uniform(0, 1, mask_shape) > .5
+        mask_bad_shape = np.random.uniform(0, 1, mask_shape).T > .5
+        mask_bad_dtype = np.random.uniform(0, 1, mask_shape)
+
+        utils.check_mask(mask_correct_3d, x)
+        utils.check_mask(mask_correct_2d, x)
+
+        with pytest.raises(ValueError):
+            utils.check_mask(mask_bad_shape, x)
+
+        with pytest.raises(TypeError):
+            utils.check_mask(mask_bad_dtype, x)
