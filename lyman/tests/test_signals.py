@@ -78,3 +78,9 @@ class TestSignals(object):
         mask = random.uniform(0, 1, x.shape[1]) > .3
         with pytest.raises(ValueError):
             cv = signals.cv(x, mask=mask, axis=-1)
+
+    def test_percent_change(self, random):
+
+        x = [90, 110, 100]
+        x_ptc = signals.percent_change(x)
+        assert x_ptc == [-10, 10, 0]
