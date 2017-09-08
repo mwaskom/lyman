@@ -81,6 +81,13 @@ class TestSignals(object):
 
     def test_percent_change(self, random):
 
-        x = [90, 110, 100]
-        x_ptc = signals.percent_change(x)
-        assert x_ptc == [-10, 10, 0]
+        x = [95, 95, 110, 100]
+        x_pch = signals.percent_change(x)
+        expected = [-5, -5, 10, 0]
+        assert x_pch == pytest.approx(expected)
+
+        x = np.c_[x, x]
+        x_pch = signals.percent_change(x, axis=0)
+        expected = np.c_[expected, expected]
+
+        assert x_pch == pytest.approx(expected)

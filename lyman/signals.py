@@ -92,10 +92,11 @@ def percent_change(data, axis=-1):
 
     Returns
     -------
-    pct_data : numpy array
+    pch_data : numpy array
         Input data divided by its mean and multiplied by 100.
 
     """
+    data = np.asarray(data).astype(np.float)
     return (data / data.mean(axis=axis, keepdims=True) - 1) * 100
 
 
