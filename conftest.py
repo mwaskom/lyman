@@ -215,14 +215,14 @@ def timeseries(template):
     mask_file = str(timeseries_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data.astype(np.int), affine), mask_file)
 
+    noise_data = mask_data & rs.choice([False, True], vol_shape, p=[.95, .05])
+    noise_file = str(timeseries_dir.join("noise.nii.gz"))
+    nib.save(nib.Nifti1Image(noise_data.astype(np.int), affine), noise_file)
+
     ts_shape = vol_shape + (n_tp,)
     ts_data = rs.normal(100, 5, ts_shape) * mask_data[..., np.newaxis]
     ts_file = str(timeseries_dir.join("func.nii.gz"))
     nib.save(nib.Nifti1Image(ts_data, affine), ts_file)
-
-    noise_data = rs.choice([0, 1], vol_shape, p=[.95, .05])
-    noise_file = str(timeseries_dir.join("noise.nii.gz"))
-    nib.save(nib.Nifti1Image(noise_data, affine), noise_file)
 
     mc_data = rs.normal(0, 1, (n_tp, 6))
     mc_file = str(timeseries_dir.join("mc.csv"))
@@ -235,8 +235,8 @@ def timeseries(template):
         session=session,
         run=run,
         mask_file=mask_file,
-        ts_file=ts_file,
         noise_file=noise_file,
+        ts_file=ts_file,
         mc_file=mc_file,
         timeseries_dir=timeseries_dir,
         model_dir=model_dir,

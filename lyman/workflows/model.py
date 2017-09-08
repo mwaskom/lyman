@@ -443,13 +443,13 @@ class ModelFit(LymanInterface):
 
         # Load the noise segmentation
         # TODO implement noisy voxel removal
-        noise = nib.load(self.inputs.noise_file)
+        noise_img = nib.load(self.inputs.noise_file)
 
         # Spatially filter the data
         # TODO implement surface smoothing
         # Using simple volumetric smoothing for now to get things running
         fwhm = model_info.smooth_fwhm
-        ts_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise)
+        signals.smooth_volume(ts_img, fwhm, mask_img, noise_img, inplace=True)
 
         # Compute the mean image for later
         # TODO limit to gray matter voxels?
@@ -466,7 +466,7 @@ class ModelFit(LymanInterface):
 
         # TODO remove the mean from the data
         # data[gray_mask] += mean[gray_mask, np.newaxis]
-        data[~mask] = 0
+        data[~mask] = 0  # TODO this is done within smoothing actually
 
         # Define confound regressons from various sources
         # TODO
@@ -495,7 +495,6 @@ class ModelFit(LymanInterface):
         dmat.design_matrix.to_csv(design_file, index=False)
 
         # Prewhiten the data
-        assert not np.isnan(data).any()
         ts_img = nib.Nifti1Image(data, affine)
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
 
