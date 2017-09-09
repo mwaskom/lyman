@@ -341,7 +341,7 @@ def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
     return S.tocsr()
 
 
-def smooth_cortex(surface, ts, vertvol, noisy_voxels=None, fwhm=2):
+def smooth_surface(surface, ts, vertvol, noisy_voxels=None, fwhm=2):
     """Smooth voxels corresponding to cortex using surface-based distances.
 
     Parameters
