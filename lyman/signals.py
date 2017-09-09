@@ -61,10 +61,10 @@ def cv(data, axis=0, detrend=True, mask=None, keepdims=False, ddof=0):
         check_mask(mask, data)
         data = data[mask]
 
-    mean = data.mean(axis=axis, keepdims=keepdims)
+    mean = data.mean(axis=axis)
     if detrend:
         data = signal.detrend(data, axis=axis)
-    std = data.std(axis=axis, keepdims=keepdims, ddof=ddof)
+    std = data.std(axis=axis, ddof=ddof)
 
     with np.errstate(all="ignore"):
         cv = std / mean
@@ -73,10 +73,10 @@ def cv(data, axis=0, detrend=True, mask=None, keepdims=False, ddof=0):
     if mask is not None:
         out = np.zeros(mask.shape, np.float)
         out[mask] = cv
-        if keepdims:
-            cv = np.expand_dims(out, axis=axis)
-        else:
-            cv = out
+        cv = out
+
+    if keepdims:
+        cv = np.expand_dims(cv, axis=axis)
 
     return cv
 

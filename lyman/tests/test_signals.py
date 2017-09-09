@@ -72,13 +72,8 @@ class TestSignals(object):
 
         assert cv == pytest.approx(cv_by_hand)
 
-        mask = random.uniform(0, 1, x.shape[1]) > .3
         with pytest.raises(ValueError):
             cv = signals.cv(x, mask=mask, axis=0)
-
-        mask = random.uniform(0, 1, x.shape[1]) > .3
-        with pytest.raises(ValueError):
-            cv = signals.cv(x, mask=mask, axis=-1)
 
     def test_percent_change(self, random):
 
