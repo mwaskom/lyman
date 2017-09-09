@@ -161,3 +161,27 @@ class TestSignals(object):
         data_img = nib.Nifti1Image(random.normal(0, 1, shape), np.eye(4))
         out_img = signals.smooth_volume(data_img, 4, inplace=True)
         assert np.array_equal(data_img.get_data(), out_img.get_data())
+
+    def test_smooth_segmentation(self, random):
+
+        shape = 12, 8, 4
+        data = seg = random.randint(0, 4, shape)
+
+        data_img = nib.Nifti1Image(data, np.eye(4))
+        seg_img = nib.Nifti1Image(seg, np.eye(4))
+
+        out_img = signals.smooth_segmentation(data_img, 4, seg_img)
+        assert np.array_equal(out_img.get_data(), data)
+
+    def test_smooth_segmentation_inplace(self, random):
+
+        shape = 12, 8, 4
+        seg = random.randint(0, 4, shape)
+        data = random.normal(0, 1, shape)
+
+        data_img = nib.Nifti1Image(data, np.eye(4))
+        seg_img = nib.Nifti1Image(seg, np.eye(4))
+
+        out_img = signals.smooth_segmentation(data_img, 4, seg_img,
+                                              inplace=True)
+        assert np.array_equal(out_img.get_data(), data)

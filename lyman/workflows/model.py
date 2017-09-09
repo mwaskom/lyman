@@ -447,6 +447,11 @@ class ModelFit(LymanInterface):
 
         # Spatially filter the data
         # TODO implement surface smoothing
+        # TODO note: this is a bit tricky because the segmentation we're using
+        # is more liberal than the surface voxel data. I think the thing to do
+        # is to smooth all the voxles in the volume using the segmentation, and
+        # then smooth and replace the surface voxels using mesh-based smoothing
+        # TODO also probably do volumetric smoothing using smooth_segmentation
         # Using simple volumetric smoothing for now to get things running
         fwhm = model_info.smooth_fwhm
         signals.smooth_volume(ts_img, fwhm, mask_img, noise_img, inplace=True)

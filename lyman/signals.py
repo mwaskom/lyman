@@ -20,6 +20,7 @@ def detrend(data, axis=-1, replace_mean=False):
 
     """
     # TODO enhance to preserve pandas index information
+    # TODO enhance to remove higher-order polynomials?
     if replace_mean:
         orig_mean = np.mean(data, axis=axis, keepdims=True)
 
@@ -184,9 +185,7 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
         Image like ``data_img`` but after smoothing.
 
     """
-    data = data_img.get_data()
-    if not inplace:
-        data = data.copy()
+    data = data_img.get_data().astype(np.float, copy=not inplace)
 
     if np.ndim(data) == 3:
         need_squeeze = True
@@ -221,9 +220,52 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     return nib.Nifti1Image(data, data_img.affine, data_img.header)
 
 
-# TODO
-def smooth_segmentation():
-    pass
+def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
+                        inplace=False):
+    """Filter each compartment of a segmentation with an isotropic gaussian.
+
+    Parameters
+    ----------
+    data_img : nibabel image
+        3D or 4D image data.
+    fwhm : positive float
+        Size of isotropic smoothing kernel in mm.
+    seg_img : nibabel image
+        3D label image defining smoothing ranges.
+    noise_img : nibabel image
+        3D binary image defining voxels to be interpolated out.
+    inplace :bool
+        If True, overwrite data in data_img. Otherwise perform a copy.
+
+    Returns
+    -------
+    smooth_data : nibabel image
+        Image like ``data_img`` but after smoothing.
+
+    """
+    affine, header = data_img.affine, data_img.header
+    data = data_img.get_data()
+    if not inplace:
+        data = data.copy()
+
+    seg = seg_img.get_data()
+    seg_ids = np.sort(np.unique(seg))
+
+    for id in seg_ids:
+
+        if not id:
+            continue
+
+        id_mask = seg == id
+        id_data = np.zeros_like(data)
+        id_data[id_mask] = data[id_mask]
+
+        id_mask_img = nib.Nifti1Image(id_mask.astype(np.int), affine)
+        id_data_img = nib.Nifti1Image(id_data, affine)
+        smooth_volume(id_data_img, fwhm, id_mask_img, noise_img, inplace=True)
+        data[id_mask] = id_data_img.get_data()[id_mask]
+
+    return nib.Nifti1Image(data, affine, header)
 
 
 def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
