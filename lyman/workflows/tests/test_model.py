@@ -27,7 +27,7 @@ class TestModelWorkflows(object):
 
         # Check root directory of output
         data_out = wf.get_node("data_output")
-        assert data_out.inputs.base_directory == proj_info.analysis_dir
+        assert data_out.inputs.base_directory == proj_info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "run_source",
@@ -53,9 +53,9 @@ class TestModelWorkflows(object):
 
         # Check root directory of output
         run_out = wf.get_node("run_output")
-        assert run_out.inputs.base_directory == proj_info.analysis_dir
+        assert run_out.inputs.base_directory == proj_info.proc_dir
         subject_out = wf.get_node("subject_output")
-        assert subject_out.inputs.base_directory == proj_info.analysis_dir
+        assert subject_out.inputs.base_directory == proj_info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "run_source", "data_input",
@@ -153,20 +153,20 @@ class TestModelWorkflows(object):
 
     def test_model_results_path(self):
 
-        analysis_dir = op.realpath(".")
+        proc_dir = op.realpath(".")
         subject = "subj01"
         experiment = "exp_a"
         model_name = "model_alpha"
 
         ifc = model.ModelResultsPath(
-            analysis_dir=analysis_dir,
+            proc_dir=proc_dir,
             subject=subject,
             experiment=experiment,
             model=model_name,
         )
 
         out = ifc.run().outputs
-        expected_path = op.join(analysis_dir, subject,
+        expected_path = op.join(proc_dir, subject,
                                 experiment, model_name, "results")
 
         assert out.output_path == expected_path
@@ -183,7 +183,7 @@ class TestModelWorkflows(object):
             experiment=exp_name,
             model=model_name,
             data_dir=str(timeseries["data_dir"]),
-            analysis_dir=str(timeseries["analysis_dir"]),
+            proc_dir=str(timeseries["proc_dir"]),
             subject=subject,
             run_tuple=run_tuple,
         ).run().outputs
@@ -211,7 +211,7 @@ class TestModelWorkflows(object):
         out = model.ModelResultsInput(
             experiment=exp_name,
             model=model_name,
-            analysis_dir=str(modelfit["analysis_dir"]),
+            proc_dir=str(modelfit["proc_dir"]),
             subject=subject,
             run_tuple=run_tuple,
         ).run().outputs

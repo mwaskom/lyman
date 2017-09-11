@@ -48,14 +48,14 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
                       iterables=("run", run_iterables))
 
     session_input = Node(SessionInput(data_dir=proj_info.data_dir,
-                                      analysis_dir=proj_info.analysis_dir,
+                                      proc_dir=proj_info.proc_dir,
                                       fm_template=proj_info.fm_template,
                                       phase_encoding=proj_info.phase_encoding),
                          "session_input")
 
     run_input = Node(RunInput(experiment=experiment,
                               data_dir=proj_info.data_dir,
-                              analysis_dir=proj_info.analysis_dir,
+                              proc_dir=proj_info.proc_dir,
                               sb_template=proj_info.sb_template,
                               ts_template=proj_info.ts_template),
                      name="run_input")
@@ -132,11 +132,11 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
 
     # --- Workflow ouptut
 
-    template_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+    template_output = Node(DataSink(base_directory=proj_info.proc_dir,
                                     parameterization=False),
                            "template_output")
 
-    timeseries_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+    timeseries_output = Node(DataSink(base_directory=proj_info.proc_dir,
                                       parameterization=False),
                              "timeseries_output")
 
@@ -482,7 +482,7 @@ class SessionInput(LymanInterface):
     class input_spec(TraitedSpec):
         session = traits.Tuple()
         data_dir = traits.Directory(exists=True)
-        analysis_dir = traits.Directory(exists=True)
+        proc_dir = traits.Directory(exists=True)
         fm_template = traits.Str()
         phase_encoding = traits.Either("ap", "pa")
 
@@ -558,7 +558,7 @@ class SessionInput(LymanInterface):
         self._results["readout_times"] = readout_times
 
         # Load files from the template directory
-        template_path = op.join(self.inputs.analysis_dir, subject, "template")
+        template_path = op.join(self.inputs.proc_dir, subject, "template")
         results = dict(
             reg_file=op.join(template_path, "anat2func.mat"),
             seg_file=op.join(template_path, "seg.nii.gz"),
@@ -575,7 +575,7 @@ class RunInput(LymanInterface, TimeSeriesGIF):
     class input_spec(TraitedSpec):
         run = traits.Tuple()
         data_dir = traits.Directory(exists=True)
-        analysis_dir = traits.Directory(exists=True)
+        proc_dir = traits.Directory(exists=True)
         experiment = traits.Str()
         sb_template = traits.Str()
         ts_template = traits.Str()
@@ -649,7 +649,7 @@ class RunInput(LymanInterface, TimeSeriesGIF):
         self.write_time_series_gif(runtime, ts_img, out_plot)
 
         # Load files from the template directory
-        template_path = op.join(self.inputs.analysis_dir, subject, "template")
+        template_path = op.join(self.inputs.proc_dir, subject, "template")
         results = dict(
             reg_file=op.join(template_path, "anat2func.mat"),
             seg_file=op.join(template_path, "seg.nii.gz"),

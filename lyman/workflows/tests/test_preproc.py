@@ -38,9 +38,9 @@ class TestPreprocWorkflow(object):
 
         # Check root directory of output
         template_out = wf.get_node("template_output")
-        assert template_out.inputs.base_directory == proj_info.analysis_dir
+        assert template_out.inputs.base_directory == proj_info.proc_dir
         timeseries_out = wf.get_node("timeseries_output")
-        assert timeseries_out.inputs.base_directory == proj_info.analysis_dir
+        assert timeseries_out.inputs.base_directory == proj_info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "session_source", "run_source",
@@ -183,7 +183,7 @@ class TestPreprocWorkflow(object):
         out = preproc.RunInput(
             run=run_tuple,
             data_dir=template["data_dir"],
-            analysis_dir=template["analysis_dir"],
+            proc_dir=template["proc_dir"],
             experiment=exp_name,
             sb_template=sb_template,
             ts_template=template["proj_info"].ts_template,
@@ -271,7 +271,7 @@ class TestPreprocWorkflow(object):
         out = preproc.SessionInput(
             session=session_tuple,
             data_dir=template["data_dir"],
-            analysis_dir=template["analysis_dir"],
+            proc_dir=template["proc_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
         ).run().outputs
@@ -323,7 +323,7 @@ class TestPreprocWorkflow(object):
         out = preproc.SessionInput(
             session=session_tuple,
             data_dir=template["data_dir"],
-            analysis_dir=template["analysis_dir"],
+            proc_dir=template["proc_dir"],
             fm_template=fm_template,
             phase_encoding=phase_encoding,
         ).run().outputs

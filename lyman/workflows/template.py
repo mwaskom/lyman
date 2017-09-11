@@ -79,7 +79,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     # --- Workflow ouptut
 
-    template_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+    template_output = Node(DataSink(base_directory=proj_info.proc_dir,
                                     parameterization=False),
                            "template_output")
 
