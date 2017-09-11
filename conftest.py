@@ -55,7 +55,8 @@ def lyman_info(tmpdir):
 
     model_info = Bunch(
         name="model_a",
-        smooth_fwhm=2,
+        smooth_fwhm=4,
+        surface_smoothing=True,
         hpf_cutoff=10,
         save_residuals=True,
 
@@ -76,8 +77,9 @@ def lyman_info(tmpdir):
     for subject in subjects:
 
         subject_dir = data_dir.mkdir(subject)
-        subject_dir.mkdir("func")
         subject_dir.mkdir("mri")
+        subject_dir.mkdir("surf")
+        subject_dir.mkdir("func")
         design_dir = subject_dir.mkdir("design")
         design.to_csv(design_dir.join("model_a.csv"))
 
@@ -162,12 +164,21 @@ def template(lyman_info):
     mask_file = str(template_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
 
-    surf_ids = np.arange(1, (seg_data == 1).sum() + 1)
-    surf_data = np.zeros(vol_shape + (2,), np.int)
+    n_verts = (seg_data == 1).sum()
+    surf_ids = np.arange(n_verts)
+    surf_data = np.full(vol_shape + (2,), -1, np.int)
     surf_data[seg_data == 1, 0] = surf_ids
     surf_data[seg_data == 1, 1] = surf_ids
     surf_file = str(template_dir.join("surf.nii.gz"))
     nib.save(nib.Nifti1Image(surf_data, affine), surf_file)
+
+    verts = rs.uniform(-1, 1, (n_verts, 3))
+    faces = np.array([(i, i + 1, i + 2) for i in range(n_verts - 2)])
+    surf_dir = lyman_info["data_dir"].join(subject).join("surf")
+    mesh_files = (str(surf_dir.join("lh.graymid")),
+                  str(surf_dir.join("rh.graymid")))
+    for fname in mesh_files:
+        nib.freesurfer.write_geometry(fname, verts, faces)
 
     lyman_info.update(
         vol_shape=vol_shape,
@@ -177,6 +188,7 @@ def template(lyman_info):
         anat_file=anat_file,
         mask_file=mask_file,
         surf_file=surf_file,
+        mesh_files=mesh_files,
     )
     return lyman_info
 

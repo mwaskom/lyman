@@ -193,7 +193,7 @@ class TestSignals(object):
         sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
         vertids = np.arange(sm.n_v)
         n_vox = len(vertids)
-        fwhm = 2
+        fwhm = 4
 
         # Test basics of the smoothing weight matrix output
         S = signals.smoothing_matrix(sm, vertids, fwhm)

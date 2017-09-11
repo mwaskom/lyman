@@ -328,6 +328,10 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
             distmap = {v: d for v, d in all_dist.items() if v in clean_verts}
             pool = len(distmap)
             factor += 1
+            if factor > 10:
+                # TODO probably better not to fail but to return data with nans
+                # (or at least make that an  option) and handle downstream
+                raise RuntimeError("Could not find enough neighbors in mesh")
 
         # Find weights for nearby voxels
         verts, distances = zip(*distmap.items())
