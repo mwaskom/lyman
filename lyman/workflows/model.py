@@ -12,7 +12,7 @@ from nipype.interfaces.base import traits, TraitedSpec
 from moss import Bunch  # move into lyman
 from moss import glm as mossglm  # TODO move into lyman
 
-from .. import glm, signals  # TODO confusingly close to scipy.signal
+from .. import glm, signals, surface
 from ..utils import LymanInterface, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot
 
@@ -44,6 +44,7 @@ def define_model_fit_workflow(proj_info, exp_info, model_info,
 
     data_input = Node(ModelFitInput(experiment=experiment,
                                     model=model,
+                                    data_dir=proj_info.data_dir,
                                     analysis_dir=proj_info.analysis_dir),
                       "data_input")
 
@@ -85,7 +86,8 @@ def define_model_fit_workflow(proj_info, exp_info, model_info,
              ("mask_file", "mask_file"),
              ("ts_file", "ts_file"),
              ("noise_file", "noise_file"),
-             ("mc_file", "mc_file")]),
+             ("mc_file", "mc_file"),
+             ("mesh_files", "mesh_files")]),
 
         (data_input, data_output,
             [("output_path", "container")]),
@@ -286,6 +288,7 @@ class ModelFitInput(LymanInterface):
     class input_spec(TraitedSpec):
         experiment = traits.Str()
         model = traits.Str()
+        data_dir = traits.Directory(exists=True)
         analysis_dir = traits.Directory(exists=True)
         subject = traits.Str()
         run_tuple = traits.Tuple(traits.Str(), traits.Str())
@@ -300,6 +303,8 @@ class ModelFitInput(LymanInterface):
         ts_file = traits.File(exists=True)
         noise_file = traits.File(Exists=True)
         mc_file = traits.File(exists=True)
+        mesh_files = traits.Tuple(traits.File(exists=True),
+                                  traits.File(exists=True))
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -310,8 +315,10 @@ class ModelFitInput(LymanInterface):
 
         experiment = self.inputs.experiment
         model = self.inputs.model
+        data_dir = self.inputs.data_dir
         anal_dir = self.inputs.analysis_dir
 
+        surface_path = op.join(data_dir, subject, "surf")
         template_path = op.join(anal_dir, subject, "template")
         timeseries_path = op.join(anal_dir, subject, experiment,
                                   "timeseries", run_key)
@@ -329,6 +336,9 @@ class ModelFitInput(LymanInterface):
             ts_file=op.join(timeseries_path, "func.nii.gz"),
             noise_file=op.join(timeseries_path, "noise.nii.gz"),
             mc_file=op.join(timeseries_path, "mc.csv"),
+
+            mesh_files=(op.join(surface_path, "lh.graymid"),
+                        op.join(surface_path, "rh.graymid")),
 
             output_path=op.join(anal_dir, subject, experiment, model, run_key)
         )
@@ -408,6 +418,8 @@ class ModelFit(LymanInterface):
         mask_file = traits.File(exists=True)
         noise_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
+        mesh_files = traits.Tuple(traits.File(exists=True),
+                                  traits.File(exists=True))
 
     class output_spec(TraitedSpec):
         mask_file = traits.File(exists=True)
@@ -443,13 +455,20 @@ class ModelFit(LymanInterface):
 
         # Load the noise segmentation
         # TODO implement noisy voxel removal
-        noise = nib.load(self.inputs.noise_file)
+        noise_img = nib.load(self.inputs.noise_file)
 
         # Spatially filter the data
-        # TODO implement surface smoothing
-        # Using simple volumetric smoothing for now to get things running
         fwhm = model_info.smooth_fwhm
-        ts_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise)
+        # TODO use smooth_segmentation instead?
+        signals.smooth_volume(ts_img, fwhm, mask_img, noise_img, inplace=True)
+
+        if model_info.surface_smoothing:
+            vert_data = nib.load(self.inputs.surf_file).get_data()
+            for i, mesh_file in enumerate(self.inputs.mesh_files):
+                sm = surface.SurfaceMeasure.from_file(mesh_file)
+                vert_img = nib.Nifti1Image(vert_data[..., i], affine)
+                signals.smooth_surface(ts_img, vert_img, sm, fwhm, noise_img,
+                                       inplace=True)
 
         # Compute the mean image for later
         # TODO limit to gray matter voxels?
@@ -466,7 +485,7 @@ class ModelFit(LymanInterface):
 
         # TODO remove the mean from the data
         # data[gray_mask] += mean[gray_mask, np.newaxis]
-        data[~mask] = 0
+        data[~mask] = 0  # TODO this is done within smoothing actually
 
         # Define confound regressons from various sources
         # TODO
@@ -495,7 +514,6 @@ class ModelFit(LymanInterface):
         dmat.design_matrix.to_csv(design_file, index=False)
 
         # Prewhiten the data
-        assert not np.isnan(data).any()
         ts_img = nib.Nifti1Image(data, affine)
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
 

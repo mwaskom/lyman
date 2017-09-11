@@ -55,7 +55,8 @@ def lyman_info(tmpdir):
 
     model_info = Bunch(
         name="model_a",
-        smooth_fwhm=2,
+        smooth_fwhm=4,
+        surface_smoothing=True,
         hpf_cutoff=10,
         save_residuals=True,
 
@@ -76,8 +77,9 @@ def lyman_info(tmpdir):
     for subject in subjects:
 
         subject_dir = data_dir.mkdir(subject)
-        subject_dir.mkdir("func")
         subject_dir.mkdir("mri")
+        subject_dir.mkdir("surf")
+        subject_dir.mkdir("func")
         design_dir = subject_dir.mkdir("design")
         design.to_csv(design_dir.join("model_a.csv"))
 
@@ -162,12 +164,21 @@ def template(lyman_info):
     mask_file = str(template_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
 
-    surf_ids = np.arange(1, (seg_data == 1).sum() + 1)
-    surf_data = np.zeros(vol_shape + (2,), np.int)
+    n_verts = (seg_data == 1).sum()
+    surf_ids = np.arange(n_verts)
+    surf_data = np.full(vol_shape + (2,), -1, np.int)
     surf_data[seg_data == 1, 0] = surf_ids
     surf_data[seg_data == 1, 1] = surf_ids
     surf_file = str(template_dir.join("surf.nii.gz"))
     nib.save(nib.Nifti1Image(surf_data, affine), surf_file)
+
+    verts = rs.uniform(-1, 1, (n_verts, 3))
+    faces = np.array([(i, i + 1, i + 2) for i in range(n_verts - 2)])
+    surf_dir = lyman_info["data_dir"].join(subject).join("surf")
+    mesh_files = (str(surf_dir.join("lh.graymid")),
+                  str(surf_dir.join("rh.graymid")))
+    for fname in mesh_files:
+        nib.freesurfer.write_geometry(fname, verts, faces)
 
     lyman_info.update(
         vol_shape=vol_shape,
@@ -177,6 +188,7 @@ def template(lyman_info):
         anat_file=anat_file,
         mask_file=mask_file,
         surf_file=surf_file,
+        mesh_files=mesh_files,
     )
     return lyman_info
 
@@ -215,14 +227,14 @@ def timeseries(template):
     mask_file = str(timeseries_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data.astype(np.int), affine), mask_file)
 
+    noise_data = mask_data & rs.choice([False, True], vol_shape, p=[.95, .05])
+    noise_file = str(timeseries_dir.join("noise.nii.gz"))
+    nib.save(nib.Nifti1Image(noise_data.astype(np.int), affine), noise_file)
+
     ts_shape = vol_shape + (n_tp,)
     ts_data = rs.normal(100, 5, ts_shape) * mask_data[..., np.newaxis]
     ts_file = str(timeseries_dir.join("func.nii.gz"))
     nib.save(nib.Nifti1Image(ts_data, affine), ts_file)
-
-    noise_data = rs.choice([0, 1], vol_shape, p=[.95, .05])
-    noise_file = str(timeseries_dir.join("noise.nii.gz"))
-    nib.save(nib.Nifti1Image(noise_data, affine), noise_file)
 
     mc_data = rs.normal(0, 1, (n_tp, 6))
     mc_file = str(timeseries_dir.join("mc.csv"))
@@ -235,8 +247,8 @@ def timeseries(template):
         session=session,
         run=run,
         mask_file=mask_file,
-        ts_file=ts_file,
         noise_file=noise_file,
+        ts_file=ts_file,
         mc_file=mc_file,
         timeseries_dir=timeseries_dir,
         model_dir=model_dir,
@@ -318,3 +330,38 @@ def modelres(modelfit):
         tstat_file=tstat_file,
     )
     return modelfit
+
+
+@pytest.fixture
+def meshdata(execdir):
+
+    verts = np.array([[0, 0, 0],
+                      [1, 0, 0],
+                      [1, 1, 1],
+                      [2, 0, 0],
+                      [2, 2, 2]], np.float)
+
+    faces = np.array([[0, 1, 2],
+                      [0, 2, 3],
+                      [2, 3, 4]], np.int)
+
+    sqrt2 = np.sqrt(2)
+    sqrt3 = np.sqrt(3)
+    sqrt8 = np.sqrt(8)
+
+    neighbors = {0: {1: 1.0, 2: sqrt3, 3: 2.0},
+                 1: {0: 1.0, 2: sqrt2},
+                 2: {0: sqrt3, 1: sqrt2, 3: sqrt3, 4: sqrt3},
+                 3: {0: 2.0, 2: sqrt3, 4: sqrt8},
+                 4: {2: sqrt3, 3: sqrt8}}
+
+    fname = execdir.join("test.mesh")
+    nib.freesurfer.write_geometry(fname, verts, faces)
+
+    meshdata = dict(
+        verts=verts,
+        faces=faces,
+        neighbors=neighbors,
+        fname=fname,
+    )
+    return meshdata
