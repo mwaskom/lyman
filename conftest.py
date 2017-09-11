@@ -19,7 +19,7 @@ def execdir(tmpdir):
 def lyman_info(tmpdir):
 
     data_dir = tmpdir.mkdir("data")
-    analysis_dir = tmpdir.mkdir("analysis")
+    proc_dir = tmpdir.mkdir("analysis")
     cache_dir = tmpdir.mkdir("cache")
 
     # TODO probably get these from default info functions
@@ -39,7 +39,7 @@ def lyman_info(tmpdir):
 
     proj_info = Bunch(
         data_dir=str(data_dir),
-        analysis_dir=str(analysis_dir),
+        proc_dir=str(proc_dir),
         cache_dir=str(cache_dir),
         scan_info=scan_info,
         phase_encoding="ap",
@@ -93,7 +93,7 @@ def lyman_info(tmpdir):
         sessions=sessions,
         exp_info=exp_info,
         model_info=model_info,
-        analysis_dir=analysis_dir,
+        proc_dir=proc_dir,
         data_dir=data_dir,
 
         vol_shape=vol_shape,
@@ -136,7 +136,7 @@ def freesurfer(lyman_info):
 def template(lyman_info):
 
     subject = "subj01"
-    template_dir = (lyman_info["analysis_dir"]
+    template_dir = (lyman_info["proc_dir"]
                     .mkdir(subject)
                     .mkdir("template"))
 
@@ -210,13 +210,13 @@ def timeseries(template):
     affine = np.eye(4)
     affine[:3, :3] *= 2
 
-    timeseries_dir = (template["analysis_dir"]
+    timeseries_dir = (template["proc_dir"]
                       .join(template["subject"])
                       .mkdir(exp_name)
                       .mkdir("timeseries")
                       .mkdir("{}_{}".format(session, run)))
 
-    model_dir = (template["analysis_dir"]
+    model_dir = (template["proc_dir"]
                  .join(template["subject"])
                  .join(exp_name)
                  .mkdir(model_name)

@@ -24,7 +24,7 @@ class TestTemplateWorkflow(object):
 
         # Check root directory of output
         template_out = wf.get_node("template_output")
-        assert template_out.inputs.base_directory == proj_info.analysis_dir
+        assert template_out.inputs.base_directory == proj_info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "template_input",

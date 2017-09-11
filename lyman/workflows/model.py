@@ -45,7 +45,7 @@ def define_model_fit_workflow(proj_info, exp_info, model_info,
     data_input = Node(ModelFitInput(experiment=experiment,
                                     model=model,
                                     data_dir=proj_info.data_dir,
-                                    analysis_dir=proj_info.analysis_dir),
+                                    proc_dir=proj_info.proc_dir),
                       "data_input")
 
     # --- Data filtering and model fitting
@@ -57,7 +57,7 @@ def define_model_fit_workflow(proj_info, exp_info, model_info,
 
     # --- Data output
 
-    data_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+    data_output = Node(DataSink(base_directory=proj_info.proc_dir,
                                 parameterization=False),
                        "data_output")
 
@@ -146,7 +146,7 @@ def define_model_results_workflow(proj_info, exp_info, model_info,
 
     data_input = Node(ModelResultsInput(experiment=experiment,
                                         model=model,
-                                        analysis_dir=proj_info.analysis_dir),
+                                        proc_dir=proj_info.proc_dir),
                       "data_input")
 
     # --- Run-level contrast estimation
@@ -164,16 +164,16 @@ def define_model_results_workflow(proj_info, exp_info, model_info,
 
     # --- Data output
 
-    run_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+    run_output = Node(DataSink(base_directory=proj_info.proc_dir,
                                parameterization=False),
                       "run_output")
 
-    results_path = Node(ModelResultsPath(analysis_dir=proj_info.analysis_dir,
+    results_path = Node(ModelResultsPath(proc_dir=proj_info.proc_dir,
                                          experiment=experiment,
                                          model=model),
                         "results_path")
 
-    subject_output = Node(DataSink(base_directory=proj_info.analysis_dir,
+    subject_output = Node(DataSink(base_directory=proj_info.proc_dir,
                                    parameterization=False),
                           "subject_output")
 
@@ -289,7 +289,7 @@ class ModelFitInput(LymanInterface):
         experiment = traits.Str()
         model = traits.Str()
         data_dir = traits.Directory(exists=True)
-        analysis_dir = traits.Directory(exists=True)
+        proc_dir = traits.Directory(exists=True)
         subject = traits.Str()
         run_tuple = traits.Tuple(traits.Str(), traits.Str())
 
@@ -316,11 +316,11 @@ class ModelFitInput(LymanInterface):
         experiment = self.inputs.experiment
         model = self.inputs.model
         data_dir = self.inputs.data_dir
-        anal_dir = self.inputs.analysis_dir
+        proc_dir = self.inputs.proc_dir
 
         surface_path = op.join(data_dir, subject, "surf")
-        template_path = op.join(anal_dir, subject, "template")
-        timeseries_path = op.join(anal_dir, subject, experiment,
+        template_path = op.join(proc_dir, subject, "template")
+        timeseries_path = op.join(proc_dir, subject, experiment,
                                   "timeseries", run_key)
 
         results = dict(
@@ -340,7 +340,7 @@ class ModelFitInput(LymanInterface):
             mesh_files=(op.join(surface_path, "lh.graymid"),
                         op.join(surface_path, "rh.graymid")),
 
-            output_path=op.join(anal_dir, subject, experiment, model, run_key)
+            output_path=op.join(proc_dir, subject, experiment, model, run_key)
         )
         self._results.update(results)
 
@@ -352,7 +352,7 @@ class ModelResultsInput(LymanInterface):
     class input_spec(TraitedSpec):
         experiment = traits.Str()
         model = traits.Str()
-        analysis_dir = traits.Directory(exists=True)
+        proc_dir = traits.Directory(exists=True)
         subject = traits.Str()
         run_tuple = traits.Tuple(traits.Str(), traits.Str())
 
@@ -375,10 +375,10 @@ class ModelResultsInput(LymanInterface):
 
         experiment = self.inputs.experiment
         model = self.inputs.model
-        analysis_dir = self.inputs.analysis_dir
+        proc_dir = self.inputs.proc_dir
 
-        template_path = op.join(analysis_dir, subject, "template")
-        model_path = op.join(analysis_dir, subject, experiment, model, run_key)
+        template_path = op.join(proc_dir, subject, "template")
+        model_path = op.join(proc_dir, subject, experiment, model, run_key)
 
         results = dict(
 
@@ -711,7 +711,7 @@ class ModelResults(LymanInterface):
 class ModelResultsPath(LymanInterface):
 
     class input_spec(TraitedSpec):
-        analysis_dir = traits.Directory(exists=True)
+        proc_dir = traits.Directory(exists=True)
         subject = traits.Str()
         experiment = traits.Str()
         model = traits.Str()
@@ -722,7 +722,7 @@ class ModelResultsPath(LymanInterface):
     def _run_interface(self, runtime):
 
         self._results["output_path"] = op.join(
-            self.inputs.analysis_dir,
+            self.inputs.proc_dir,
             self.inputs.subject,
             self.inputs.experiment,
             self.inputs.model,
