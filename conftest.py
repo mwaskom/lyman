@@ -318,3 +318,38 @@ def modelres(modelfit):
         tstat_file=tstat_file,
     )
     return modelfit
+
+
+@pytest.fixture
+def meshdata(execdir):
+
+    verts = np.array([[0, 0, 0],
+                      [1, 0, 0],
+                      [1, 1, 1],
+                      [2, 0, 0],
+                      [2, 2, 2]], np.float)
+
+    faces = np.array([[0, 1, 2],
+                      [0, 2, 3],
+                      [2, 3, 4]], np.int)
+
+    sqrt2 = np.sqrt(2)
+    sqrt3 = np.sqrt(3)
+    sqrt8 = np.sqrt(8)
+
+    neighbors = {0: {1: 1.0, 2: sqrt3, 3: 2.0},
+                 1: {0: 1.0, 2: sqrt2},
+                 2: {0: sqrt3, 1: sqrt2, 3: sqrt3, 4: sqrt3},
+                 3: {0: 2.0, 2: sqrt3, 4: sqrt8},
+                 4: {2: sqrt3, 3: sqrt8}}
+
+    fname = execdir.join("test.mesh")
+    nib.freesurfer.write_geometry(fname, verts, faces)
+
+    meshdata = dict(
+        verts=verts,
+        faces=faces,
+        neighbors=neighbors,
+        fname=fname,
+    )
+    return meshdata

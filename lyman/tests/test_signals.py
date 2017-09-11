@@ -1,11 +1,12 @@
 from itertools import product
 import numpy as np
 import scipy.signal as scipy_signal
+from scipy import sparse, stats
 import nibabel as nib
 
 import pytest
 
-from .. import signals
+from .. import signals, surface
 
 
 class TestSignals(object):
@@ -171,17 +172,117 @@ class TestSignals(object):
         seg_img = nib.Nifti1Image(seg, np.eye(4))
 
         out_img = signals.smooth_segmentation(data_img, 4, seg_img)
-        assert np.array_equal(out_img.get_data(), data)
+        assert out_img.get_data() == pytest.approx(data.astype(np.float))
 
     def test_smooth_segmentation_inplace(self, random):
 
         shape = 12, 8, 4
-        seg = random.randint(0, 4, shape)
+
         data = random.normal(0, 1, shape)
+        seg = random.randint(0, 4, shape)
 
         data_img = nib.Nifti1Image(data, np.eye(4))
         seg_img = nib.Nifti1Image(seg, np.eye(4))
 
         out_img = signals.smooth_segmentation(data_img, 4, seg_img,
                                               inplace=True)
+        assert np.array_equal(out_img.get_data(), data.astype(np.float))
+
+    def test_smoothing_matrix(self, meshdata):
+
+        sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
+        vertids = np.arange(sm.n_v)
+        n_vox = len(vertids)
+        fwhm = 2
+
+        # Test basics of the smoothing weight matrix output
+        S = signals.smoothing_matrix(sm, vertids, fwhm)
+        assert isinstance(S, sparse.csr_matrix)
+        assert S.shape == (n_vox, n_vox)
+        assert S.sum(axis=1) == pytest.approx(np.ones((n_vox, 1)))
+
+        for i, row_ws in enumerate(S.toarray()):
+            row_ds = sm(i)
+            row_ds = np.array([row_ds[j] for j in vertids])
+            assert np.array_equal((1 / row_ws).argsort(), row_ds.argsort())
+
+        # Test the computed weights in one matrix
+        sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
+        norm = stats.norm(0, sigma)
+        distmap = sm(0)
+        w = np.array([norm.pdf(d) for v, d in distmap.items()])
+        w /= w.sum()
+        s = S[0].toarray().squeeze()
+        assert s == pytest.approx(w)
+
+        # Lightly test the rest of the weights in the matrices
+        S1 = signals.smoothing_matrix(sm, vertids, 1).toarray()
+        S2 = signals.smoothing_matrix(sm, vertids, 2).toarray()
+        assert np.all(np.diag(S1, 0) > np.diag(S2, 0))
+        assert np.all(np.diag(S1, 1) < np.diag(S2, 1))
+
+        # Test exclusion of noisy voxels
+        noise = np.zeros(sm.n_v, np.int)
+        noise[0] = 1
+        S = signals.smoothing_matrix(sm, vertids, 1, noise).toarray()
+        assert S.shape == (n_vox, n_vox)
+        assert S[:, 0] == pytest.approx(np.zeros(n_vox))
+
+        # Test bad input
+        with pytest.raises(ValueError):
+            signals.smoothing_matrix(sm, vertids, 0)
+
+    def test_smooth_surface(self, random, meshdata):
+
+        shape = 4, 3, 2
+        affine = np.eye(4)
+        fwhm = 4
+
+        sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
+
+        data = random.normal(10, 2, shape)
+        data_img = nib.Nifti1Image(data, affine)
+
+        surf_vox = random.choice(np.arange(np.product(shape)), sm.n_v, False)
+        vertvol = np.full(shape, -1, np.int)
+        vertvol.flat[surf_vox] = np.arange(sm.n_v)
+        vert_img = nib.Nifti1Image(vertvol, affine)
+
+        ribbon = vertvol > -1
+
+        out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm)
+        out_data = out_img.get_data()
+
+        assert out_data[ribbon].std() < data[ribbon].std()
+        assert np.array_equal(out_data[~ribbon], data[~ribbon])
+
+        shape = 4, 3, 2, 10
+
+        data = random.normal(10, 2, shape)
+        data_img = nib.Nifti1Image(data, affine)
+
+        out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm)
+        out_data = out_img.get_data()
+
+        assert out_data[ribbon].std() < data[ribbon].std()
+        assert np.array_equal(out_data[~ribbon], data[~ribbon])
+
+        n_tp = shape[-1]
+        noise_vox = surf_vox[0]
+        noise_mask = vertvol == noise_vox
+        data[noise_mask] = random.normal(10, 10, n_tp)
+        noise_img = nib.Nifti1Image(noise_mask.astype(int), affine)
+
+        noise_out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm)
+        clean_out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm,
+                                               noise_img)
+
+        noise_sd = noise_out_img.get_data()[noise_mask].std()
+        clean_sd = clean_out_img.get_data()[noise_mask].std()
+
+        assert clean_sd < noise_sd
+
+        out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm,
+                                         inplace=True)
+
         assert np.array_equal(out_img.get_data(), data)

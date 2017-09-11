@@ -176,7 +176,7 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
         3D binary image defining smoothing range.
     noise_img : nibabel image
         3D binary image defining voxels to be interpolated out.
-    inplace :bool
+    inplace : bool
         If True, overwrite data in data_img. Otherwise perform a copy.
 
     Returns
@@ -234,7 +234,7 @@ def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
         3D label image defining smoothing ranges.
     noise_img : nibabel image
         3D binary image defining voxels to be interpolated out.
-    inplace :bool
+    inplace : bool
         If True, overwrite data in data_img. Otherwise perform a copy.
 
     Returns
@@ -244,9 +244,7 @@ def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
 
     """
     affine, header = data_img.affine, data_img.header
-    data = data_img.get_data()
-    if not inplace:
-        data = data.copy()
+    data = data_img.get_data().astype(np.float, copy=not inplace)
 
     seg = seg_img.get_data()
     seg_ids = np.sort(np.unique(seg))
@@ -268,7 +266,7 @@ def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
     return nib.Nifti1Image(data, affine, header)
 
 
-def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
+def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
     """Define a matrix to smooth voxels using surface geometry.
 
     If T is an n_voxel x n_tp timeseries matrix, the resulting object S can
@@ -276,16 +274,17 @@ def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
 
     Parameters
     ----------
-    surface : Surface object
-        Object representing the surface geometry that defines `.nvertices` and
-        `.dijkstra_distance()`.
+    measure : surface.SurfaceMeasure object
+        Object for measuring distance along a cortical mesh.
     vertids : 1d numpy array
         Array of vertex IDs corresponding to each cortical voxel.
-    noisy_voxels : 1d numpy array
-        Binary array defining voxels that should be excluded and interpolated
-        during smoothing.
     fwhm : float
         Size of the smoothing kernel, in mm.
+    exclude : 1d numpy array
+        Binary array defining voxels that should be excluded and interpolated
+        during smoothing.
+    minpool : int
+        Minimum number of neighborhood vertices to include in smoothing pool.
 
     Returns
     -------
@@ -294,20 +293,19 @@ def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
 
     """
     # Define the weighting function
-    assert fwhm > 0
-    sigma = fwhm / 2.355
+    if fwhm <= 0:
+        raise ValueError("Smoothing kernel fwhm must be positive")
+    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
     norm = stats.norm(0, sigma)
 
     # Define the vertex ids that will be included in the smoothing
-    if noisy_voxels is None:
-        noisy_voxels = np.zeros_like(vertids)
-    else:
-        assert len(noisy_voxels) == len(vertids)
-    clean = ~(noisy_voxels.astype(bool))
-    clean_vertices = set(vertids[clean])
+    if exclude is None:
+        exclude = np.zeros_like(vertids)
+    clean = ~(exclude.astype(bool))
+    clean_verts = set(vertids[clean])
 
     # Define a mapping from vertex index to voxel index
-    voxids = np.full(surface.nvertices, -1, np.int)
+    voxids = np.full(measure.n_v, -1, np.int)
     for i, v in enumerate(vertids):
         voxids[v] = i
 
@@ -316,21 +314,23 @@ def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
     mat_size = n_voxels, n_voxels
     S = sparse.lil_matrix(mat_size)
 
+    # Ensure that the minpool isn't larger than the surface
+    minpool = min(minpool, clean.sum())
+
     # Build the matrix by rows
     for voxid, vertid in enumerate(vertids):
 
         # Find the distance to a minmimum number of neighboring voxels
         factor = 4
-        neighbors = 0
-        while neighbors < 6:
-            d = surface.dijkstra_distance(vertid, sigma * factor)
-            d = {vert: dist for vert, dist in d.items()
-                 if vert in clean_vertices}
-            neighbors = len(d)
+        pool = 0
+        while pool < minpool:
+            all_dist = measure(vertid, sigma * factor)
+            distmap = {v: d for v, d in all_dist.items() if v in clean_verts}
+            pool = len(distmap)
             factor += 1
 
         # Find weights for nearby voxels
-        verts, distances = zip(*d.items())
+        verts, distances = zip(*distmap.items())
         voxels = voxids[list(verts)]
         w = norm.pdf(distances)
         w /= w.sum()
@@ -341,48 +341,48 @@ def smoothing_matrix(surface, vertids, noisy_voxels=None, fwhm=2):
     return S.tocsr()
 
 
-def smooth_surface(surface, ts, vertvol, noisy_voxels=None, fwhm=2):
+def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
+                   inplace=False):
     """Smooth voxels corresponding to cortex using surface-based distances.
 
     Parameters
     ----------
-    surface : Surface object
-        Object representing the surface geometry that defines `.nvertices` and
-        `.dijkstra_distance()`.
-    ts : nibabel image
-        4D timeseries data.
-    vertvol : nibabel image
-        Image where voxels have their corresponding vertex ID or are -1 if not
-        part of cortex.
-    noisy_voxels : nibabel image
-        Binary image defining voxels that should be excluded and interpolated
-        during smoothing.
+    data_img : nibabel image
+        3D or 4D input data.
+    vert_img : nibabel image
+        Image where voxels have their corresponding surfave vertex ID or are -1
+        if they are not considered part of cortex.
+    measure : SurfaceMeasure object
+        Object for measuring distance along a cortical mesh.
     fwhm : float
         Size of smoothing kernel in mm.
+    noise_img : nibabel image
+        Binary image defining voxels that should be interpolated out.
+    inplace :bool
+        If True, overwrite data in data_img. Otherwise perform a copy.
 
     Returns
     -------
-    smooth_ts : nibabel image
-        Image like `ts` but after smoothing.
+    smooth_img : nibabel image
+        Image like ``data_img`` but after smoothing.
 
     """
     # Load the data
-    data = ts.get_data().copy()  # TODO allow inplace as an option
-    vertvol = vertvol.get_data()
-    ribbon = vertvol > -1
-    if noisy_voxels is not None:
-        noisy_voxels = noisy_voxels.get_data()
+    data = data_img.get_data().astype(np.float, copy=not inplace)
+    vertvol = vert_img.get_data()
+    noise = None if noise_img is None else noise_img.get_data()
 
     # Extract the cortical data
+    ribbon = vertvol > -1
     vertids = vertvol[ribbon]
-    cortex_data = data[ribbon]
-    if noisy_voxels is not None:
-        noisy_voxels = noisy_voxels[ribbon]
+    surf_data = data[ribbon]
+    if noise is not None:
+        noise = noise[ribbon]
 
     # Generate a smoothing matrix
-    S = smoothing_matrix(surface, vertids, noisy_voxels, fwhm)
+    S = smoothing_matrix(measure, vertids, fwhm, noise)
 
     # Smooth the data
-    data[ribbon] = S * cortex_data
+    data[ribbon] = S * surf_data
 
-    return nib.Nifti1Image(data, ts.affine, ts.header)
+    return nib.Nifti1Image(data, data_img.affine, data_img.header)
