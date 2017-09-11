@@ -463,6 +463,7 @@ class ModelFit(LymanInterface):
         signals.smooth_volume(ts_img, fwhm, mask_img, noise_img, inplace=True)
 
         if model_info.surface_smoothing:
+            # TODO this is double smoothing the surface voxels!
             vert_data = nib.load(self.inputs.surf_file).get_data()
             for i, mesh_file in enumerate(self.inputs.mesh_files):
                 sm = surface.SurfaceMeasure.from_file(mesh_file)

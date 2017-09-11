@@ -5,13 +5,15 @@ import re
 import sys
 import imp
 import shutil
+from textwrap import dedent
 import yaml
 
 import numpy as np
 
+from traits.api import (HasTraits, Str, Bool, Float, Int,
+                        Tuple, List, Enum, Either)
 from moss import Bunch  # TODO get from nipype
 
-# TODO maybe defer workflow imports?
 from .workflows.template import define_template_workflow
 from .workflows.preproc import define_preproc_workflow
 from .workflows.model import (define_model_fit_workflow,
@@ -19,6 +21,133 @@ from .workflows.model import (define_model_fit_workflow,
 
 
 __all__ = []
+
+
+class ProjectInfo(HasTraits):
+
+    data_dir = Str(
+        "../data",
+        desc=dedent("""
+        A relative path to the directory where raw data is stored.
+        """),
+    )
+    proc_dir = Str(
+        "../proc",
+        desc=dedent("""
+        A relative path to the directory where lyman workflows will output
+        persistent data.
+        """),
+    )
+    cache_dir = Str(
+        "../cache",
+        desc=dedent("""
+        A relative path to the directory where lyman workflows will write
+        intermediate files during execution.
+        """),
+    )
+    remove_cache = Bool(
+        True,
+        desc=dedent("""
+        If True, delete the cache directory containing intermediate files after
+        successful execution of the workflow. This behavior can be overridden
+        at runtime by command-line arguments.
+        """),
+    )
+    fm_template = Str(
+        "{session}_fieldmap_{encoding}.nii.gz",
+        desc=dedent("""
+        A template string to identify session-specific fieldmap files.
+        """),
+    )
+    ts_template = Str(
+        "{session}_{experiment}_{run}.nii.gz",
+        desc=dedent("""
+        A template string to identify time series data files.
+        """),
+    )
+    sb_template = Str(
+        "{session}_{experiment}_{run}_ref.nii.gz",
+        desc=dedent("""
+        A template string to identify reference volumes corresponding to each
+        run of time series data.
+        """),
+    )
+    phase_encoding = Enum(
+        "pa", "ap",
+        desc=dedent("""
+        The phase encoding direction used in the functional acquisition.
+        """),
+    )
+
+
+class ExperimentInfo(HasTraits):
+
+    name = Str(
+        desc="The name of the experiment."
+    )
+    tr = Float(
+        desc=dedent("""
+        The temporal resolution of the functional acquisition in seconds.
+        """),
+    )
+    crop_frames = Int(
+        0,
+        desc=dedent("""
+        The number of frames to remove from the beginning of each time series
+        during preprocessing.
+        """),
+    )
+    smooth_fwhm = Either(
+        Float(2), None,
+        desc=dedent("""
+        The size of the Gaussian smoothing kernel for spatial filtering.
+        """),
+    )
+    surface_smoothing = Bool(
+        True,
+        desc=dedent("""
+        If True, filter cortical voxels using Gaussian weights computed along
+        the surface mesh.
+        """),
+    )
+    interpolate_noise = Bool(
+        True,
+        desc=dedent("""
+        If True, identify locally noisy voxels and replace replace their values
+        using interpolation during spatial filtering.
+        """),
+    )
+    hpf_cutoff = Either(
+        Float(128), None,
+        usedefault=True,
+        desc=dedent("""
+        The cutoff value (in seconds) for the temporal high-pass filter.
+        """),
+    )
+    save_residuals = Bool(
+        False,
+        desc=dedent("""
+        If True, write out an image with the residual time series in each voxel
+        after model fitting.
+        """),
+    )
+    # TODO HRF model and params
+
+
+class ModelInfo(ExperimentInfo):
+
+    name = Str(
+        desc="The name of the model."
+    )
+    contrasts = List(
+        Tuple(Str, List(Str), List(Float)),
+        desc=dedent("""
+        Definitions for model parameter contrasts. Each item in the list should
+        be a tuple with the fields: (1) the name of the contrast, (2) the names
+        of the parameters included in the contrast, and (3) the weights to apply
+        to the parameters.
+        """),
+    )
 
 
 def gather_project_info(lyman_dir=None):
@@ -126,7 +255,7 @@ def gather_model_info(experiment, model):
     info = imp.load_source(module_name, model_file)
 
     # TODO hacked to get going
-    fields = ["smooth_fwhm", "hpf_cutoff",
+    fields = ["smooth_fwhm", "surface_smoothing", "hpf_cutoff",
               "interpolate_noise", "contrasts",
               "save_residuals"]
     info_dict = {k: getattr(info, k) for k in fields}

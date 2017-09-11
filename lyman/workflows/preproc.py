@@ -57,7 +57,8 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
                               data_dir=proj_info.data_dir,
                               proc_dir=proj_info.proc_dir,
                               sb_template=proj_info.sb_template,
-                              ts_template=proj_info.ts_template),
+                              ts_template=proj_info.ts_template,
+                              crop_frames=exp_info.crop_frames),
                      name="run_input")
 
     # --- Warpfield estimation using topup
@@ -579,8 +580,6 @@ class RunInput(LymanInterface, TimeSeriesGIF):
         experiment = traits.Str()
         sb_template = traits.Str()
         ts_template = traits.Str()
-
-        # TODO this default should be defined at the project/experiment level
         crop_frames = traits.Int(0, usedefault=True)
 
     class output_spec(TraitedSpec):

@@ -50,6 +50,7 @@ def lyman_info(tmpdir):
 
     exp_info = Bunch(
         name="exp_alpha",
+        crop_frames=2,
         tr=1.5,
     )
 
