@@ -6,8 +6,6 @@ import pytest
 
 from lyman.frontend import LymanInfo
 
-from moss import Bunch  # TODO change to lyman version when implemented
-
 
 @pytest.fixture()
 def execdir(tmpdir):

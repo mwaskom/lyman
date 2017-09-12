@@ -7,9 +7,8 @@ import pandas as pd
 import nibabel as nib
 
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
-from nipype.interfaces.base import traits, TraitedSpec
+from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
-from moss import Bunch  # move into lyman
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals, surface
