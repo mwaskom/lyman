@@ -112,6 +112,7 @@ if __name__ == "__main__":
     sessions = args.session
     qc = args.qc
 
+    # TODO best place for this? (Maybe move into determine_subjects?)
     if len(subjects) > 1 and sessions is not None:
         raise RuntimeError("Can only specify session for single subject")
 
@@ -119,17 +120,14 @@ if __name__ == "__main__":
         wf = define_template_workflow(info, subjects, qc)
         execute(wf, args, info)
 
-    else:
+    if stage == "preproc":
+        wf = define_preproc_workflow(info, subjects, sessions, qc)
+        execute(wf, args, info)
 
-        if stage == "preproc":
-            wf = define_preproc_workflow(info, subjects, sessions, qc)
-            execute(wf, args, info)
+    if stage in ["model", "model-fit"]:
+        wf = define_model_fit_workflow(info, subjects, sessions, qc)
+        execute(wf, args, info)
 
-        else:
-
-            if stage in ["model", "model-fit"]:
-                wf = define_model_fit_workflow(info, subjects, sessions, qc)
-                execute(wf, args, info)
-            if stage in ["model", "model-res"]:
-                wf = define_model_results_workflow(info, subjects, qc)
-                execute(wf, args, info)
+    if stage in ["model", "model-res"]:
+        wf = define_model_results_workflow(info, subjects, qc)
+        execute(wf, args, info)
