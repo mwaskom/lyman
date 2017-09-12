@@ -1,63 +1,65 @@
 #! /usr/bin/env python
 import argparse
-
 import matplotlib
 matplotlib.use("Agg")
 
-from lyman.frontend import execute_workflow
 
+def add_subparser(subparsers, name, help, parameterization):
 
-def add_subject(parser):
-    parser.add_argument("-s", "--subject",
-                        nargs="*",
-                        metavar="id",
-                        help="subject id(s)")
+    parser = subparsers.add_parser(name, help=help)
 
+    if "subject" in parameterization:
+        parser.add_argument("-s", "--subject",
+                            nargs="*",
+                            metavar="id",
+                            help="subject id(s)")
 
-def add_session(parser):
-    parser.add_argument("--session",
-                        nargs="*",
-                        metavar="sess",
-                        help="scanning session(s) for single subject")
+    if "session" in parameterization:
+        parser.add_argument("--session",
+                            nargs="*",
+                            metavar="sess",
+                            help="scanning session(s) for single subject")
 
+    if "experiment" in parameterization:
+        parser.add_argument("-e", "--experiment",
+                            metavar="name",
+                            help="experiment name")
 
-def add_experiment(parser):
-    parser.add_argument("-e", "--experiment",
-                        metavar="name",
-                        help="experiment name")
+    if "model" in parameterization:
+        parser.add_argument("-m", "--model",
+                            metavar="name",
+                            help="model name")
 
-
-def add_model(parser):
-    parser.add_argument("-m", "--model",
-                        metavar="name",
-                        help="model name")
-
-
-def add_execution(parser):
-    parser.add_argument("-p", "--plugin",
-                        metavar="name",
-                        help="nipype execution plugin")
-    parser.add_argument("-n", "--nprocs",
+    parser.add_argument("-n", "--n-procs",
                         type=int,
+                        default=4,
                         metavar="number",
                         help="size of multiprocessing pool")
-    parser.add_argument("-g", "--graph",
-                        action="store_true",  # TODO make this take a filename
-                        help="write graph instead of executing")
+    parser.add_argument("--graph",
+                        const=True,
+                        metavar="<fname>",
+                        help="create graph image instead of executing")
+    parser.add_argument("--debug",
+                        action="store_strue",
+                        help="enable nipype debug mode")
     parser.add_argument("--clear-cache",
                         action="store_true",
                         help="remove existing cache directory before running")
     parser.add_argument("--no-qc",
                         dest="qc", action="store_false",
                         help="don't connect qc nodes")
-    parser.add_argument("--no-run",
-                        dest="run", action="store_false",
-                        help="do everything but actually execute the workflow")
-
-    # TODO add debug mode that preserves cache directory and all outputs
+    parser.add_argument("--no-exec",
+                        dest="execute", action="store_false",
+                        help="define the workflow but do not execute it")
 
 
 if __name__ == "__main__":
+
+    from lyman.frontend import (lyman_info, determine_subjects, execute)
+    from .workflows.template import define_template_workflow
+    from .workflows.preproc import define_preproc_workflow
+    from .workflows.model import (define_model_fit_workflow,
+                                  define_model_results_workflow)
 
     parser = argparse.ArgumentParser(prog="lyman")
     subparsers = parser.add_subparsers(help="processing stage",
@@ -65,50 +67,69 @@ if __name__ == "__main__":
 
     # ---
 
-    template = subparsers.add_parser("template",
-                                     help="functional template definition")
-    add_subject(template)
-    add_execution(template)
+    add_subparser(
+        subparsers,
+        "template",
+        "functional template definition",
+        ["subject"],
+    )
 
-    # ---
+    add_subparser(
+        subparsers,
+        "preproc",
+        "functional preprocessing",
+        ["subject", "session", "experiment"],
+    )
 
-    preproc = subparsers.add_parser("preproc",
-                                    help="functional preprocessing")
-    add_subject(preproc)
-    add_session(preproc)
-    add_experiment(preproc)
-    add_execution(preproc)
+    add_subparser(
+        subparsers,
+        "model",
+        "fit univariate GLM and estimate contrasts",
+        ["subject", "session", "experiment", "model"],
+    )
 
-    # ---
+    add_subparser(
+        subparsers,
+        "model-fit",
+        "fit univariate GLM",
+        ["subject", "session", "experiment", "model"],
+    )
 
-    # TODO a nice API would be something like model, model-fit, and model-res
-    # We typically will want to do both, but want flexibility not to
-    model_all = subparsers.add_parser("model",
-                                      help=("fit univariate GLM "
-                                            "and estimate contrasts"))
-    add_subject(model_all)
-    add_experiment(model_all)
-    add_model(model_all)
-    add_session(model_all)
-    add_execution(model_all)
-
-    model_fit = subparsers.add_parser("model-fit",
-                                      help="fit univariate GLM")
-    add_subject(model_fit)
-    add_experiment(model_fit)
-    add_model(model_fit)
-    add_session(model_fit)
-    add_execution(model_fit)
-
-    model_res = subparsers.add_parser("model-res",
-                                      help="estimate univariate contrats")
-    add_subject(model_res)
-    add_experiment(model_res)
-    add_model(model_res)
-    add_execution(model_res)
+    add_subparser(
+        subparsers,
+        "model-res",
+        "estimate univariate contrasts",
+        ["subject", "experiment", "model"],
+    )
 
     # ---
 
     args = parser.parse_args()
+    stage = args.stage
 
-    execute_workflow(args)
+    info = lyman_info(args.experiment, args.model)
+    subjects = determine_subjects(args.subject)
+    sessions = args.session
+    qc = args.qc
+
+    if len(subjects) > 1 and sessions is not None:
+        raise RuntimeError("Can only specify session for single subject")
+
+    if stage == "template":
+        wf = define_template_workflow(info, subjects, qc)
+        execute(wf, args, info)
+
+    else:
+
+        if stage == "preproc":
+            wf = define_preproc_workflow(info, subjects, sessions, qc)
+            execute(wf, args, info)
+
+        else:
+
+            if stage in ["model", "model-fit"]:
+                wf = define_model_fit_workflow(info, subjects, sessions, qc)
+                execute(wf, args, info)
+            if stage in ["model", "model-res"]:
+                wf = define_model_results_workflow(info, subjects, qc)
+                execute(wf, args, info)

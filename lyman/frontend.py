@@ -10,9 +10,9 @@ import yaml
 
 import numpy as np
 
+import nipype
 from traits.api import (HasTraits, Str, Bool, Float, Int,
-                        Tuple, List, Enum, Either)
-from moss import Bunch  # TODO get from nipype
+                        Tuple, List, Dict, Enum, Either)
 
 from .workflows.template import define_template_workflow
 from .workflows.preproc import define_preproc_workflow
@@ -78,11 +78,18 @@ class ProjectInfo(HasTraits):
         The phase encoding direction used in the functional acquisition.
         """),
     )
+    scan_info = Dict(
+        Str, Dict(Str, Dict(Str, List(Str))),
+        desc=dedent("""
+        Information about scanning sessions, populted by reading the
+        ``scan_info.yaml`` file.
+        """),
+    )
 
 
 class ExperimentInfo(HasTraits):
 
-    name = Str(
+    experiment_name = Str(
         desc="The name of the experiment."
     )
     tr = Float(
@@ -96,6 +103,13 @@ class ExperimentInfo(HasTraits):
         The number of frames to remove from the beginning of each time series
         during preprocessing.
         """),
+    )
+
+
+class ModelInfo(ExperimentInfo):
+
+    model_name = Str(
+        desc="The name of the model."
     )
     smooth_fwhm = Either(
         Float(2), None,
@@ -132,187 +146,87 @@ class ExperimentInfo(HasTraits):
         """),
     )
     # TODO HRF model and params
-
-
-class ModelInfo(ExperimentInfo):
-
-    name = Str(
-        desc="The name of the model."
-    )
+    # TODO model confounds and artifact-related params
     contrasts = List(
         Tuple(Str, List(Str), List(Float)),
         desc=dedent("""
         Definitions for model parameter contrasts. Each item in the list should
         be a tuple with the fields: (1) the name of the contrast, (2) the names
-        of the parameters included in the contrast, and (3) the weights to apply
-        to the parameters.
+        of the parameters included in the contrast, and (3) the weights to
+        apply to the parameters.
         """),
     )
 
 
-def gather_project_info(lyman_dir=None):
-    """Import project information based on environment settings."""
+class LymanInfo(ProjectInfo, ModelInfo):
+
+    pass
+
+
+def load_info_from_module(module_name, lyman_dir):
+    """Load lyman information from a Python module."""
+    module_file_name = op.join(lyman_dir, module_name + ".py")
+    module_sys_name = "lyman_" + module_name
+
+    # Load the module from memory or disk
+    try:
+        module = sys.modules[module_sys_name]
+    except KeyError:
+        module = imp.load_source(module_sys_name, module_file_name)
+
+    # Parse the "normal" variables from the info module
+    module_vars = {k: v
+                   for k, v in vars(module).items()
+                   if not re.match("__.+__", k)}
+
+    return module_vars
+
+
+def check_extra_vars(module_vars, spec):
+    """Raise when unexpected information is defined to avoid errors."""
+    kind = spec.__name__.lower().strip("info")
+    extra_vars = set(module_vars) - set(spec.trait_names())
+    if extra_vars:
+        msg = ("The following variables were unexpectedly present in the "
+               "{} information module: {}".format(kind, extra_vars))
+        raise RuntimeError(msg)
+
+
+def lyman_info(experiment=None, model=None, lyman_dir=None):
+    """Load information from various modules."""
     if lyman_dir is None:
         lyman_dir = os.environ["LYMAN_DIR"]
-    proj_file = op.join(lyman_dir, "project.py")
-    try:
-        project = sys.modules["project"]
-    except KeyError:
-        project = imp.load_source("project", proj_file)
 
-    project_dict = dict()
-    for dir in ["data", "analysis", "cache"]:
-        path = op.abspath(op.join(lyman_dir, getattr(project, dir + "_dir")))
-        project_dict[dir + "_dir"] = path
+    # Load project-level information
+    project_info = load_info_from_module("project", lyman_dir)
+    check_extra_vars(project_info, ProjectInfo)
 
-    for scan in ["fm", "ts", "sb"]:
-        project_dict[scan + "_template"] = getattr(project, scan + "_template")
+    # Load scan information
+    # TODO load from yaml file
 
-    scan_fname = op.join(lyman_dir, "scan_info.yaml")
-    with open(scan_fname) as fid:
-        scan_info = yaml.load(fid)
-    project_dict["scan_info"] = scan_info
+    # Load the experiment-level information
+    if experiment is None:
+        experiment_info = {}
+    else:
+        experiment_info = load_info_from_module(experiment, lyman_dir)
+        experiment_info["experiment_name"] = experiment
+        check_extra_vars(experiment_info, ExperimentInfo)
 
-    project_dict["phase_encoding"] = getattr(project, "phase_encoding")
+    # Load the model-level information
+    if model is None:
+        model_info = {}
+    else:
+        model_info = load_info_from_module(experiment + "-" + model, lyman_dir)
+        model_info["model_name"] = model
+        check_extra_vars(model_info, ModelInfo)
 
-    return Bunch(project_dict)
+    # Set the output traits in descending order of granularity
+    info = (LymanInfo()
+            .trait_set(project_info)
+            .trait_set(experiment_info)
+            .trait_set(model_info))
 
-
-def gather_experiment_info(exp_name=None, altmodel=None, args=None):
-    """Import an experiment module and add some formatted information."""
-    lyman_dir = os.environ["LYMAN_DIR"]
-
-    # Allow easy use of default experiment
-    if exp_name is None:
-        project = gather_project_info()
-        exp_name = project["default_exp"]
-
-    # Import the base experiment
-    try:
-        exp = sys.modules[exp_name]
-    except KeyError:
-        exp_file = op.join(lyman_dir, exp_name + ".py")
-        exp = imp.load_source(exp_name, exp_file)
-
-    exp_dict = default_experiment_parameters()
-
-    def keep(k):
-        return not re.match("__.*__", k)
-
-    exp_dict.update({k: v for k, v in exp.__dict__.items() if keep(k)})
-
-    # Possibly import the alternate model details
-    if altmodel is not None:
-        try:
-            alt = sys.modules[altmodel]
-        except KeyError:
-            alt_file = op.join(lyman_dir, "%s-%s.py" % (exp_name, altmodel))
-            alt = imp.load_source(altmodel, alt_file)
-
-        alt_dict = {k: v for k, v in alt.__dict__.items() if keep(k)}
-
-        # Update the base information with the altmodel info
-        exp_dict.update(alt_dict)
-
-    # Save the __doc__ attribute to the dict
-    exp_dict["comments"] = "" if exp.__doc__ is None else exp.__doc__
-    if altmodel is not None:
-        exp_dict["comments"] += "\n"
-        exp_dict["comments"] += "" if alt.__doc__ is None else alt.__doc__
-
-    # Check if it looks like this is a partial FOV acquisition
-    exp_dict["partial_brain"] = bool(exp_dict.get("whole_brain_template"))
-
-    # Temporal resolution. Mandatory.
-    exp_dict["TR"] = float(exp_dict["TR"])
-
-    # Set up the default contrasts
-    if exp_dict["condition_names"] is not None:
-        cs = [(name, [name], [1]) for name in exp_dict["condition_names"]]
-        exp_dict["contrasts"] = cs + exp_dict["contrasts"]
-
-    # Build contrasts list if neccesary
-    exp_dict["contrast_names"] = [c[0] for c in exp_dict["contrasts"]]
-
-    # Add command line arguments for reproducibility
-    if args is not None:
-        exp_dict["command_line"] = vars(args)
-
-    exp_dict["name"] = exp_name
-
-    return Bunch(exp_dict)
-
-
-def gather_model_info(experiment, model):
-
-    lyman_dir = os.environ["LYMAN_DIR"]
-
-    model_file = op.join(lyman_dir, "{}-{}.py".format(experiment, model))
-    if not op.exists(model_file):
-        model_file = op.join(lyman_dir, "{}.py".format(model))
-
-    module_name = "lyman_model_{}".format(model)
-    info = imp.load_source(module_name, model_file)
-
-    # TODO hacked to get going
-    fields = ["smooth_fwhm", "surface_smoothing", "hpf_cutoff",
-              "interpolate_noise", "contrasts",
-              "save_residuals"]
-    info_dict = {k: getattr(info, k) for k in fields}
-    info_dict["name"] = model
-    return Bunch(info_dict)
-
-
-def default_experiment_parameters():
-    """Return default values for experiments."""
-    exp = dict(
-
-        source_template="",
-        whole_brain_template="",
-        fieldmap_template="",
-        n_runs=0,
-
-        TR=2,
-        frames_to_toss=0,
-        fieldmap_pe=("y", "y-"),
-        temporal_interp=False,
-        interleaved=True,
-        coreg_init="fsl",
-        slice_order="up",
-        intensity_threshold=4.5,
-        motion_threshold=1,
-        spike_threshold=None,
-        wm_components=6,
-        smooth_fwhm=6,
-        hpf_cutoff=128,
-
-        design_name=None,
-        condition_names=None,
-        regressor_file=None,
-        regressor_names=None,
-        confound_sources=["motion"],
-        remove_artifacts=True,
-        hrf_model="GammaDifferenceHRF",
-        temporal_deriv=False,
-        confound_pca=False,
-        hrf_params={},
-        contrasts=[],
-        memory_request=5,
-
-        flame_mode="flame1",
-        cluster_zthresh=2.3,
-        grf_pthresh=0.05,
-        peak_distance=30,
-        surf_name="inflated",
-        surf_smooth=5,
-        sampling_units="frac",
-        sampling_method="average",
-        sampling_range=(0, 1, .1),
-        surf_corr_sign="pos",
-
-        )
-
-    return exp
+    return info
 
 
 def determine_subjects(subject_arg=None):
@@ -332,36 +246,14 @@ def determine_subjects(subject_arg=None):
     return subjects
 
 
-def determine_engine(args):
-    """Read command line args and return Workflow.run() args."""
-    plugin_dict = dict(linear="Linear", multiproc="MultiProc",
-                       ipython="IPython", torque="PBS", sge="SGE",
-                       slurm="SLURM")
+def execute(wf, args, info):
+    """Execute a workflow from command line arguments."""
 
-    plugin = plugin_dict[args.plugin]
-
-    plugin_args = dict()
-
-    if plugin == "MultiProc":
-        plugin_args['n_procs'] = args.nprocs
-
-    elif plugin in ["SGE", "PBS"]:
-
-        qsub_args = "-V -e /dev/null -o /dev/null "
-
-        if args.queue is not None:
-            qsub_args += "-q %s " % args.queue
-
-        plugin_args["qsub_args"] = qsub_args
-
-    return plugin, plugin_args
-
-
-def run_workflow(wf, args, proj_info):
-    """Run a workflow, if we asked to do so on the command line."""
-
-    crash_dir = op.join(proj_info.cache_dir, "crashdumps")
+    crash_dir = op.join(info.cache_dir, "crashdumps")
     wf.config["execution"]["crashdump_dir"] = crash_dir
+
+    if args.debug:
+        nipype.config.enable_debug_mode()
 
     cache_dir = op.join(wf.base_dir, wf.name)
     if args.clear_cache:
@@ -369,57 +261,17 @@ def run_workflow(wf, args, proj_info):
             shutil.rmtree(cache_dir)
 
     if args.graph:
-        wf.write_graph(args.stage, "orig", "svg")
+        if args.graph is True:
+            fname = args.stage
+        else:
+            fname = args.graph
+        wf.write_graph(fname, "orig", "svg")
+
     else:
-        plugin, plugin_args = determine_engine(args)
-        if args.run:
+        if args.execute:
+            plugin = "MultiProc"
+            plugin_args = dict(n_procs=args.n_procs)
             wf.run(plugin, plugin_args)
 
-    # TODO remove cache directory again here
-
-
-def execute_workflow(args):
-
-    # TODO maybe this code should just be in the lyman script
-
-    stage = args.stage
-
-    proj_info = gather_project_info()
-
-    subjects = determine_subjects(args.subject)
-    sessions = getattr(args, "session", None)
-    qc = args.qc
-
-    if len(subjects) > 1 and sessions is not None:
-        raise RuntimeError("Can only specify session for single subject")
-
-    # TODO Oof this logic needs to be reworked
-    if stage == "template":
-        wf = define_template_workflow(proj_info, subjects, qc)
-        run_workflow(wf, args, proj_info)
-
-    else:
-        exp_info = gather_experiment_info(args.experiment)
-
-        if stage == "preproc":
-            wf = define_preproc_workflow(proj_info, exp_info,
-                                         subjects, sessions, qc)
-
-            run_workflow(wf, args, proj_info)
-
-        else:
-            model_info = gather_model_info(args.experiment, args.model)
-
-            if stage in ["model", "model-fit"]:
-                wf = define_model_fit_workflow(proj_info,
-                                               exp_info, model_info,
-                                               subjects, sessions, qc)
-
-                run_workflow(wf, args, proj_info)
-
-            if stage in ["model", "model-res"]:
-                wf = define_model_results_workflow(proj_info,
-                                                   exp_info, model_info,
-                                                   subjects, qc)
-
-                run_workflow(wf, args, proj_info)
+    if not args.debug:
+        shutil.rmtree(cache_dir)

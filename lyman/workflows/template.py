@@ -13,7 +13,7 @@ from ..utils import LymanInterface
 from ..visualizations import Mosaic
 
 
-def define_template_workflow(proj_info, subjects, qc=True):
+def define_template_workflow(info, subjects, qc=True):
 
     # --- Workflow parameterization
 
@@ -22,7 +22,7 @@ def define_template_workflow(proj_info, subjects, qc=True):
                           iterables=("subject", subjects))
 
     # Data input
-    template_input = Node(TemplateInput(data_dir=proj_info.data_dir),
+    template_input = Node(TemplateInput(data_dir=info.data_dir),
                           "template_input")
 
     # --- Definition of functional template space
@@ -79,13 +79,13 @@ def define_template_workflow(proj_info, subjects, qc=True):
 
     # --- Workflow ouptut
 
-    template_output = Node(DataSink(base_directory=proj_info.proc_dir,
+    template_output = Node(DataSink(base_directory=info.proc_dir,
                                     parameterization=False),
                            "template_output")
 
     # === Assemble pipeline
 
-    workflow = Workflow(name="template", base_dir=proj_info.cache_dir)
+    workflow = Workflow(name="template", base_dir=info.cache_dir)
 
     processing_edges = [
 

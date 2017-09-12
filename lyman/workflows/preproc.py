@@ -17,16 +17,12 @@ from ..utils import LymanInterface
 from ..visualizations import Mosaic, CarpetPlot
 
 
-def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
-
-    # proj_info will be a bunch or other object with data_dir, etc. fields
-
-    # exp_info is a bunch or dict or other obj with experiment parameters
+def define_preproc_workflow(info, subjects, sessions, qc=True):
 
     # --- Workflow parameterization and data input
 
-    scan_info = proj_info.scan_info
-    experiment = exp_info.name
+    scan_info = info.scan_info
+    experiment = info.experiment_name
 
     iterables = generate_iterables(scan_info, experiment, subjects, sessions)
     subject_iterables, session_iterables, run_iterables = iterables
@@ -47,18 +43,18 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
                       itersource=("session_source", "session"),
                       iterables=("run", run_iterables))
 
-    session_input = Node(SessionInput(data_dir=proj_info.data_dir,
-                                      proc_dir=proj_info.proc_dir,
-                                      fm_template=proj_info.fm_template,
-                                      phase_encoding=proj_info.phase_encoding),
+    session_input = Node(SessionInput(data_dir=info.data_dir,
+                                      proc_dir=info.proc_dir,
+                                      fm_template=info.fm_template,
+                                      phase_encoding=info.phase_encoding),
                          "session_input")
 
     run_input = Node(RunInput(experiment=experiment,
-                              data_dir=proj_info.data_dir,
-                              proc_dir=proj_info.proc_dir,
-                              sb_template=proj_info.sb_template,
-                              ts_template=proj_info.ts_template,
-                              crop_frames=exp_info.crop_frames),
+                              data_dir=info.data_dir,
+                              proc_dir=info.proc_dir,
+                              sb_template=info.sb_template,
+                              ts_template=info.ts_template,
+                              crop_frames=info.crop_frames),
                      name="run_input")
 
     # --- Warpfield estimation using topup
@@ -82,7 +78,7 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
                                  out_reg_file="sess2anat.dat"),
                    "fm2anat")
 
-    fm2anat_qc = Node(AnatRegReport(data_dir=proj_info.data_dir), "fm2anat_qc")
+    fm2anat_qc = Node(AnatRegReport(data_dir=info.data_dir), "fm2anat_qc")
 
     # --- Registration of SBRef to SE-EPI (with distortions)
 
@@ -133,17 +129,17 @@ def define_preproc_workflow(proj_info, exp_info, subjects, sessions, qc=True):
 
     # --- Workflow ouptut
 
-    template_output = Node(DataSink(base_directory=proj_info.proc_dir,
+    template_output = Node(DataSink(base_directory=info.proc_dir,
                                     parameterization=False),
                            "template_output")
 
-    timeseries_output = Node(DataSink(base_directory=proj_info.proc_dir,
+    timeseries_output = Node(DataSink(base_directory=info.proc_dir,
                                       parameterization=False),
                              "timeseries_output")
 
     # === Assemble pipeline
 
-    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    cache_base = op.join(info.cache_dir, info.experiment_name)
     workflow = Workflow(name="preproc", base_dir=cache_base)
 
     # Connect processing nodes
