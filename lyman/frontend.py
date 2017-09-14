@@ -14,12 +14,6 @@ import nipype
 from traits.api import (HasTraits, Str, Bool, Float, Int,
                         Tuple, List, Dict, Enum, Either)
 
-from .workflows.template import define_template_workflow
-from .workflows.preproc import define_preproc_workflow
-from .workflows.model import (define_model_fit_workflow,
-                              define_model_results_workflow)
-
-
 __all__ = []
 
 
@@ -204,21 +198,16 @@ def lyman_info(experiment=None, model=None, lyman_dir=None):
     if lyman_dir is None:
         lyman_dir = os.environ["LYMAN_DIR"]
 
-    # Load project-level information
+    # --- Load project-level information
     project_info = load_info_from_module("project", lyman_dir)
     check_extra_vars(project_info, ProjectInfo)
-
-    # Ensure that directories are specifed as real absolute paths
-    for directory in ["data", "proc", "cache"]:
-        key = directory + "_dir"
-        project_info[key] = op.abspath(op.join(lyman_dir, project_info[key]))
 
     # Load scan information
     scan_fname = op.join(lyman_dir, "scans.yaml")
     with open(scan_fname) as fid:
         project_info["scan_info"] = yaml.load(fid)
 
-    # Load the experiment-level information
+    # --- Load the experiment-level information
     if experiment is None:
         experiment_info = {}
     else:
@@ -226,7 +215,7 @@ def lyman_info(experiment=None, model=None, lyman_dir=None):
         experiment_info["experiment_name"] = experiment
         check_extra_vars(experiment_info, ExperimentInfo)
 
-    # Load the model-level information
+    # --- Load the model-level information
     if model is None:
         model_info = {}
     else:
@@ -234,18 +223,27 @@ def lyman_info(experiment=None, model=None, lyman_dir=None):
         model_info["model_name"] = model
         check_extra_vars(model_info, ModelInfo)
 
-    # Set the output traits in descending order of granularity
+    # TODO set default single parameter contrasts?
+
+    # --- Set the output traits, respecting inhereitance
     info = (LymanInfo()
             .trait_set(**project_info)
             .trait_set(**experiment_info)
             .trait_set(**model_info))
+
+    # Ensure that directories are specifed as real absolute paths
+    directories = ["data_dir", "proc_dir", "cache_dir"]
+    orig = info.trait_get(directories)
+    full = {k: op.abspath(op.join(lyman_dir, v)) for k, v in orig.items()}
+    info.trait_set(**full)
 
     return info
 
 
 def determine_subjects(subject_arg=None):
     """Intelligently find a list of subjects in a variety of ways."""
-    # TODO best name for this?
+    # TODO best name for this, and should it handle sessions too?
+    # TODO do we need a duplicate sessions text file or just get from scans
     if subject_arg is None:
         subject_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
         subjects = np.loadtxt(subject_file, str).tolist()
