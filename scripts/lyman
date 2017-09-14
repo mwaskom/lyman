@@ -37,10 +37,11 @@ def add_subparser(subparsers, name, help, parameterization):
                         help="size of multiprocessing pool")
     parser.add_argument("--graph",
                         const=True,
+                        nargs="?",
                         metavar="<fname>",
                         help="create graph image instead of executing")
     parser.add_argument("--debug",
-                        action="store_strue",
+                        action="store_true",
                         help="enable nipype debug mode")
     parser.add_argument("--clear-cache",
                         action="store_true",
@@ -56,10 +57,10 @@ def add_subparser(subparsers, name, help, parameterization):
 if __name__ == "__main__":
 
     from lyman.frontend import (lyman_info, determine_subjects, execute)
-    from .workflows.template import define_template_workflow
-    from .workflows.preproc import define_preproc_workflow
-    from .workflows.model import (define_model_fit_workflow,
-                                  define_model_results_workflow)
+    from lyman.workflows.template import define_template_workflow
+    from lyman.workflows.preproc import define_preproc_workflow
+    from lyman.workflows.model import (define_model_fit_workflow,
+                                       define_model_results_workflow)
 
     parser = argparse.ArgumentParser(prog="lyman")
     subparsers = parser.add_subparsers(help="processing stage",
@@ -107,9 +108,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     stage = args.stage
 
-    info = lyman_info(args.experiment, args.model)
+    experiment = getattr(args, "experiment", None)
+    model = getattr(args, "model", None)
+    subject = getattr(args, "subject", None)
+    session = getattr(args, "session", None)
+
+    info = lyman_info(experiment, model)
     subjects = determine_subjects(args.subject)
-    sessions = args.session
+    sessions = session
     qc = args.qc
 
     # TODO best place for this? (Maybe move into determine_subjects?)

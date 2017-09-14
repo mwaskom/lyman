@@ -191,7 +191,7 @@ def load_info_from_module(module_name, lyman_dir):
 def check_extra_vars(module_vars, spec):
     """Raise when unexpected information is defined to avoid errors."""
     kind = spec.__name__.lower().strip("info")
-    extra_vars = set(module_vars) - set(spec.trait_names())
+    extra_vars = set(module_vars) - set(spec().trait_names())
     if extra_vars:
         msg = ("The following variables were unexpectedly present in the "
                "{} information module: {}".format(kind, extra_vars))
@@ -207,6 +207,11 @@ def lyman_info(experiment=None, model=None, lyman_dir=None):
     # Load project-level information
     project_info = load_info_from_module("project", lyman_dir)
     check_extra_vars(project_info, ProjectInfo)
+
+    # Ensure that directories are specifed as real absolute paths
+    for directory in ["data", "proc", "cache"]:
+        key = directory + "_dir"
+        project_info[key] = op.abspath(op.join(lyman_dir, project_info[key]))
 
     # Load scan information
     # TODO load from yaml file
@@ -229,9 +234,9 @@ def lyman_info(experiment=None, model=None, lyman_dir=None):
 
     # Set the output traits in descending order of granularity
     info = (LymanInfo()
-            .trait_set(project_info)
-            .trait_set(experiment_info)
-            .trait_set(model_info))
+            .trait_set(**project_info)
+            .trait_set(**experiment_info)
+            .trait_set(**model_info))
 
     return info
 
