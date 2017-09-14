@@ -214,7 +214,9 @@ def lyman_info(experiment=None, model=None, lyman_dir=None):
         project_info[key] = op.abspath(op.join(lyman_dir, project_info[key]))
 
     # Load scan information
-    # TODO load from yaml file
+    scan_fname = op.join(lyman_dir, "scans.yaml")
+    with open(scan_fname) as fid:
+        project_info["scan_info"] = yaml.load(fid)
 
     # Load the experiment-level information
     if experiment is None:
