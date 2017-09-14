@@ -31,7 +31,7 @@ def define_template_workflow(info, subjects, qc=True):
 
     zoom_image = Node(fs.MRIConvert(resample_type="cubic",
                                     out_type="niigz",
-                                    vox_size=(2, 2, 2),  # TODO make proj param
+                                    vox_size=info.voxel_size,
                                     ),
                       "zoom_image")
 

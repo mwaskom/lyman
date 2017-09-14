@@ -72,6 +72,12 @@ class ProjectInfo(HasTraits):
         run of time series data.
         """),
     )
+    voxel_size = Tuple(
+        Float(2), Float(2), Float(2),
+        desc=dedent("""
+        The voxel size to use for the functional template.
+        """),
+    )
     phase_encoding = Enum(
         "pa", "ap",
         desc=dedent("""
