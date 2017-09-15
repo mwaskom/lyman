@@ -1,44 +1,12 @@
 import os
 from textwrap import dedent
-
-import pytest
-
+from nipype import Workflow, Node, Function
 from traits.api import TraitError
-
+import pytest
 from .. import frontend
 
 
 class TestFrontend(object):
-
-    def test_load_info_from_module(self, execdir):
-
-        lyman_dir = execdir.mkdir("lyman")
-
-        # Write a Python module to test import from disk
-        module_text = dedent("""
-        foo = "a"
-        bar = 3
-        buz = [1, 2, 3]
-        """)
-        module_fname = lyman_dir.join("test.py")
-        with open(module_fname, "w") as fid:
-            fid.write(module_text)
-
-        expected = dict(foo="a", bar=3, buz=[1, 2, 3])
-
-        module_vars = frontend.load_info_from_module("test", lyman_dir)
-        assert module_vars == expected
-
-        # Remove the file to test import from memory
-        os.remove(module_fname)
-        module_vars = frontend.load_info_from_module("test", lyman_dir)
-        assert module_vars == expected
-
-    def test_check_extra_vars(self):
-
-        with pytest.raises(RuntimeError):
-            module_vars = {"not_a_valid_trait": True}
-            frontend.check_extra_vars(module_vars, frontend.ProjectInfo)
 
     @pytest.fixture
     def lyman_dir(self, execdir):
@@ -49,9 +17,12 @@ class TestFrontend(object):
         subj01:
           sess01:
             exp_alpha: [run01, run02]
-          ess01:
+          sess02:
             exp_alpha: [run01]
-            exp_beta: [run01, run01]
+            exp_beta: [run01, run02]
+        subj02:
+          sess01:
+            exp_beta: [run01, run03]
         """)
 
         project = dedent("""
@@ -95,6 +66,12 @@ class TestFrontend(object):
 
         info = frontend.lyman_info()
         assert info.data_dir == execdir.join("datums")
+        assert info.scan_info == {
+            "subj01": {"sess01": {"exp_alpha": ["run01", "run02"]},
+                       "sess02": {"exp_alpha": ["run01"],
+                                  "exp_beta": ["run01", "run02"]}},
+            "subj02": {"sess01": {"exp_beta": ["run01", "run03"]}},
+        }
 
         model_traits = frontend.ModelInfo().trait_get()
         assert info.trait_get(*model_traits.keys()) == model_traits
@@ -114,3 +91,83 @@ class TestFrontend(object):
 
         info = frontend.lyman_info(lyman_dir=str(lyman_dir_new))
         assert info.voxel_size == (2.5, 2.5, 2.5)
+
+    def test_execute(self, lyman_dir, execdir):
+
+        info = frontend.lyman_info(lyman_dir=lyman_dir)
+
+        def f(x):
+            return x ** 2
+        assert f(2) == 4
+
+        n1 = Node(Function("x", "y", f), "n1")
+        n2 = Node(Function("x", "y", f), "n2")
+
+        wf = Workflow("test", base_dir=info.cache_dir)
+        wf.connect(n1, "y", n2, "x")
+        wf.inputs.n1.x = 2
+
+        cache_dir = execdir.join("cache").join("test")
+
+        class args(object):
+            graph = False
+            n_procs = 1
+            debug = False
+            clear_cache = True
+            execute = True
+
+        frontend.execute(wf, args, info)
+        assert not cache_dir.exists()
+
+        args.debug = True
+        frontend.execute(wf, args, info)
+        assert cache_dir.exists()
+
+        args.debug = False
+        info.remove_cache = False
+        frontend.execute(wf, args, info)
+        assert cache_dir.exists()
+
+        args.execute = False
+        res = frontend.execute(wf, args, info)
+        assert res is None
+
+        fname = execdir.join("graph").join("workflow.dot")
+        args.graph = fname
+        res = frontend.execute(wf, args, info)
+        assert res == fname + ".svg"
+
+        args.graph = True
+        args.stage = "preproc"
+        res = frontend.execute(wf, args, info)
+        assert res == cache_dir.join("preproc.dot.svg")
+
+    def test_load_info_from_module(self, execdir):
+
+        lyman_dir = execdir.mkdir("lyman")
+
+        # Write a Python module to test import from disk
+        module_text = dedent("""
+        foo = "a"
+        bar = 3
+        buz = [1, 2, 3]
+        """)
+        module_fname = lyman_dir.join("test.py")
+        with open(module_fname, "w") as fid:
+            fid.write(module_text)
+
+        expected = dict(foo="a", bar=3, buz=[1, 2, 3])
+
+        module_vars = frontend.load_info_from_module("test", lyman_dir)
+        assert module_vars == expected
+
+        # Remove the file to test import from memory
+        os.remove(module_fname)
+        module_vars = frontend.load_info_from_module("test", lyman_dir)
+        assert module_vars == expected
+
+    def test_check_extra_vars(self):
+
+        with pytest.raises(RuntimeError):
+            module_vars = {"not_a_valid_trait": True}
+            frontend.check_extra_vars(module_vars, frontend.ProjectInfo)

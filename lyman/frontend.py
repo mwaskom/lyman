@@ -261,7 +261,6 @@ def determine_subjects(subject_arg=None):
 
 def execute(wf, args, info):
     """Execute a workflow from command line arguments."""
-
     crash_dir = op.join(info.cache_dir, "crashdumps")
     wf.config["execution"]["crashdump_dir"] = crash_dir
 
@@ -278,13 +277,17 @@ def execute(wf, args, info):
             fname = args.stage
         else:
             fname = args.graph
-        wf.write_graph(fname, "orig", "svg")
+        res = wf.write_graph(fname, "orig", "svg")
 
     else:
         if args.execute:
             plugin = "MultiProc"
             plugin_args = dict(n_procs=args.n_procs)
-            wf.run(plugin, plugin_args)
+            res = wf.run(plugin, plugin_args)
+        else:
+            res = None
 
-    if not args.debug:
+    if info.remove_cache and not args.debug:
         shutil.rmtree(cache_dir)
+
+    return res
