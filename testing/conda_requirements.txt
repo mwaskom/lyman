@@ -6,3 +6,5 @@ traits
 networkx
 pyyaml
 pytest
+pydotplus
+graphviz
