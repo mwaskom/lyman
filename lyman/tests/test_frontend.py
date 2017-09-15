@@ -12,6 +12,7 @@ class TestFrontend(object):
     def lyman_dir(self, execdir):
 
         lyman_dir = execdir.mkdir("lyman")
+        os.environ["LYMAN_DIR"] = str(lyman_dir)
 
         scans = dedent("""
         subj01:
@@ -64,8 +65,6 @@ class TestFrontend(object):
 
     def test_info(self, lyman_dir, execdir):
 
-        os.environ["LYMAN_DIR"] = str(lyman_dir)
-
         info = frontend.info()
         assert info.data_dir == execdir.join("datums")
         assert info.scan_info == {
@@ -95,6 +94,39 @@ class TestFrontend(object):
         assert info.voxel_size == (2.5, 2.5, 2.5)
 
         lyman_dir_new.move(execdir.join("lyman"))
+
+    def test_subjects(self, lyman_dir, execdir):
+
+        subjects = frontend.subjects()
+        assert subjects == ["subj01", "subj02"]
+
+        subjects = frontend.subjects("subj01")
+        assert subjects == ["subj01"]
+
+        subjects = frontend.subjects(["subj01"])
+        assert subjects == ["subj01"]
+
+        subjects = frontend.subjects(["subj01", "subj02"])
+        assert subjects == ["subj01", "subj02"]
+
+        subj_file = lyman_dir.join("subjects.txt")
+        with open(subj_file, "w") as fid:
+            fid.write("subj01")
+
+        subjects = frontend.subjects("subjects")
+        assert subjects == ["subj01"]
+
+        subjects = frontend.subjects(str(subj_file))
+        assert subjects == ["subj01"]
+
+        with pytest.raises(RuntimeError):
+            frontend.subjects(["subj01", "subj03"])
+
+        with pytest.raises(RuntimeError):
+            frontend.subjects(["subj01", "subj02"], ["sess01", "sess02"])
+
+        with pytest.raises(RuntimeError):
+            frontend.subjects(["subj02"], ["sess01", "sess02"])
 
     def test_execute(self, lyman_dir, execdir):
 

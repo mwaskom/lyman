@@ -14,7 +14,7 @@ import nipype
 from traits.api import (HasTraits, Str, Bool, Float, Int,
                         Tuple, List, Dict, Enum, Either)
 
-__all__ = []
+__all__ = ["info", "subjects", "execute"]
 
 
 class ProjectInfo(HasTraits):
@@ -182,6 +182,18 @@ def load_info_from_module(module_name, lyman_dir):
     return module_vars
 
 
+def load_scan_info(lyman_dir=None):
+    """Load information about subjects, sessions, and scans from a file."""
+    if lyman_dir is None:
+        lyman_dir = os.environ["LYMAN_DIR"]
+
+    scan_fname = op.join(lyman_dir, "scans.yaml")
+    with open(scan_fname) as fid:
+        info = yaml.load(fid)
+
+    return info
+
+
 def check_extra_vars(module_vars, spec):
     """Raise when unexpected information is defined to avoid errors."""
     kind = spec.__name__.lower().strip("info")
@@ -193,7 +205,9 @@ def check_extra_vars(module_vars, spec):
 
 
 def info(experiment=None, model=None, lyman_dir=None):
-    """Load information from various modules."""
+    """Load information from various modules.
+    """
+    # TODO docstring
     if lyman_dir is None:
         lyman_dir = os.environ["LYMAN_DIR"]
 
@@ -202,9 +216,7 @@ def info(experiment=None, model=None, lyman_dir=None):
     check_extra_vars(project_info, ProjectInfo)
 
     # Load scan information
-    scan_fname = op.join(lyman_dir, "scans.yaml")
-    with open(scan_fname) as fid:
-        project_info["scan_info"] = yaml.load(fid)
+    project_info["scan_info"] = load_scan_info(lyman_dir)
 
     # --- Load the experiment-level information
     if experiment is None:
@@ -239,21 +251,50 @@ def info(experiment=None, model=None, lyman_dir=None):
     return info
 
 
-def subjects(subject_arg=None, session_arg=None, lyman_dir=None):
-    """Intelligently find a list of subjects in a variety of ways."""
-    # TODO do we need a duplicate sessions text file or just get from scans
+def subjects(subject_arg=None, sessions=None, lyman_dir=None):
+    """Find a list of subjects in a variety of ways
+    """
+    # TODO docstring
+    scan_info = load_scan_info(lyman_dir)
+
+    if lyman_dir is None:
+        lyman_dir = os.environ["LYMAN_DIR"]
+
+    # -- Parse the input
+
+    string_arg = isinstance(subject_arg, str)
+
     if subject_arg is None:
-        subject_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")
-        subjects = np.loadtxt(subject_file, str).tolist()
-    elif op.isfile(subject_arg[0]):
-        subjects = np.loadtxt(subject_arg[0], str).tolist()
+        subjects = list(scan_info)
+    elif string_arg:
+        subject_path = op.join(lyman_dir, subject_arg + ".txt")
+        if op.isfile(subject_path):
+            subjects = np.loadtxt(subject_path, str, ndmin=1).tolist()
+        elif op.isfile(subject_arg):
+            subjects = np.loadtxt(subject_arg, str, ndmin=1).tolist()
+        else:
+            subjects = [subject_arg]
     else:
+        subjects = subject_arg
+
+    # -- Check the input
+
+    unexepected_subjects = set(subjects) - set(scan_info)
+    if unexepected_subjects:
+        msg = "Specified subjects were not in scans.yaml: {}"
+        raise RuntimeError(unexepected_subjects)
+
+    if sessions is not None:
         try:
-            subject_file = op.join(os.environ["LYMAN_DIR"],
-                                   subject_arg[0] + ".txt")
-            subjects = np.loadtxt(subject_file, str).tolist()
-        except IOError:
-            subjects = subject_arg
+            subject, = subjects
+        except ValueError:
+            raise RuntimeError("Can only specify session for single subject")
+
+        unexpected_sessions = set(sessions) - set(scan_info[subject])
+        if unexpected_sessions:
+            msg = "Specified sessions were not in scans.yaml for {}: {}"
+            raise RuntimeError(msg.format(subject, unexpected_sessions))
+
     return subjects
 
 

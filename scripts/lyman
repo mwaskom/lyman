@@ -106,21 +106,17 @@ if __name__ == "__main__":
     # ---
 
     args = parser.parse_args()
+
     stage = args.stage
+    qc = args.qc
 
     experiment = getattr(args, "experiment", None)
     model = getattr(args, "model", None)
-    subject = getattr(args, "subject", None)
-    session = getattr(args, "session", None)
+    subjects = getattr(args, "subject", None)
+    sessions = getattr(args, "session", None)
 
     info = lyman.info(experiment, model)
-    subjects = lyman.subjects(args.subject)
-    sessions = session
-    qc = args.qc
-
-    # TODO best place for this? (Maybe move into determine_subjects?)
-    if len(subjects) > 1 and sessions is not None:
-        raise RuntimeError("Can only specify session for single subject")
+    subjects = lyman.subjects(subjects, sessions)
 
     if stage == "template":
         wf = define_template_workflow(info, subjects, qc)
