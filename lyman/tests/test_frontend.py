@@ -58,7 +58,9 @@ class TestFrontend(object):
         with open(lyman_dir.join("exp_alpha-model_b.py"), "w") as fid:
             fid.write(model_bad)
 
-        return lyman_dir
+        yield lyman_dir
+
+        lyman_dir.remove()
 
     def test_info(self, lyman_dir, execdir):
 
@@ -91,6 +93,8 @@ class TestFrontend(object):
 
         info = frontend.info(lyman_dir=str(lyman_dir_new))
         assert info.voxel_size == (2.5, 2.5, 2.5)
+
+        lyman_dir_new.move(execdir.join("lyman"))
 
     def test_execute(self, lyman_dir, execdir):
 

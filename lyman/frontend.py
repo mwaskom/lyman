@@ -239,7 +239,7 @@ def info(experiment=None, model=None, lyman_dir=None):
     return info
 
 
-def subjects(subject_arg=None):
+def subjects(subject_arg=None, session_arg=None, lyman_dir=None):
     """Intelligently find a list of subjects in a variety of ways."""
     # TODO do we need a duplicate sessions text file or just get from scans
     if subject_arg is None:
