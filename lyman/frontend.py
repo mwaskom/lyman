@@ -192,9 +192,8 @@ def check_extra_vars(module_vars, spec):
         raise RuntimeError(msg)
 
 
-def lyman_info(experiment=None, model=None, lyman_dir=None):
+def info(experiment=None, model=None, lyman_dir=None):
     """Load information from various modules."""
-    # TODO best name for this?
     if lyman_dir is None:
         lyman_dir = os.environ["LYMAN_DIR"]
 
@@ -240,9 +239,8 @@ def lyman_info(experiment=None, model=None, lyman_dir=None):
     return info
 
 
-def determine_subjects(subject_arg=None):
+def subjects(subject_arg=None):
     """Intelligently find a list of subjects in a variety of ways."""
-    # TODO best name for this, and should it handle sessions too?
     # TODO do we need a duplicate sessions text file or just get from scans
     if subject_arg is None:
         subject_file = op.join(os.environ["LYMAN_DIR"], "subjects.txt")

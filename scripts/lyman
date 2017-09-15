@@ -56,7 +56,7 @@ def add_subparser(subparsers, name, help, parameterization):
 
 if __name__ == "__main__":
 
-    from lyman.frontend import (lyman_info, determine_subjects, execute)
+    import lyman
     from lyman.workflows.template import define_template_workflow
     from lyman.workflows.preproc import define_preproc_workflow
     from lyman.workflows.model import (define_model_fit_workflow,
@@ -113,8 +113,8 @@ if __name__ == "__main__":
     subject = getattr(args, "subject", None)
     session = getattr(args, "session", None)
 
-    info = lyman_info(experiment, model)
-    subjects = determine_subjects(args.subject)
+    info = lyman.info(experiment, model)
+    subjects = lyman.subjects(args.subject)
     sessions = session
     qc = args.qc
 
@@ -124,16 +124,16 @@ if __name__ == "__main__":
 
     if stage == "template":
         wf = define_template_workflow(info, subjects, qc)
-        execute(wf, args, info)
+        lyman.execute(wf, args, info)
 
     if stage == "preproc":
         wf = define_preproc_workflow(info, subjects, sessions, qc)
-        execute(wf, args, info)
+        lyman.execute(wf, args, info)
 
     if stage in ["model", "model-fit"]:
         wf = define_model_fit_workflow(info, subjects, sessions, qc)
-        execute(wf, args, info)
+        lyman.execute(wf, args, info)
 
     if stage in ["model", "model-res"]:
         wf = define_model_results_workflow(info, subjects, qc)
-        execute(wf, args, info)
+        lyman.execute(wf, args, info)

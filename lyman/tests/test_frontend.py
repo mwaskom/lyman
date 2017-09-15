@@ -60,11 +60,11 @@ class TestFrontend(object):
 
         return lyman_dir
 
-    def test_lyman_info(self, lyman_dir, execdir):
+    def test_info(self, lyman_dir, execdir):
 
         os.environ["LYMAN_DIR"] = str(lyman_dir)
 
-        info = frontend.lyman_info()
+        info = frontend.info()
         assert info.data_dir == execdir.join("datums")
         assert info.scan_info == {
             "subj01": {"sess01": {"exp_alpha": ["run01", "run02"]},
@@ -76,25 +76,25 @@ class TestFrontend(object):
         model_traits = frontend.ModelInfo().trait_get()
         assert info.trait_get(*model_traits.keys()) == model_traits
 
-        info = frontend.lyman_info("exp_alpha")
+        info = frontend.info("exp_alpha")
         assert info.tr == .72
 
-        info = frontend.lyman_info("exp_alpha", "model_a")
+        info = frontend.info("exp_alpha", "model_a")
         assert info.tr == 1.5
         assert info.contrasts == [("a-b", ["a", "b"], [1, -1])]
 
         with pytest.raises(TraitError):
-            frontend.lyman_info("exp_alpha", "model_b")
+            frontend.info("exp_alpha", "model_b")
 
         lyman_dir_new = execdir.join("lyman2")
         lyman_dir.move(lyman_dir_new)
 
-        info = frontend.lyman_info(lyman_dir=str(lyman_dir_new))
+        info = frontend.info(lyman_dir=str(lyman_dir_new))
         assert info.voxel_size == (2.5, 2.5, 2.5)
 
     def test_execute(self, lyman_dir, execdir):
 
-        info = frontend.lyman_info(lyman_dir=lyman_dir)
+        info = frontend.info(lyman_dir=lyman_dir)
 
         def f(x):
             return x ** 2
