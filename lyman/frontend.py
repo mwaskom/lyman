@@ -147,6 +147,7 @@ class ModelInfo(ExperimentInfo):
     )
     # TODO HRF model and params
     # TODO model confounds and artifact-related params
+    # TODO parameter names to filter the design and generate default contrasts?
     contrasts = List(
         Tuple(Str, List(Str), List(Float)),
         desc=dedent("""
@@ -164,7 +165,7 @@ class LymanInfo(ProjectInfo, ModelInfo):
 
 
 def load_info_from_module(module_name, lyman_dir):
-    """Load lyman information from a Python module."""
+    """Load lyman information from a Python module as specified by name."""
     module_file_name = op.join(lyman_dir, module_name + ".py")
     module_sys_name = "lyman_" + module_name
 
@@ -183,7 +184,7 @@ def load_info_from_module(module_name, lyman_dir):
 
 
 def load_scan_info(lyman_dir=None):
-    """Load information about subjects, sessions, and scans from a file."""
+    """Load information about subjects, sessions, and runs from scans.yaml."""
     if lyman_dir is None:
         lyman_dir = os.environ["LYMAN_DIR"]
 
@@ -205,9 +206,31 @@ def check_extra_vars(module_vars, spec):
 
 
 def info(experiment=None, model=None, lyman_dir=None):
-    """Load information from various modules.
+    """Load information from various files to control analyses.
+
+    The default behavior (when called with no arguments) is to load project
+    level information. Additional information can be loaded by specifying an
+    experiment or an experiment and a model.
+
+    Parameters
+    ----------
+    experiment : string
+        Name of the experiment to load information for.  Will include
+        information from the file <lyman_dir>/<experiment>.py.
+    model : string
+        Name of the model to load information for. Requires having also
+        specified an experiment. Will include information from the file
+        <lyman_dir>/<experiment>-<model>.py.
+    lyman_dir : string
+        Path to the directory where files with information are stored;
+        otherwise read from the $LYMAN_DIR environment variable.
+
+    Returns
+    -------
+    info : LymanInfo
+        This object has traits with various analysis-related parameters.
+
     """
-    # TODO docstring
     if lyman_dir is None:
         lyman_dir = os.environ["LYMAN_DIR"]
 
@@ -230,19 +253,21 @@ def info(experiment=None, model=None, lyman_dir=None):
     if model is None:
         model_info = {}
     else:
+        if experiment is None:
+            raise RuntimeError("Loading a model requires an experiment")
         model_info = load_info_from_module(experiment + "-" + model, lyman_dir)
         model_info["model_name"] = model
         check_extra_vars(model_info, ModelInfo)
 
     # TODO set default single parameter contrasts?
 
-    # --- Set the output traits, respecting inhereitance
+    # --- Set the output traits, respecting inheritance
     info = (LymanInfo()
             .trait_set(**project_info)
             .trait_set(**experiment_info)
             .trait_set(**model_info))
 
-    # Ensure that directories are specifed as real absolute paths
+    # Ensure that directories are specified as real absolute paths
     directories = ["data_dir", "proc_dir", "cache_dir"]
     orig = info.trait_get(directories)
     full = {k: op.abspath(op.join(lyman_dir, v)) for k, v in orig.items()}
@@ -252,15 +277,41 @@ def info(experiment=None, model=None, lyman_dir=None):
 
 
 def subjects(subject_arg=None, sessions=None, lyman_dir=None):
-    """Find a list of subjects in a variety of ways
+    """Find a list of subjects in a variety of ways.
+
+    Parameters
+    ----------
+    subject_arg : list or string
+        This argument can take several forms:
+           - None, in which case all subject ids in scans.yaml are used.
+           - A list of subject ids or single subject id which will be used.
+           - A single subject id, which will be used.
+           - A path to a text file with subject ids, or the name (without
+             extension) of a text file in the <lyman_dir>, or a list with a
+             single entry corresponding to one of the above two options.
+    sessions : list
+        A list of session ids. Only valid when there is a single subject
+        in the returned list. This parameter can be used to validate that
+        the requested sessions exist for the requested subject.
+    lyman_dir : string
+        Path to the directory where files with information are stored;
+        otherwise read from the $LYMAN_DIR environment variable.
+
+    Returns
+    -------
+    subjects : list of strings
+        A list of subject ids.
+
     """
-    # TODO docstring
     scan_info = load_scan_info(lyman_dir)
 
     if lyman_dir is None:
         lyman_dir = os.environ["LYMAN_DIR"]
 
     # -- Parse the input
+
+    if isinstance(subject_arg, list) and len(subject_arg) == 1:
+        subject_arg = subject_arg[0]
 
     string_arg = isinstance(subject_arg, str)
 
@@ -299,33 +350,66 @@ def subjects(subject_arg=None, sessions=None, lyman_dir=None):
 
 
 def execute(wf, args, info):
-    """Execute a workflow from command line arguments."""
+    """Main interface for (probably) executing a nipype workflow.
+
+    Depending on the command-line and module-based parameters, different things
+    might happen with the workflow object. See the code for details.
+
+    Parameters
+    ----------
+    wf : Workflow
+        Nipype workflow graph with processing steps.
+    args : argparse Namespace
+        Parsed arguments from lyman command-line interface.
+    info : LymanInfo
+        Analysis execution parameters from lyman info files.
+
+    Returns
+    -------
+    res : variable
+        The result of the execution, which can take several forms. See the
+        code to understand the relationship between input parameters and
+        output type.
+
+    """
+    # Set a location for the workflow to save debugging files on a crash
     crash_dir = op.join(info.cache_dir, "crashdumps")
     wf.config["execution"]["crashdump_dir"] = crash_dir
 
+    # Set various nipype config options if debugging
     if args.debug:
         nipype.config.enable_debug_mode()
 
+    # Locate the directory where intermediate processing outputs will be stored
+    # and optionally remove it to force a full clean re-run of the workflow.
     cache_dir = op.join(wf.base_dir, wf.name)
     if args.clear_cache:
         if op.exists(cache_dir):
             shutil.rmtree(cache_dir)
 
-    if args.graph:
+    # One option is to do nothing (allowing a check from the command-line that
+    # everything is specified properly),
+    if not args.execute:
+        res = None
+
+    # Another option is to generate an svg image of the workflow graph
+    elif args.graph:
         if args.graph is True:
             fname = args.stage
         else:
             fname = args.graph
         res = wf.write_graph(fname, "orig", "svg")
 
+    # Alternatively, submit the workflow to the nipype execution engine
     else:
-        if args.execute:
-            plugin = "MultiProc"
-            plugin_args = dict(n_procs=args.n_procs)
-            res = wf.run(plugin, plugin_args)
-        else:
-            res = None
 
+        # TODO expose other nipype plugins as a command-line parameter
+        plugin, plugin_args = "MultiProc", {"n_procs": args.n_procs}
+        res = wf.run(plugin, plugin_args)
+
+    # After successful completion of the workflow, optionally delete the
+    # intermediate files, which are not usually needed aside from debugging
+    # (persistent outputs go into the `info.proc_dir`).
     if info.remove_cache and not args.debug:
         shutil.rmtree(cache_dir)
 

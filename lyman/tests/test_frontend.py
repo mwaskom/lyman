@@ -87,6 +87,9 @@ class TestFrontend(object):
         with pytest.raises(TraitError):
             frontend.info("exp_alpha", "model_b")
 
+        with pytest.raises(RuntimeError):
+            frontend.info(model="model_b")
+
         lyman_dir_new = execdir.join("lyman2")
         lyman_dir.move(lyman_dir_new)
 
@@ -114,6 +117,9 @@ class TestFrontend(object):
             fid.write("subj01")
 
         subjects = frontend.subjects("subjects")
+        assert subjects == ["subj01"]
+
+        subjects = frontend.subjects(["subjects"])
         assert subjects == ["subj01"]
 
         subjects = frontend.subjects(str(subj_file))
@@ -168,6 +174,7 @@ class TestFrontend(object):
         res = frontend.execute(wf, args, info)
         assert res is None
 
+        args.execute = True
         fname = execdir.join("graph").join("workflow.dot")
         args.graph = fname
         res = frontend.execute(wf, args, info)
