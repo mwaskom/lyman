@@ -10,21 +10,19 @@ class TestTemplateWorkflow(object):
 
     def test_template_workflow_creation(self, lyman_info):
 
-        proj_info = lyman_info["proj_info"]
+        info = lyman_info["info"]
         subjects = lyman_info["subjects"]
 
-        wf = define_template_workflow(
-            proj_info, subjects
-        )
+        wf = define_template_workflow(info, subjects)
 
         # Check basic information about the workflow
         assert isinstance(wf, nipype.Workflow)
         assert wf.name == "template"
-        assert wf.base_dir == proj_info.cache_dir
+        assert wf.base_dir == info.cache_dir
 
         # Check root directory of output
         template_out = wf.get_node("template_output")
-        assert template_out.inputs.base_directory == proj_info.proc_dir
+        assert template_out.inputs.base_directory == info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "template_input",

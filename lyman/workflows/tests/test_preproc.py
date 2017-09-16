@@ -22,25 +22,22 @@ class TestPreprocWorkflow(object):
 
     def test_preproc_workflow_creation(self, lyman_info):
 
-        proj_info = lyman_info["proj_info"]
+        info = lyman_info["info"]
         subjects = lyman_info["subjects"]
         sessions = lyman_info["sessions"]
-        exp_info = lyman_info["exp_info"]
 
-        wf = preproc.define_preproc_workflow(
-            proj_info, exp_info, subjects, sessions,
-        )
+        wf = preproc.define_preproc_workflow(info, subjects, sessions)
 
         # Check basic information about the workflow
         assert isinstance(wf, nipype.Workflow)
         assert wf.name == "preproc"
-        assert wf.base_dir == op.join(proj_info.cache_dir, exp_info.name)
+        assert wf.base_dir == op.join(info.cache_dir, info.experiment_name)
 
         # Check root directory of output
         template_out = wf.get_node("template_output")
-        assert template_out.inputs.base_directory == proj_info.proc_dir
+        assert template_out.inputs.base_directory == info.proc_dir
         timeseries_out = wf.get_node("timeseries_output")
-        assert timeseries_out.inputs.base_directory == proj_info.proc_dir
+        assert timeseries_out.inputs.base_directory == info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "session_source", "run_source",
@@ -59,9 +56,8 @@ class TestPreprocWorkflow(object):
 
     def test_preproc_iterables(self, lyman_info):
 
-        proj_info = lyman_info["proj_info"]
-        scan_info = proj_info["scan_info"]
-        exp_info = lyman_info["exp_info"]
+        info = lyman_info["info"]
+        scan_info = info.scan_info
 
         # -- Test full iterables
 
@@ -86,9 +82,7 @@ class TestPreprocWorkflow(object):
 
         # -- Test iterables as set in workflow
 
-        wf = preproc.define_preproc_workflow(
-            proj_info, exp_info, ["subj01", "subj02"], None,
-        )
+        wf = preproc.define_preproc_workflow(info, ["subj01", "subj02"], None)
 
         subject_source = wf.get_node("subject_source")
         assert subject_source.iterables == ("subject", iterables[0])
@@ -153,9 +147,9 @@ class TestPreprocWorkflow(object):
         subject = template["subject"]
         session, run = "sess01", "run01"
         run_tuple = subject, session, run
-        exp_name = template["exp_info"].name
-        sb_template = template["proj_info"].sb_template
-        ts_template = template["proj_info"].ts_template
+        exp_name = template["info"].experiment_name
+        sb_template = template["info"].sb_template
+        ts_template = template["info"].ts_template
         crop_frames = 2
 
         affine = np.array([[-2, 0, 0, 10],
@@ -186,7 +180,7 @@ class TestPreprocWorkflow(object):
             proc_dir=template["proc_dir"],
             experiment=exp_name,
             sb_template=sb_template,
-            ts_template=template["proj_info"].ts_template,
+            ts_template=template["info"].ts_template,
             crop_frames=crop_frames,
         ).run().outputs
 
@@ -243,8 +237,8 @@ class TestPreprocWorkflow(object):
         session = "sess01"
         session_tuple = subject, session
 
-        fm_template = template["proj_info"].fm_template
-        phase_encoding = template["proj_info"].phase_encoding
+        fm_template = template["info"].fm_template
+        phase_encoding = template["info"].phase_encoding
 
         func_dir = template["data_dir"].join(subject).join("func")
 

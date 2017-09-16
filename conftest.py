@@ -4,7 +4,7 @@ import nibabel as nib
 
 import pytest
 
-from moss import Bunch  # TODO change to lyman version when implemented
+from lyman.frontend import LymanInfo
 
 
 @pytest.fixture()
@@ -37,7 +37,13 @@ def lyman_info(tmpdir):
         },
     }
 
-    proj_info = Bunch(
+    contrasts = [
+        ("a", ["a", "b"], [1, 0]),
+        ("b", ["b"], [1]),
+        ("a-b", ["a", "b"], [1, -1])
+    ]
+
+    info = LymanInfo().trait_set(
         data_dir=str(data_dir),
         proc_dir=str(proc_dir),
         cache_dir=str(cache_dir),
@@ -46,22 +52,16 @@ def lyman_info(tmpdir):
         fm_template="{session}_{encoding}.nii.gz",
         ts_template="{session}_{experiment}_{run}.nii.gz",
         sb_template="{session}_{experiment}_{run}_sbref.nii.gz",
-    )
-
-    exp_info = Bunch(
-        name="exp_alpha",
+        experiment_name="exp_alpha",
+        crop_frames=2,
         tr=1.5,
-    )
-
-    model_info = Bunch(
-        name="model_a",
+        model_name="model_a",
         smooth_fwhm=4,
         surface_smoothing=True,
         hpf_cutoff=10,
         save_residuals=True,
-
         # TODO FIX
-        contrasts=["a", "b", "a-b"]
+        contrasts=contrasts,
     )
 
     subjects = ["subj01", "subj02"]
@@ -88,11 +88,9 @@ def lyman_info(tmpdir):
     n_params = len(design["condition"].unique())
 
     return dict(
-        proj_info=proj_info,
+        info=info,
         subjects=subjects,
         sessions=sessions,
-        exp_info=exp_info,
-        model_info=model_info,
         proc_dir=proc_dir,
         data_dir=data_dir,
 
@@ -202,8 +200,8 @@ def timeseries(template):
     session = "sess01"
     run = "run01"
 
-    exp_name = template["exp_info"].name
-    model_name = template["model_info"].name
+    exp_name = template["info"].experiment_name
+    model_name = template["info"].model_name
 
     vol_shape = template["vol_shape"]
     n_tp = template["n_tp"]

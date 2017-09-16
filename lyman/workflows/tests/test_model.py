@@ -10,24 +10,20 @@ class TestModelWorkflows(object):
 
     def test_model_fit_workflow_creation(self, lyman_info):
 
-        proj_info = lyman_info["proj_info"]
-        exp_info = lyman_info["exp_info"]
-        model_info = lyman_info["model_info"]
+        info = lyman_info["info"]
         subjects = lyman_info["subjects"]
         sessions = lyman_info["sessions"]
 
-        wf = model.define_model_fit_workflow(
-            proj_info, exp_info, model_info, subjects, sessions,
-        )
+        wf = model.define_model_fit_workflow(info, subjects, sessions)
 
         # Check basic information about the workflow
         assert isinstance(wf, nipype.Workflow)
         assert wf.name == "model_fit"
-        assert wf.base_dir == op.join(proj_info.cache_dir, exp_info.name)
+        assert wf.base_dir == op.join(info.cache_dir, info.experiment_name)
 
         # Check root directory of output
         data_out = wf.get_node("data_output")
-        assert data_out.inputs.base_directory == proj_info.proc_dir
+        assert data_out.inputs.base_directory == info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "run_source",
@@ -37,25 +33,21 @@ class TestModelWorkflows(object):
 
     def test_model_results_workflow_creation(self, lyman_info):
 
-        proj_info = lyman_info["proj_info"]
-        exp_info = lyman_info["exp_info"]
-        model_info = lyman_info["model_info"]
+        info = lyman_info["info"]
         subjects = lyman_info["subjects"]
 
-        wf = model.define_model_results_workflow(
-            proj_info, exp_info, model_info, subjects,
-        )
+        wf = model.define_model_results_workflow(info, subjects)
 
         # Check basic information about the workflow
         assert isinstance(wf, nipype.Workflow)
         assert wf.name == "model_results"
-        assert wf.base_dir == op.join(proj_info.cache_dir, exp_info.name)
+        assert wf.base_dir == op.join(info.cache_dir, info.experiment_name)
 
         # Check root directory of output
         run_out = wf.get_node("run_output")
-        assert run_out.inputs.base_directory == proj_info.proc_dir
+        assert run_out.inputs.base_directory == info.proc_dir
         subject_out = wf.get_node("subject_output")
-        assert subject_out.inputs.base_directory == proj_info.proc_dir
+        assert subject_out.inputs.base_directory == info.proc_dir
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "run_source", "data_input",
@@ -66,10 +58,8 @@ class TestModelWorkflows(object):
 
     def test_model_iterables(self, lyman_info):
 
-        proj_info = lyman_info["proj_info"]
-        scan_info = proj_info["scan_info"]
-        exp_info = lyman_info["exp_info"]
-        model_info = lyman_info["model_info"]
+        info = lyman_info["info"]
+        scan_info = info.scan_info
 
         # -- Test full iterables
 
@@ -91,9 +81,7 @@ class TestModelWorkflows(object):
 
         # -- Test iterables as set in workflow
 
-        wf = model.define_model_fit_workflow(
-            proj_info, exp_info, model_info, ["subj01", "subj02"], None,
-        )
+        wf = model.define_model_fit_workflow(info, ["subj01", "subj02"], None)
 
         subject_source = wf.get_node("subject_source")
         assert subject_source.iterables == ("subject", iterables[0])
@@ -101,9 +89,7 @@ class TestModelWorkflows(object):
         run_source = wf.get_node("run_source")
         assert run_source.iterables == ("run", iterables[1])
 
-        wf = model.define_model_results_workflow(
-            proj_info, exp_info, model_info, ["subj01", "subj02"],
-        )
+        wf = model.define_model_results_workflow(info, ["subj01", "subj02"])
 
         subject_source = wf.get_node("subject_source")
         assert subject_source.iterables == ("subject", iterables[0])
@@ -176,8 +162,8 @@ class TestModelWorkflows(object):
         subject = timeseries["subject"]
         run_tuple = session, run = timeseries["session"], timeseries["run"]
 
-        exp_name = timeseries["exp_info"].name
-        model_name = timeseries["model_info"].name
+        exp_name = timeseries["info"].experiment_name
+        model_name = timeseries["info"].model_name
 
         out = model.ModelFitInput(
             experiment=exp_name,
@@ -205,8 +191,8 @@ class TestModelWorkflows(object):
         subject = modelfit["subject"]
         run_tuple = session, run = modelfit["session"], modelfit["run"]
 
-        exp_name = modelfit["exp_info"].name
-        model_name = modelfit["model_info"].name
+        exp_name = modelfit["info"].experiment_name
+        model_name = modelfit["info"].model_name
 
         out = model.ModelResultsInput(
             experiment=exp_name,
@@ -233,8 +219,7 @@ class TestModelWorkflows(object):
             session=timeseries["session"],
             run=timeseries["run"],
             data_dir=timeseries["data_dir"],
-            exp_info=timeseries["exp_info"],
-            model_info=timeseries["model_info"],
+            info=timeseries["info"].trait_get(),
             seg_file=timeseries["seg_file"],
             surf_file=timeseries["surf_file"],
             ts_file=timeseries["ts_file"],
@@ -281,8 +266,7 @@ class TestModelWorkflows(object):
     def test_estimate_contrasts(self, execdir, modelfit):
 
         out = model.EstimateContrasts(
-            exp_info=modelfit["exp_info"],
-            model_info=modelfit["model_info"],
+            info=modelfit["info"].trait_get(),
             mask_file=modelfit["mask_file"],
             beta_file=modelfit["beta_file"],
             ols_file=modelfit["ols_file"],
@@ -299,16 +283,16 @@ class TestModelWorkflows(object):
 
         # TODO we should also test "missing" contrast behavior here
 
-    def test_model_rsults(self, execdir, modelres):
+    def test_model_results(self, execdir, modelres):
 
         out = model.ModelResults(
-            model_info=modelres["model_info"],
+            info=modelres["info"].trait_get(),
             anat_file=modelres["anat_file"],
             contrast_files=[modelres["contrast_file"]],
             variance_files=[modelres["variance_file"]],
         ).run().outputs
 
         result_directories = [
-            execdir.join(c) for c in modelres["model_info"].contrasts
+            execdir.join(c) for c, _, _ in modelres["info"].contrasts
         ]
         assert out.result_directories == result_directories

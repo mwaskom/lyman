@@ -232,6 +232,13 @@ class TestSignals(object):
         with pytest.raises(ValueError):
             signals.smoothing_matrix(sm, vertids, 0)
 
+        # Test avoidance of infinite loop
+        verts = meshdata["verts"].copy()
+        verts[0] += 100
+        sm = surface.SurfaceMeasure(verts, meshdata["faces"])
+        with pytest.raises(RuntimeError):
+            signals.smoothing_matrix(sm, vertids, 1)
+
     def test_smooth_surface(self, random, meshdata):
 
         shape = 4, 3, 2

@@ -7,9 +7,8 @@ import pandas as pd
 import nibabel as nib
 
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
-from nipype.interfaces.base import traits, TraitedSpec
+from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
-from moss import Bunch  # move into lyman
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals, surface
@@ -17,8 +16,7 @@ from ..utils import LymanInterface, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot
 
 
-def define_model_fit_workflow(proj_info, exp_info, model_info,
-                              subjects, sessions, qc=True):
+def define_model_fit_workflow(info, subjects, sessions, qc=True):
 
     # --- Workflow parameterization and data input
 
@@ -26,9 +24,9 @@ def define_model_fit_workflow(proj_info, exp_info, model_info,
     # one "flat" run-level iterable (i.e. all runs collapsing over
     # sessions). But we want to be able to specify sessions to process.
 
-    scan_info = proj_info.scan_info
-    experiment = exp_info.name
-    model = model_info.name
+    scan_info = info.scan_info
+    experiment = info.experiment_name
+    model = info.model_name
 
     iterables = generate_iterables(scan_info, experiment, subjects, sessions)
     subject_iterables, run_iterables = iterables
@@ -44,26 +42,25 @@ def define_model_fit_workflow(proj_info, exp_info, model_info,
 
     data_input = Node(ModelFitInput(experiment=experiment,
                                     model=model,
-                                    data_dir=proj_info.data_dir,
-                                    proc_dir=proj_info.proc_dir),
+                                    data_dir=info.data_dir,
+                                    proc_dir=info.proc_dir),
                       "data_input")
 
     # --- Data filtering and model fitting
 
-    fit_model = Node(ModelFit(data_dir=proj_info.data_dir,
-                              exp_info=exp_info,
-                              model_info=model_info),
+    fit_model = Node(ModelFit(data_dir=info.data_dir,
+                              info=info.trait_get()),
                      "fit_model")
 
     # --- Data output
 
-    data_output = Node(DataSink(base_directory=proj_info.proc_dir,
+    data_output = Node(DataSink(base_directory=info.proc_dir,
                                 parameterization=False),
                        "data_output")
 
     # === Assemble pipeline
 
-    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    cache_base = op.join(info.cache_dir, experiment)
     workflow = Workflow(name="model_fit", base_dir=cache_base)
 
     # Connect processing nodes
@@ -116,8 +113,7 @@ def define_model_fit_workflow(proj_info, exp_info, model_info,
     return workflow
 
 
-def define_model_results_workflow(proj_info, exp_info, model_info,
-                                  subjects, qc=True):
+def define_model_results_workflow(info, subjects, qc=True):
 
     # TODO I am copying a lot from above ...
 
@@ -128,9 +124,9 @@ def define_model_results_workflow(proj_info, exp_info, model_info,
     # sessions). Unlike in the model fit workflow, we always want to process
     # all sessions.
 
-    scan_info = proj_info.scan_info
-    experiment = exp_info.name
-    model = model_info.name
+    scan_info = info.scan_info
+    experiment = info.experiment_name
+    model = info.model_name
 
     iterables = generate_iterables(scan_info, experiment, subjects)
     subject_iterables, run_iterables = iterables
@@ -146,17 +142,17 @@ def define_model_results_workflow(proj_info, exp_info, model_info,
 
     data_input = Node(ModelResultsInput(experiment=experiment,
                                         model=model,
-                                        proc_dir=proj_info.proc_dir),
+                                        proc_dir=info.proc_dir),
                       "data_input")
 
     # --- Run-level contrast estimation
 
-    estimate_contrasts = Node(EstimateContrasts(model_info=model_info),
+    estimate_contrasts = Node(EstimateContrasts(info=info.trait_get()),
                               "estimate_contrasts")
 
     # --- Subject-level contrast estimation
 
-    model_results = JoinNode(ModelResults(model_info=model_info),
+    model_results = JoinNode(ModelResults(info=info.trait_get()),
                              name="model_results",
                              joinsource="run_source",
                              joinfield=["contrast_files",
@@ -164,22 +160,22 @@ def define_model_results_workflow(proj_info, exp_info, model_info,
 
     # --- Data output
 
-    run_output = Node(DataSink(base_directory=proj_info.proc_dir,
+    run_output = Node(DataSink(base_directory=info.proc_dir,
                                parameterization=False),
                       "run_output")
 
-    results_path = Node(ModelResultsPath(proc_dir=proj_info.proc_dir,
+    results_path = Node(ModelResultsPath(proc_dir=info.proc_dir,
                                          experiment=experiment,
                                          model=model),
                         "results_path")
 
-    subject_output = Node(DataSink(base_directory=proj_info.proc_dir,
+    subject_output = Node(DataSink(base_directory=info.proc_dir,
                                    parameterization=False),
                           "subject_output")
 
     # === Assemble pipeline
 
-    cache_base = op.join(proj_info.cache_dir, exp_info.name)
+    cache_base = op.join(info.cache_dir, experiment)
     workflow = Workflow(name="model_results", base_dir=cache_base)
 
     # Connect processing nodes
@@ -410,8 +406,7 @@ class ModelFit(LymanInterface):
         session = traits.Str()
         run = traits.Str()
         data_dir = traits.Directory(exists=True)
-        exp_info = traits.Dict()
-        model_info = traits.Dict()
+        info = traits.Dict()
         seg_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
         ts_file = traits.File(exists=True)
@@ -437,8 +432,7 @@ class ModelFit(LymanInterface):
         subject = self.inputs.subject
         session = self.inputs.session
         run = self.inputs.run
-        exp_info = Bunch(self.inputs.exp_info)
-        model_info = Bunch(self.inputs.model_info)
+        info = Bunch(self.inputs.info)
         data_dir = self.inputs.data_dir
 
         # Load the timeseries
@@ -458,11 +452,12 @@ class ModelFit(LymanInterface):
         noise_img = nib.load(self.inputs.noise_file)
 
         # Spatially filter the data
-        fwhm = model_info.smooth_fwhm
+        fwhm = info.smooth_fwhm
         # TODO use smooth_segmentation instead?
         signals.smooth_volume(ts_img, fwhm, mask_img, noise_img, inplace=True)
 
-        if model_info.surface_smoothing:
+        if info.surface_smoothing:
+            # TODO this is double smoothing the surface voxels!
             vert_data = nib.load(self.inputs.surf_file).get_data()
             for i, mesh_file in enumerate(self.inputs.mesh_files):
                 sm = surface.SurfaceMeasure.from_file(mesh_file)
@@ -479,8 +474,8 @@ class ModelFit(LymanInterface):
         # Temporally filter the data
         n_tp = ts_img.shape[-1]
         hpf_matrix = glm.highpass_filter_matrix(n_tp,
-                                                model_info.hpf_cutoff,
-                                                exp_info.tr)
+                                                info.hpf_cutoff,
+                                                info.tr)
         data[mask] = np.dot(hpf_matrix, data[mask].T).T
 
         # TODO remove the mean from the data
@@ -500,13 +495,13 @@ class ModelFit(LymanInterface):
         # Build the design matrix
         # TODO move out of moss and simplify
         design_file = op.join(data_dir, subject, "design",
-                              model_info.name + ".csv")
+                              info.model_name + ".csv")
         design = pd.read_csv(design_file)
         run_rows = (design.session == session) & (design.run == run)
         design = design.loc[run_rows]
         # TODO better error when this fails (maybe check earlier too)
         assert len(design) > 0
-        dmat = mossglm.DesignMatrix(design, ntp=n_tp, tr=exp_info.tr)
+        dmat = mossglm.DesignMatrix(design, ntp=n_tp, tr=info.tr)
         X = dmat.design_matrix.values
 
         # Save out the design matrix
@@ -534,7 +529,7 @@ class ModelFit(LymanInterface):
         self.write_image("beta_file", "beta.nii.gz", beta_img)
         self.write_image("error_file", "error.nii.gz", error_img)
         self.write_image("ols_file", "ols.nii.gz", ols_img)
-        if model_info.save_residuals:
+        if info.save_residuals:
             self.write_image("resid_file", "resid.nii.gz", resid_img)
 
         # Make some QC plots
@@ -567,8 +562,7 @@ class ModelFit(LymanInterface):
 class EstimateContrasts(LymanInterface):
 
     class input_spec(TraitedSpec):
-        exp_info = traits.Dict()
-        model_info = traits.Dict()
+        info = traits.Dict()
         mask_file = traits.File(exists=True)
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
@@ -599,7 +593,7 @@ class EstimateContrasts(LymanInterface):
         XtXinv = XtXinv.reshape(n_ev, n_ev, n_vox).T
 
         # Obtain list of contrast matrices
-        # C = model_info.contrasts
+        # C = info.contrasts
         # TODO how are we going to do this? Hardcode for now.
         # TODO do we want to enforce vectors or do we ever want F stats
         C = [np.array([1, 0, 0, 0]),
@@ -629,7 +623,7 @@ class EstimateContrasts(LymanInterface):
 class ModelResults(LymanInterface):
 
     class input_spec(TraitedSpec):
-        model_info = traits.Dict()
+        info = traits.Dict()
         anat_file = traits.File(exists=True)
         contrast_files = traits.List(traits.File(exists=True))
         variance_files = traits.List(traits.File(exists=True))
@@ -639,7 +633,7 @@ class ModelResults(LymanInterface):
 
     def _run_interface(self, runtime):
 
-        model_info = Bunch(self.inputs.model_info)
+        info = Bunch(self.inputs.info)
 
         # Load the anatomical template to get image geometry information
         anat_img = nib.load(self.inputs.anat_file)
@@ -647,10 +641,12 @@ class ModelResults(LymanInterface):
 
         # TODO define contrasts properly accounting for missing EVs
         result_directories = []
-        for i, contrast in enumerate(model_info.contrasts):
+        for i, contrast_tuple in enumerate(info.contrasts):
 
-            result_directories.append(op.abspath(contrast))
-            os.makedirs(op.join(contrast, "qc"))
+            name, _, _ = contrast_tuple
+
+            result_directories.append(op.abspath(name))
+            os.makedirs(op.join(name, "qc"))
 
             con_frames = []
             var_frames = []
@@ -685,20 +681,20 @@ class ModelResults(LymanInterface):
             t_img = matrix_to_image(t_ffx.T, mask_img)
 
             # Write out output images
-            con_img.to_filename(op.join(contrast, "contrast.nii.gz"))
-            var_img.to_filename(op.join(contrast, "variance.nii.gz"))
-            t_img.to_filename(op.join(contrast, "tstat.nii.gz"))
-            mask_img.to_filename(op.join(contrast, "mask.nii.gz"))
+            con_img.to_filename(op.join(name, "contrast.nii.gz"))
+            var_img.to_filename(op.join(name, "variance.nii.gz"))
+            t_img.to_filename(op.join(name, "tstat.nii.gz"))
+            mask_img.to_filename(op.join(name, "mask.nii.gz"))
 
             # Contrast t statistic overlay
             stat_m = Mosaic(anat_img, t_img, mask_img, show_mask=True)
             stat_m.plot_overlay("coolwarm", -10, 10)
-            stat_m.savefig(op.join(contrast, "qc", "tstat.png"), close=True)
+            stat_m.savefig(op.join(name, "qc", "tstat.png"), close=True)
 
             # Analysis mask
             mask_m = Mosaic(anat_img, mask_img)
             mask_m.plot_mask()
-            mask_m.savefig(op.join(contrast, "qc", "mask.png"), close=True)
+            mask_m.savefig(op.join(name, "qc", "mask.png"), close=True)
 
         # Output a list of directories with results.
         # This makes the connections in the workflow more opaque, but it
