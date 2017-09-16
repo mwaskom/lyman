@@ -112,17 +112,14 @@ class TestFrontend(object):
         subjects = frontend.subjects(["subj01", "subj02"])
         assert subjects == ["subj01", "subj02"]
 
-        subj_file = lyman_dir.join("subjects.txt")
+        subj_file = lyman_dir.join("group_one.txt")
         with open(subj_file, "w") as fid:
             fid.write("subj01")
 
-        subjects = frontend.subjects("subjects")
+        subjects = frontend.subjects("group_one")
         assert subjects == ["subj01"]
 
-        subjects = frontend.subjects(["subjects"])
-        assert subjects == ["subj01"]
-
-        subjects = frontend.subjects(str(subj_file))
+        subjects = frontend.subjects(["group_one"])
         assert subjects == ["subj01"]
 
         with pytest.raises(RuntimeError):

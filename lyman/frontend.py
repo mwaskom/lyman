@@ -285,10 +285,10 @@ def subjects(subject_arg=None, sessions=None, lyman_dir=None):
         This argument can take several forms:
            - None, in which case all subject ids in scans.yaml are used.
            - A list of subject ids or single subject id which will be used.
+           - The name (without extension) of a text file in the <lyman_dir>
+             containing list of subject ids, or a list with a single entry
+             corresponding to the name of a file.
            - A single subject id, which will be used.
-           - A path to a text file with subject ids, or the name (without
-             extension) of a text file in the <lyman_dir>, or a list with a
-             single entry corresponding to one of the above two options.
     sessions : list
         A list of session ids. Only valid when there is a single subject
         in the returned list. This parameter can be used to validate that
@@ -321,8 +321,6 @@ def subjects(subject_arg=None, sessions=None, lyman_dir=None):
         subject_path = op.join(lyman_dir, subject_arg + ".txt")
         if op.isfile(subject_path):
             subjects = np.loadtxt(subject_path, str, ndmin=1).tolist()
-        elif op.isfile(subject_arg):
-            subjects = np.loadtxt(subject_arg, str, ndmin=1).tolist()
         else:
             subjects = [subject_arg]
     else:
