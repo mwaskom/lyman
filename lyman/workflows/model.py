@@ -12,7 +12,7 @@ from nipype.interfaces.base import traits, TraitedSpec, Bunch
 from moss import glm as mossglm  # TODO move into lyman
 
 from .. import glm, signals, surface
-from ..utils import LymanInterface, image_to_matrix, matrix_to_image
+from ..utils import LymanInterface, SaveInfo, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot
 
 
@@ -53,6 +53,8 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
                      "fit_model")
 
     # --- Data output
+
+    save_info = Node(SaveInfo(info_dict=info.trait_get()), "save_info")
 
     data_output = Node(DataSink(base_directory=info.proc_dir,
                                 parameterization=False),
@@ -100,6 +102,11 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
     workflow.connect(processing_edges)
 
     qc_edges = [
+
+        (run_source, save_info,
+            [("run", "parameterization")]),
+        (save_info, data_output,
+            [("info_file", "qc.@info_json")]),
 
         (fit_model, data_output,
             [("design_plot", "qc.@design_plot"),
@@ -160,6 +167,8 @@ def define_model_results_workflow(info, subjects, qc=True):
 
     # --- Data output
 
+    save_info = Node(SaveInfo(info_dict=info.trait_get()), "save_info")
+
     run_output = Node(DataSink(base_directory=info.proc_dir,
                                parameterization=False),
                       "run_output")
@@ -200,6 +209,11 @@ def define_model_results_workflow(info, subjects, qc=True):
         (estimate_contrasts, model_results,
             [("contrast_file", "contrast_files"),
              ("variance_file", "variance_files")]),
+
+        (run_source, save_info,
+            [("run", "parameterization")]),
+        (save_info, run_output,
+            [("info_file", "qc.@info_json")]),
 
         (data_input, run_output,
             [("output_path", "container")]),

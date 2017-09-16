@@ -30,7 +30,7 @@ class TestTemplateWorkflow(object):
                           "generate_reg", "invert_reg",
                           "transform_wmparc", "anat_segment",
                           "hemi_source", "tag_surf", "combine_hemis",
-                          "template_qc", "template_output"]
+                          "save_info", "template_qc", "template_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes
 

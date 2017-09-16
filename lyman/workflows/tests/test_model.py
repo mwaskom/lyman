@@ -26,7 +26,7 @@ class TestModelWorkflows(object):
         assert data_out.inputs.base_directory == info.proc_dir
 
         # Check the list of nodes we expect
-        expected_nodes = ["subject_source", "run_source",
+        expected_nodes = ["subject_source", "run_source", "save_info",
                           "data_input", "fit_model", "data_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes
@@ -51,7 +51,7 @@ class TestModelWorkflows(object):
 
         # Check the list of nodes we expect
         expected_nodes = ["subject_source", "run_source", "data_input",
-                          "estimate_contrasts", "model_results",
+                          "estimate_contrasts", "model_results", "save_info",
                           "run_output", "results_path", "subject_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes

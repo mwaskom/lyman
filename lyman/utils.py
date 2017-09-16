@@ -1,9 +1,10 @@
 import os.path as op
 import subprocess as sp
+import json
 
 import numpy as np
 import nibabel as nib
-from nipype.interfaces.base import BaseInterface
+from nipype.interfaces.base import BaseInterface, TraitedSpec, traits
 
 
 class LymanInterface(BaseInterface):
@@ -72,6 +73,23 @@ class LymanInterface(BaseInterface):
             message += "Return code: " + str(runtime.returncode)
             raise RuntimeError(message)
 
+        return runtime
+
+
+class SaveInfo(LymanInterface):
+
+    class input_spec(TraitedSpec):
+        info_dict = traits.Dict()
+        parameterization = traits.Either(traits.Str, traits.Tuple)
+
+    class output_spec(TraitedSpec):
+        info_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        fname = self.define_output("info_file", "info.json")
+        with open(fname, "w") as fid:
+            json.dump(self.inputs.info_dict, fid, indent=2)
         return runtime
 
 

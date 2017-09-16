@@ -13,7 +13,7 @@ from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
 
 from .. import signals
-from ..utils import LymanInterface
+from ..utils import LymanInterface, SaveInfo
 from ..visualizations import Mosaic, CarpetPlot
 
 
@@ -128,6 +128,8 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
                                             "mask_files", "noise_files"])
 
     # --- Workflow ouptut
+
+    save_info = Node(SaveInfo(info_dict=info.trait_get()), "save_info")
 
     template_output = Node(DataSink(base_directory=info.proc_dir,
                                     parameterization=False),
@@ -308,6 +310,11 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
             [("raw_file", "ref_file")]),
 
         # Ouputs associated with each scanner run
+
+        (run_source, save_info,
+            [("run", "parameterization")]),
+        (save_info, timeseries_output,
+            [("info_file", "qc.@info_json")]),
 
         (run_input, timeseries_output,
             [("ts_plot", "qc.@raw_gif")]),

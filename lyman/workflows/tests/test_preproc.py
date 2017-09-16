@@ -50,7 +50,7 @@ class TestPreprocWorkflow(object):
                           "combine_premats", "combine_postmats",
                           "restore_timeseries", "restore_template",
                           "finalize_timeseries", "finalize_template",
-                          "template_output", "timeseries_output"]
+                          "save_info", "template_output", "timeseries_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes
 
