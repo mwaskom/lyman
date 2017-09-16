@@ -1,4 +1,5 @@
 import os.path as op
+import json
 import numpy as np
 import nibabel as nib
 
@@ -140,6 +141,21 @@ class TestLymanInterface(object):
         assert runtime.cmdline == cmdline
 
         assert runtime.returncode == 1
+
+
+class TestSaveInfo(object):
+
+    def test_save_info(self, execdir):
+
+        info = {"proc_dir": "../proc",
+                "data_dir": "../data"}
+
+        res = utils.SaveInfo(info_dict=info).run()
+
+        with open(res.outputs.info_file) as fid:
+            info_roundtrip = json.load(fid)
+
+        assert info == info_roundtrip
 
 
 class TestImageMatrixConversion(object):

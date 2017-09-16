@@ -9,7 +9,7 @@ from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec
 from nipype.interfaces import fsl, freesurfer as fs
 
-from ..utils import LymanInterface
+from ..utils import LymanInterface, SaveInfo
 from ..visualizations import Mosaic
 
 
@@ -78,6 +78,8 @@ def define_template_workflow(info, subjects, qc=True):
     template_qc = Node(TemplateReport(), "template_qc")
 
     # --- Workflow ouptut
+
+    save_info = Node(SaveInfo(info_dict=info.trait_get()), "save_info")
 
     template_output = Node(DataSink(base_directory=info.proc_dir,
                                     parameterization=False),
@@ -157,6 +159,11 @@ def define_template_workflow(info, subjects, qc=True):
              ("mask_file", "mask_file")]),
         (combine_hemis, template_qc,
             [("merged_file", "surf_file")]),
+
+        (subject_source, save_info,
+            [("subject", "parameterization")]),
+        (save_info, template_output,
+            [("info_file", "qc.@info_json")]),
 
         (template_qc, template_output,
             [("seg_plot", "qc.@seg_plot"),
