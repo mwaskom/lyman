@@ -197,11 +197,11 @@ class Mosaic(object):
             func = getattr(ax, func_name)
             try:
                 func(np.rot90(slice), **kwargs)
-            except ValueError:
+            except ValueError as err:
                 if ignore_value_error:
                     pass
                 else:
-                    raise
+                    raise err
 
     def plot_activation(self, thresh=2, vmin=None, vmax=None, vmax_perc=99,
                         vfloor=None, pos_cmap="Reds_r", neg_cmap=None,
@@ -233,7 +233,7 @@ class Mosaic(object):
         """
         stat_data = self.stat_img.get_data()[self.x_slice,
                                              self.y_slice,
-                                             self.z_slice]
+                                             self.z_slice].copy()
         pos_data = stat_data.copy()
         pos_data[pos_data < thresh] = np.nan
         if vmin is None:
@@ -297,7 +297,7 @@ class Mosaic(object):
         """
         stat_data = self.stat_img.get_data()[self.x_slice,
                                              self.y_slice,
-                                             self.z_slice]
+                                             self.z_slice].copy()
         if hasattr(self, "mask_img"):
             fov = self.mask_img.get_data()[self.x_slice,
                                            self.y_slice,
@@ -308,10 +308,8 @@ class Mosaic(object):
         if vmin is None:
             vmin = np.percentile(stat_data[fov], vmin_perc)
         if vmax is None:
-            if stat_data.any():
-                vmax = np.percentile(stat_data[fov], vmax_perc)
-            else:
-                vmax = vmin * 2
+            vmax = np.percentile(stat_data[fov], vmax_perc)
+
         if center:
             vabs = max(np.abs(vmin), vmax)
             vmin, vmax = -vabs, vabs
@@ -352,35 +350,6 @@ class Mosaic(object):
         self._map("contour", slices, ignore_value_error=True,
                   levels=[0, 1], cmap=cmap, vmin=0, vmax=1,
                   linewidths=linewidth)
-
-    def map(self, func_name, data, thresh=None, **kwargs):
-        """Map a dataset across the mosaic of axes.
-
-        Parameters
-        ----------
-        func_name : str
-            Name of a pyplot function.
-        data : filename, nibabel image, or array
-            Dataset to plot.
-        thresh : float
-            Don't map voxels in ``data`` below this threshold.
-        kwargs : key, value mappings
-            Other keyword arguments are passed to the plotting function.
-
-        """
-        if isinstance(data, string_types):
-            data_img = nib.load(data)
-        elif isinstance(data, np.ndarray):
-            data_img = nib.Nifti1Image(data, np.eye(4))
-        else:
-            data_img = data
-        data_img = nib.as_closest_canonical(data_img)
-        data = data_img.get_data()
-        data = data.astype(np.float)
-        if thresh is not None:
-            data[data < thresh] = np.nan
-        data = data[self.x_slice, self.y_slice, self.z_slice]
-        self._map(func_name, data, **kwargs)
 
     def _pad_for_cbar(self):
         """Add extra space to the bottom of the figure for the colorbars."""
@@ -531,11 +500,10 @@ class CarpetPlot(object):
         # Use header geometry to convert smoothing sigma from mm to voxels
         sx, sy, sz, _ = img.header.get_zooms()
         voxel_sizes = sx, sy, sz
-        if smooth_fwhm is not None:
-            if smooth_fwhm > 0:
-                smooth_sigma = np.divide(smooth_fwhm / 2.355, voxel_sizes)
-            else:
-                smooth_sigma = None
+        if smooth_fwhm is not None and smooth_fwhm > 0:
+            smooth_sigma = np.divide(smooth_fwhm / 2.355, voxel_sizes)
+        else:
+            smooth_sigma = None
 
         # Preprocess and segment the data
         masks, brain = self.define_masks(seg)
