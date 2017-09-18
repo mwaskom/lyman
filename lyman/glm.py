@@ -11,7 +11,7 @@ from .utils import image_to_matrix, matrix_to_image
 class HRFModel(object):
 
     def transform(self, input):
-        """Generate a predicted response ot the input."""
+        """Generate a basis set for the predicted response to the input."""
         raise NotImplementedError
 
 
@@ -91,22 +91,91 @@ class GammaHRF(HRFModel):
             if dy is not None:
                 dy = pd.Series(dy, input.index, name=input.name + "-dydt")
 
-        # TODO is always returning a pair helpful or a nuisance?
-        # upside: when building the design matrix, a flat column list can be
-        # extended, and then pd.concat will drop the Nones
-        # downside: when just interested in the cannonical prediction, it's
-        # a minor pain to have to index into the return value
+        # TODO Is always returning a pair helpful or a nuisance?
+        # Upside: when building the design matrix, a flat column list can be
+        # extended, and then pd.concat will drop the Nones.
+        # Downside: when just interested in the canonical prediction, it's
+        # a minor pain to have to index into the return value.
         # in any case, transform() should probably have the same behavior
         # as kernel in terms of what it returns
 
         return y, dy
 
 
-def build_design_matrix(events=None, hrf_model=None,
+def conditions_to_regressors(conditions, hrf_model, n_tp, tr, res, shift):
+    """Generate design matrix columns from information about event occurrence.
+
+    Parameters
+    ----------
+    conditions : dataframe
+        Must have onset (in seconds), duration (in seconds), and value (in
+        arbitrary units) columns; and should correspond to event occurrences.
+    hrf_model : HRFModel object
+        Object that implements `.transform()` to return a basis set for the
+        predicted response.
+    n_tp : int
+        Number of time points in the final output.
+    tr : float
+        Time resolution of the output regressor, in seconds.
+    res : float
+        Sampling resolution at which to construct the regressor and perform
+        convolution with the HRF model.
+    shift : float
+        Proportion of the TR to shift the predicted response when downsampling
+        to the output resolution.
+
+    Returns
+    -------
+    regressors : column(s)
+        One or more output regressors that will form columns in the design
+        matrix corresponding to this event type.
+
+    """
+    pass
+
+
+def build_design_matrix(conditions=None, hrf_model=None,
                         regressors=None, artifacts=None,
                         n_tp=None, tr=1, res=60, shift=.5,
                         hpf_matrix=None, demean=True):
+    """Use design information to build a matrix for a BOLD time series GLM.
 
+    Parameters
+    ----------
+    conditions : dataframe
+        Must have condition (a string), onset (in seconds), duration (in
+        seconds), and value (in arbitrary units) columns; rows should
+        correspond to event occurrences.
+    hrf_model : HRFModel object
+        Object that implements `.transform()` to return a basis set for the
+        predicted response.
+    regressors : DataFrame
+        Additional columns to include in the design matrix without any
+        transformation (aside from optional de-meaning).
+    artifacts : boolean series
+        A Series indicating which row should have indicator regressors
+        included in the design matrix to account for signal artifacts.
+    n_tp : int
+        The number of timepoints in the
+    tr : float
+        Time resolution of the output regressors, in seconds.
+    res : float
+        Sampling resolution at which to construct the condition regressors and
+        perform convolution with the HRF model.
+    shift : float
+        Proportion of the TR to shift the predicted response when downsampling
+        to the output resolution.
+    hpf_matrix : n_tp x n_tp array
+        Matrix for high-pass filtering the condition regressors.
+    demean : bool
+        If True, each column in the output matrix will be mean-centered.
+
+    Returns
+    -------
+    X : dataframe
+        Design matrix with timepoints in rows and regressors in columns.
+
+    """
     pass
 
 
