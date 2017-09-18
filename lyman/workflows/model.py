@@ -9,8 +9,6 @@ import nibabel as nib
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
-from moss import glm as mossglm  # TODO move into lyman
-
 from .. import glm, signals, surface
 from ..utils import LymanInterface, SaveInfo, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot
@@ -506,8 +504,7 @@ class ModelFit(LymanInterface):
         # Convert to percent signal change?
         # TODO
 
-        # Build the design matrix
-        # TODO move out of moss and simplify
+        # Get the design information for this run
         design_file = op.join(data_dir, subject, "design",
                               info.model_name + ".csv")
         design = pd.read_csv(design_file)
@@ -515,16 +512,19 @@ class ModelFit(LymanInterface):
         design = design.loc[run_rows]
         # TODO better error when this fails (maybe check earlier too)
         assert len(design) > 0
-        dmat = mossglm.DesignMatrix(design, ntp=n_tp, tr=info.tr)
-        X = dmat.design_matrix.values
+
+        # Build the design matrix
+        # TODO highpass filter
+        hrf_model = glm.GammaHRF(derivative=False)  # TODO info param
+        X = glm.build_design_matrix(design, hrf_model, n_tp=n_tp, tr=info.tr)
 
         # Save out the design matrix
         design_file = self.define_output("design_file", "design.csv")
-        dmat.design_matrix.to_csv(design_file, index=False)
+        X.to_csv(design_file, index=False)
 
         # Prewhiten the data
         ts_img = nib.Nifti1Image(data, affine)
-        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
+        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X.values)
 
         # Fit the final model
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
@@ -561,9 +561,10 @@ class ModelFit(LymanInterface):
         self.write_visualization("resid_plot", "resid.png", p)
 
         # Plot the deisgn matrix
-        # TODO update when improving design matrix code
         design_plot = self.define_output("design_plot", "design.png")
-        dmat.plot(fname=design_plot, close=True)
+        # TODO add to visualization module and fix
+        with open(design_plot, "w") as fid:
+            fid.write(" ")
 
         # Plot the sigma squares image for QC
         error_m = Mosaic(mean_img, error_img, mask_img)

@@ -181,9 +181,10 @@ def build_design_matrix(conditions=None, hrf_model=None,
     Parameters
     ----------
     conditions : dataframe
-        Must have condition (a string), onset (in seconds), duration (in
-        seconds), and value (in arbitrary units) columns; rows should
-        correspond to event occurrences.
+        Must have `condition` (a string) and `onset` (in seconds) columns.  Can
+        also have `duration` (in seconds, defaulting to 0), and `value` (in
+        arbitrary units, defaulting to 1) columns; rows should correspond to
+        event occurrences.
     hrf_model : HRFModel object
         Object that implements `.transform()` to return a basis set for the
         predicted response.
@@ -215,7 +216,11 @@ def build_design_matrix(conditions=None, hrf_model=None,
         Design matrix with timepoints in rows and regressors in columns.
 
     """
-    # TODO conditions defaults
+    if "duration" not in conditions:
+        conditions.loc[:, "duration"] = 0
+    if "value" not in conditions:
+        conditions.loc[:, "value"] = 1
+
     condition_columns = []
     for name, info in conditions.groupby("condition"):
         cols = conditions_to_regressors(name, info, hrf_model,
@@ -223,7 +228,11 @@ def build_design_matrix(conditions=None, hrf_model=None,
         condition_columns.extend(cols)
 
     X = pd.concat(condition_columns, axis=1)
-    # TODO highpass filter
+
+    if hpf_matrix is not None:
+        prefilter_means = X.mean()
+        X.values[:] = hpf_matrix.dot(X.values)
+        X += prefilter_means
 
     if regressors is not None:
         if not X.index.equals(regressors.index):
@@ -233,7 +242,11 @@ def build_design_matrix(conditions=None, hrf_model=None,
 
     # TODO artifact indicators
 
+    # TODO polynomial regressors?
+
     # TODO demean
+    if demean:
+        X -= X.mean()
 
     return X
 
