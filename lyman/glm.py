@@ -216,39 +216,71 @@ def build_design_matrix(conditions=None, hrf_model=None,
         Design matrix with timepoints in rows and regressors in columns.
 
     """
+    # TODO default n_tp from other regressors or artifacts?
+    # -- Condition information (i.e. experimental design)
+
+    # Default values for some fields
     if "duration" not in conditions:
         conditions.loc[:, "duration"] = 0
     if "value" not in conditions:
         conditions.loc[:, "value"] = 1
 
+    # Build regressors for each condition
     condition_columns = []
     for name, info in conditions.groupby("condition"):
         cols = conditions_to_regressors(name, info, hrf_model,
                                         n_tp, tr, res, shift)
         condition_columns.extend(cols)
 
+    # Assemble the initial component of the design matrix
     X = pd.concat(condition_columns, axis=1)
 
+    # High-pass filter the condition information
     if hpf_matrix is not None:
         prefilter_means = X.mean()
         X.values[:] = hpf_matrix.dot(X.values)
         X += prefilter_means
 
+    # -- Other regressors
     if regressors is not None:
         if not X.index.equals(regressors.index):
+            # TODO maybe match on size and fire a warning instead?
             err = "The `regressors` index does not match the design index."
             raise ValueError(err)
         X = pd.concat([X, regressors], axis=1)
 
-    # TODO artifact indicators
+    # -- Indicator regressors for signal artifacts
+    if artifacts is not None:
+        indicators = np.eye(n_tp)[:, artifacts.astype(np.bool)]
+        columns = ["art{:02d}".format(i) for i in range(artifacts.sum())]
+        indicators = pd.DataFrame(indicators, columns, X.index, np.float)
+        X = pd.concat([X, indicators], axis=1)
 
-    # TODO polynomial regressors?
-
-    # TODO demean
+    # -- Postprocessing
     if demean:
         X -= X.mean()
 
     return X
+
+
+def contrast_matrix(contrast, design_matrix):
+    """Return a contrast matrix that is valid for a given design matrix.
+
+    Parameters
+    ----------
+    contrast : tuple
+        A tuple with (1) the name of the contrast, (2) the involved regressors,
+        and (3) the weight to use for each of those regressors.
+    design_matrix : dataframe
+        Design matrix with regressor names corresponding to contrast elements.
+
+    Returns
+    -------
+    contrast_matrix : series
+        Contrast weights with regressor names as the index.
+
+    """
+    pass
 
 
 def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):

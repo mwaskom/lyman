@@ -116,7 +116,22 @@ class TestHRFs(object):
 
 class TestDesignMatrix(object):
 
-    pass
+    @pytest.fixture
+    def random(self):
+
+        seed = sum(map(ord, "design_matrix"))
+        return np.random.RandomState(seed)
+
+    @pytest.fixture
+    def conditions(self):
+
+        conditions = pd.DataFrame(dict(
+            condition=["a", "b", "a", "b"],
+            onset=[0, 12, 24, 36],
+            duration=[2, 2, 2, 2],
+            value=[1, 1, 1, 1],
+        ))
+        return conditions
 
 
 class TestLinearModel(object):
