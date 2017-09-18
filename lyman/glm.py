@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import scipy as sp
 from scipy import sparse, stats
+from scipy.interpolate import interp1d
 
 from .signals import smooth_volume
 from .utils import image_to_matrix, matrix_to_image
@@ -102,11 +103,14 @@ class GammaHRF(HRFModel):
         return y, dy
 
 
-def conditions_to_regressors(conditions, hrf_model, n_tp, tr, res, shift):
+def conditions_to_regressors(name, conditions, hrf_model,
+                             n_tp, tr, res, shift):
     """Generate design matrix columns from information about event occurrence.
 
     Parameters
     ----------
+    name : string
+        Condition name.
     conditions : dataframe
         Must have onset (in seconds), duration (in seconds), and value (in
         arbitrary units) columns; and should correspond to event occurrences.
@@ -131,7 +135,41 @@ def conditions_to_regressors(conditions, hrf_model, n_tp, tr, res, shift):
         matrix corresponding to this event type.
 
     """
-    pass
+    onset = conditions["onset"]
+    duration = conditions["duration"]
+    value = conditions["value"]
+
+    # Define hires and output resolution timepoints
+    hires_tps = np.arange(0, n_tp * tr, 1 / res)
+    # TODO should output timepoints reflect shifting or not?
+    tps = np.arange(0, n_tp * tr, tr)
+
+    # Initialize the array that will be transformed
+    hires_input = np.zeros_like(hires_tps, np.float)
+
+    # Determine the time points at which each even starts and stops
+    onset_at = np.round(onset * res).astype(int)
+    offset_at = np.round((onset + duration) * res).astype(int)
+
+    # Insert specified amplitudes for each event duration
+    for start, end, value in zip(onset_at, offset_at, value):
+        hires_input[start:(end + 1)] = value
+
+    # Transform into a regressor basis set
+    hires_input = pd.Series(hires_input, name=name)
+    hires_output = hrf_model.transform(hires_input)
+
+    # Downsample the predicted regressors to native sampling
+    output = []
+    for hires_col in hires_output:
+        # TODO having to do this is a pain!
+        if hires_col is None:
+            output.append(None)
+            continue
+        col = interp1d(hires_tps, hires_col)(tps + shift)
+        output.append(pd.Series(col, index=tps, name=hires_col.name))
+
+    return tuple(output)
 
 
 def build_design_matrix(conditions=None, hrf_model=None,
@@ -149,9 +187,10 @@ def build_design_matrix(conditions=None, hrf_model=None,
     hrf_model : HRFModel object
         Object that implements `.transform()` to return a basis set for the
         predicted response.
-    regressors : DataFrame
+    regressors : dataframe
         Additional columns to include in the design matrix without any
-        transformation (aside from optional de-meaning).
+        transformation (aside from optional de-meaning). It must have an
+        index with valid time points.
     artifacts : boolean series
         A Series indicating which row should have indicator regressors
         included in the design matrix to account for signal artifacts.
@@ -176,7 +215,27 @@ def build_design_matrix(conditions=None, hrf_model=None,
         Design matrix with timepoints in rows and regressors in columns.
 
     """
-    pass
+    # TODO conditions defaults
+    condition_columns = []
+    for name, info in conditions.groupby("condition"):
+        cols = conditions_to_regressors(name, info, hrf_model,
+                                        n_tp, tr, res, shift)
+        condition_columns.extend(cols)
+
+    X = pd.concat(condition_columns, axis=1)
+    # TODO highpass filter
+
+    if regressors is not None:
+        if not X.index.equals(regressors.index):
+            err = "The `regressors` index does not match the design index."
+            raise ValueError(err)
+        X = pd.concat([X, regressors], axis=1)
+
+    # TODO artifact indicators
+
+    # TODO demean
+
+    return X
 
 
 def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
