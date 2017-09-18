@@ -1,10 +1,113 @@
 from __future__ import division
 import numpy as np
+import pandas as pd
 import scipy as sp
-from scipy import sparse
+from scipy import sparse, stats
 
 from .signals import smooth_volume
 from .utils import image_to_matrix, matrix_to_image
+
+
+class HRFModel(object):
+
+    def transform(self, input):
+        """Generate a predicted response ot the input."""
+        raise NotImplementedError
+
+
+class GammaHRF(HRFModel):
+
+    def __init__(self, derivative=False, res=60, duration=32,
+                 pos_shape=6, pos_scale=1, neg_shape=16, neg_scale=1,
+                 ratio=1/6):
+        """Gamma PDF model of the HRF, possibly with temporal derivative.
+
+        Parameters
+        ----------
+        derivative : bool
+            If True, include a temporal derivative basis function.
+        res : float
+            Sampling frequency at which to generate the convolution kernel.
+        duration : float
+            Duration of the convolution kernel.
+        pos_{shape, scale} : floats
+            Parameters for scipy.stats.gamma defining the initial positive
+            component of the response.
+        neg_{shape, scale} : floats
+            Parameters for scipy.stats.gamma defining the later negative
+            component of the response.
+        ratio : float
+            Ratio between the amplitude of the positive component to the
+            amplitude of the negative component.
+
+        """
+        pos = stats.gamma(pos_shape, scale=pos_scale).pdf
+        neg = stats.gamma(neg_shape, scale=neg_scale).pdf
+        tps = np.arange(0, duration, 1 / res, np.float)
+
+        y = pos(tps) - ratio * neg(tps)
+        y /= y.sum()
+
+        if derivative:
+            dydt = self._temporal_derivative(y)
+            self.kernel = y, dydt
+        else:
+            self.kernel = y, None
+
+    def _temporal_derivative(self, y):
+        """Compute the scaled temporal derivative of the input."""
+        from numpy import diff, sum, square, sqrt
+        dydt = np.zeros_like(y)
+        dydt[1:] = diff(y)
+        dydt *= sqrt(sum(square(y)) / sum(square(dydt)))
+        return dydt
+
+    def transform(self, input):
+        """Generate a prediction basis set for the input through convolution.
+
+        Parameters
+        ----------
+        input : array or series
+            Input data; should be one-dimensional
+
+        Returns
+        -------
+        output : pair of arrays or series or None
+            Output data; has same type of input, and the derivative output
+            is always included but may be None if the model has no derivative.
+
+        """
+        n_tp = len(input)
+        y, dydt = self.kernel
+
+        y = np.convolve(input, y)[:n_tp]
+        if dydt is None:
+            dy = None
+        else:
+            dy = np.convolve(input, dydt)[:n_tp]
+
+        if isinstance(input, pd.Series):
+            y = pd.Series(y, input.index, name=input.name)
+            if dy is not None:
+                dy = pd.Series(dy, input.index, name=input.name + "-dydt")
+
+        # TODO is always returning a pair helpful or a nuisance?
+        # upside: when building the design matrix, a flat column list can be
+        # extended, and then pd.concat will drop the Nones
+        # downside: when just interested in the cannonical prediction, it's
+        # a minor pain to have to index into the return value
+        # in any case, transform() should probably have the same behavior
+        # as kernel in terms of what it returns
+
+        return y, dy
+
+
+def build_design_matrix(events=None, hrf_model=None,
+                        regressors=None, artifacts=None,
+                        n_tp=None, tr=1, res=60, shift=.5,
+                        hpf_matrix=None, demean=True):
+
+    pass
 
 
 def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):

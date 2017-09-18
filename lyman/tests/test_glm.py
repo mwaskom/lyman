@@ -1,6 +1,7 @@
 from __future__ import division
 import os.path as op
 import numpy as np
+import pandas as pd
 import nibabel as nib
 
 from scipy.signal import periodogram
@@ -14,6 +15,108 @@ from .. import glm
 def assert_highly_correlated(a, b, thresh=.999):
     corr = np.corrcoef(a.flat, b.flat)[0, 1]
     assert corr > thresh
+
+
+class TestHRFs(object):
+
+    @pytest.fixture
+    def random(self):
+
+        seed = sum(map(ord, "hrfs"))
+        return np.random.RandomState(seed)
+
+    @pytest.fixture
+    def input(self, random):
+
+        return random.randn(100)
+
+    def test_base(self):
+
+        with pytest.raises(NotImplementedError):
+            glm.HRFModel().transform(None)
+
+    @pytest.mark.parametrize(
+        "res,duration", [(10, 20), (24, 42)])
+    def test_gamma_hrf_kernel_size(self, res, duration):
+
+        hrf = glm.GammaHRF(res=res, duration=duration)
+        k, _ = hrf.kernel
+        assert len(k) == res * duration
+
+        hrf = glm.GammaHRF(derivative=True, res=res, duration=duration)
+        k, dkdt = hrf.kernel
+        assert len(k) == res * duration
+        assert len(dkdt) == res * duration
+
+    def test_kernel_normalization(self):
+
+        hrf = glm.GammaHRF()
+        k, _ = hrf.kernel
+        assert k.sum() == pytest.approx(1)
+
+    def test_undershoot(self, random):
+
+        double = glm.GammaHRF()
+        assert double.kernel[0].min() < 0
+
+        single = glm.GammaHRF(ratio=0)
+        assert single.kernel[0].min() >= 0
+
+    def test_gamma_hrf_output_type(self, random, input):
+
+        a = np.asarray(input)
+        s = pd.Series(input, name="event")
+
+        hrf = glm.GammaHRF()
+        a_out = hrf.transform(a)
+        s_out = hrf.transform(s)
+
+        assert isinstance(a_out[0], np.ndarray)
+        assert a_out[1] is None
+        assert isinstance(s_out[0], pd.Series)
+        assert s_out[1] is None
+
+        hrf = glm.GammaHRF(derivative=True)
+        a_out = hrf.transform(a)
+        s_out = hrf.transform(s)
+
+        assert isinstance(a_out[0], np.ndarray)
+        assert isinstance(a_out[1], np.ndarray)
+        assert isinstance(s_out[0], pd.Series)
+        assert isinstance(s_out[1], pd.Series)
+
+    def test_gamma_hrf_convolution(self, random, input):
+
+        hrf = glm.GammaHRF()
+        k, _ = hrf.kernel
+        convolution = np.convolve(input, k)[:len(input)]
+        assert hrf.transform(input)[0] == pytest.approx(convolution)
+
+    def test_output_names(self, random, input):
+
+        name = "event"
+        s = pd.Series(input, name=name)
+        hrf = glm.GammaHRF(derivative=True)
+        y, dydt = hrf.transform(s)
+        assert y.name == name
+        assert dydt.name == name + "-dydt"
+
+    def test_output_index(self, random, input):
+
+        n = len(input)
+        name = "event"
+        idx = pd.Index(random.permutation(np.arange(n)))
+        s = pd.Series(input, idx, name=name)
+
+        hrf = glm.GammaHRF(derivative=True)
+        y, dydt = hrf.transform(s)
+        assert y.index.equals(idx)
+        assert dydt.index.equals(idx)
+
+
+class TestDesignMatrix(object):
+
+    pass
 
 
 class TestLinearModel(object):
