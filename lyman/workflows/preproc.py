@@ -1135,10 +1135,8 @@ class RealignmentReport(LymanInterface):
         df = pd.DataFrame(params, columns=cols)
 
         # Plot the motion timeseries
-        params_plot = self.define_output("params_plot", "mc_params.png")
         f = self.plot_motion(df)
-        f.savefig(params_plot, dpi=100)
-        plt.close(f)
+        self.write_visualization("params_plot", "mc_params.png", f)
 
         # Plot the target image
         m = self.plot_target()

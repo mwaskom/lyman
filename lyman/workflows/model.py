@@ -11,7 +11,7 @@ from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
 from .. import glm, signals, surface
 from ..utils import LymanInterface, SaveInfo, image_to_matrix, matrix_to_image
-from ..visualizations import Mosaic, CarpetPlot
+from ..visualizations import Mosaic, CarpetPlot, plot_design_matrix
 
 
 def define_model_fit_workflow(info, subjects, sessions, qc=True):
@@ -566,10 +566,8 @@ class ModelFit(LymanInterface):
         self.write_visualization("resid_plot", "resid.png", p)
 
         # Plot the deisgn matrix
-        design_plot = self.define_output("design_plot", "design.png")
-        # TODO add to visualization module and fix
-        with open(design_plot, "w") as fid:
-            fid.write(" ")
+        f = plot_design_matrix(X)
+        self.write_visualization("design_plot", "design.png", f)
 
         # Plot the sigma squares image for QC
         error_m = Mosaic(mean_img, error_img, mask_img)
