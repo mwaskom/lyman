@@ -10,18 +10,25 @@ from .utils import image_to_matrix, matrix_to_image
 
 
 class HRFModel(object):
-
+    """Abstract base class for HRF models used in design construction."""
     def transform(self, input):
         """Generate a basis set for the predicted response to the input."""
         raise NotImplementedError
 
 
-class GammaHRF(HRFModel):
+class IdentityHRF(HRFModel):
+    """Model that does not alter input during transform; useful for testing."""
+    def transform(self, input):
+        """Return input witout altering."""
+        return input
 
+
+class GammaHRF(HRFModel):
+    """Gamma PDF model of HRF with undershoot and temporal derivative."""
     def __init__(self, derivative=False, res=60, duration=32,
                  pos_shape=6, pos_scale=1, neg_shape=16, neg_scale=1,
                  ratio=1/6):
-        """Gamma PDF model of the HRF, possibly with temporal derivative.
+        """Initialize the object with parameters that define response shape.
 
         Parameters
         ----------
@@ -159,10 +166,15 @@ def conditions_to_regressors(name, conditions, hrf_model,
     hires_input = pd.Series(hires_input, name=name)
     hires_output = hrf_model.transform(hires_input)
 
+    # TODO this is bad!
+    if isinstance(hires_output, (pd.Series, pd.DataFrame)):
+        hires_output = (hires_output,)
+
     # Downsample the predicted regressors to native sampling
     output = []
     for hires_col in hires_output:
         # TODO having to do this is a pain!
+        # TODO also this doesn't handle 1D outputs:
         if hires_col is None:
             output.append(None)
             continue
@@ -187,7 +199,7 @@ def build_design_matrix(conditions=None, hrf_model=None,
         event occurrences.
     hrf_model : HRFModel object
         Object that implements `.transform()` to return a basis set for the
-        predicted response.
+        predicted response. Defaults to GammaHRF with default parameters.
     regressors : dataframe
         Additional columns to include in the design matrix without any
         transformation (aside from optional de-meaning). It must have an
@@ -216,47 +228,68 @@ def build_design_matrix(conditions=None, hrf_model=None,
         Design matrix with timepoints in rows and regressors in columns.
 
     """
-    # TODO default n_tp from other regressors or artifacts?
+    if hrf_model is None:
+        hrf_model = GammaHRF(res=res)
+
+    # -- Default design size and quality control on input shapes
+
+    if regressors is not None:
+        n_reg_tp = len(regressors)
+        n_tp = n_reg_tp if n_tp is None else n_tp
+        if n_tp != n_reg_tp:
+            err = "Size of regressors does not correspond with `n_tp`"
+            raise ValueError(err)
+
+    if artifacts is not None:
+        n_art_tp = len(artifacts)
+        n_tp = n_art_tp if n_tp is None else n_tp
+        if n_tp != n_art_tp:
+            err = "Size of artifacts does not correspond with `n_tp`"
+            raise ValueError(err)
+
+    index = pd.Index(np.arange(0, n_tp * tr, tr))
+
     # -- Condition information (i.e. experimental design)
+    design_components = []
+    if conditions is not None:
 
-    # Default values for some fields
-    if "duration" not in conditions:
-        conditions.loc[:, "duration"] = 0
-    if "value" not in conditions:
-        conditions.loc[:, "value"] = 1
+        # Default values for some fields
+        if "duration" not in conditions:
+            conditions.loc[:, "duration"] = 0
+        if "value" not in conditions:
+            conditions.loc[:, "value"] = 1
 
-    # Build regressors for each condition
-    condition_columns = []
-    for name, info in conditions.groupby("condition"):
-        cols = conditions_to_regressors(name, info, hrf_model,
-                                        n_tp, tr, res, shift)
-        condition_columns.extend(cols)
+        # Build regressors for each condition
+        condition_columns = []
+        for name, info in conditions.groupby("condition"):
+            cols = conditions_to_regressors(name, info, hrf_model,
+                                            n_tp, tr, res, shift)
+            condition_columns.extend(cols)
 
-    # Assemble the initial component of the design matrix
-    X = pd.concat(condition_columns, axis=1)
+        # Assemble the initial component of the design matrix
+        condition_columns = pd.concat(condition_columns, axis=1)
 
-    # High-pass filter the condition information
-    if hpf_matrix is not None:
-        prefilter_means = X.mean()
-        X.values[:] = hpf_matrix.dot(X.values)
-        X += prefilter_means
+        # High-pass filter the condition information
+        if hpf_matrix is not None:
+            prefilter_means = condition_columns.mean()
+            condition_columns.values[:] = hpf_matrix.dot(condition_columns)
+            condition_columns += prefilter_means
+
+        design_components.append(condition_columns)
 
     # -- Other regressors
     if regressors is not None:
-        if not X.index.equals(regressors.index):
-            # TODO maybe match on size and fire a warning instead?
-            err = "The `regressors` index does not match the design index."
-            raise ValueError(err)
-        X = pd.concat([X, regressors], axis=1)
+        design_components.append(regressors)
 
     # -- Indicator regressors for signal artifacts
     if artifacts is not None:
         indicators = np.eye(n_tp)[:, artifacts.astype(np.bool)]
         columns = ["art{:02d}".format(i) for i in range(artifacts.sum())]
-        indicators = pd.DataFrame(indicators, columns, X.index, np.float)
-        X = pd.concat([X, indicators], axis=1)
+        indicators = pd.DataFrame(indicators, index, columns, np.float)
+        design_components.append(indicators)
 
-    # -- Postprocessing
+    # -- Final assembly
+    X = pd.concat(design_components, axis=1)
     if demean:
         X -= X.mean()
 

@@ -1,5 +1,6 @@
 from __future__ import division
 import os.path as op
+from itertools import product
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -35,8 +36,14 @@ class TestHRFs(object):
         with pytest.raises(NotImplementedError):
             glm.HRFModel().transform(None)
 
+    def test_identity(self, input):
+
+        output = glm.IdentityHRF().transform(input)
+        assert np.array_equal(output, input)
+
     @pytest.mark.parametrize(
-        "res,duration", [(10, 20), (24, 42)])
+        "res,duration",
+        product((10, 20), (24, 42)))
     def test_gamma_hrf_kernel_size(self, res, duration):
 
         hrf = glm.GammaHRF(res=res, duration=duration)
@@ -132,6 +139,107 @@ class TestDesignMatrix(object):
             value=[1, 1, 1, 1],
         ))
         return conditions
+
+    @pytest.fixture
+    def regressors(self, random):
+
+        data = random.normal(2, 1, (48, 3))
+        columns = ["x", "y", "z"]
+        regressors = pd.DataFrame(data, columns=columns)
+        return regressors
+
+    @pytest.fixture
+    def artifacts(self, random):
+
+        return pd.Series(random.rand(48) < .1)
+
+    @pytest.mark.parametrize(
+        "n_tp,tr,deriv",
+        product((24, 28), (1, 2), (False, True)))
+    def test_design_shape_and_index(self, conditions, tr, n_tp, deriv):
+
+        X = glm.build_design_matrix(conditions, glm.GammaHRF(deriv),
+                                    n_tp=n_tp, tr=tr)
+
+        assert isinstance(X, pd.DataFrame)
+        assert X.shape == (n_tp, 2 * (2 if deriv else 1))
+
+        tps = np.arange(0, n_tp * tr, tr)
+        assert np.array_equal(X.index.values, tps)
+
+    def test_design_contents(self, conditions):
+
+        n_tp, tr = 48, 1
+        X = glm.build_design_matrix(conditions, glm.IdentityHRF(),
+                                    n_tp=n_tp, tr=tr, demean=False)
+
+        expected_a = np.zeros(n_tp)
+        expected_a[[0, 1, 24, 25]] = 1
+        assert np.array_equal(X["a"].values, expected_a)
+
+        n_tp, tr = 24, 2
+        X = glm.build_design_matrix(conditions, glm.IdentityHRF(),
+                                    n_tp=n_tp, tr=tr, demean=False)
+
+        expected_a = np.zeros(n_tp)
+        expected_a[[0 // tr, 24 // tr]] = 1
+        assert isinstance(X, pd.DataFrame)
+        assert np.array_equal(X["a"].values, expected_a)
+
+    def test_design_regressors(self, conditions, regressors):
+
+        cols = regressors.columns.tolist()
+
+        X = glm.build_design_matrix(regressors=regressors)
+        assert X.columns.tolist() == cols
+        assert np.array_equal(X[cols], regressors - regressors.mean())
+
+        X = glm.build_design_matrix(conditions, regressors=regressors)
+        assert X.columns.tolist() == ["a", "b"] + cols
+        assert np.array_equal(X[cols], regressors - regressors.mean())
+
+        X = glm.build_design_matrix(regressors=regressors, demean=False)
+        assert np.array_equal(X[cols], regressors)
+
+    def test_design_artifacts(self, conditions, artifacts):
+
+        cols = ["art{:02d}".format(i) for i in range(artifacts.sum())]
+
+        X = glm.build_design_matrix(artifacts=artifacts)
+        assert X.columns.tolist() == cols
+        assert X.shape == (48, artifacts.sum())
+
+        X = glm.build_design_matrix(conditions, artifacts=artifacts)
+        assert X.columns.tolist() == ["a", "b"] + cols
+
+    def test_n_tp_errors(self, conditions, regressors, artifacts):
+
+        with pytest.raises(ValueError):
+            glm.build_design_matrix(regressors=regressors, n_tp=20)
+
+        with pytest.raises(ValueError):
+            glm.build_design_matrix(artifacts=artifacts, n_tp=20)
+
+        with pytest.raises(ValueError):
+            glm.build_design_matrix(regressors=regressors,
+                                    artifacts=artifacts.iloc[:20])
+
+    def test_hpf(self, conditions):
+
+        n_tp = 48
+        F = glm.highpass_filter_matrix(n_tp, 20, 1)
+        X = glm.build_design_matrix(conditions, hpf_matrix=F, n_tp=n_tp)
+        assert len(X) == len(F)
+
+    def test_condition_defaults(self, conditions):
+
+        conditions.loc[:, "duration"] = 0
+        conditions.loc[:, "value"] = 1
+        min_cols = ["condition", "onset"]
+
+        X1 = glm.build_design_matrix(conditions, n_tp=48)
+        X2 = glm.build_design_matrix(conditions[min_cols].copy(), n_tp=48)
+        assert np.array_equal(X1.values, X2.values)
 
 
 class TestLinearModel(object):
