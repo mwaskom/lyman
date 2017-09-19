@@ -289,6 +289,27 @@ class TestModelWorkflows(object):
         assert nib.load(out.tstat_file).shape[-1] == n_contrasts
         assert len(np.loadtxt(out.name_file, str)) == n_contrasts
 
+    def test_missing_contrasts(self, execdir, modelfit):
+
+        info = deepcopy(modelfit["info"].trait_get())
+        n_contrasts = len(info["contrasts"])
+        info["contrasts"].append(("d", ["d"], [1]))
+
+        out = model.EstimateContrasts(
+            info=info,
+            mask_file=modelfit["mask_file"],
+            beta_file=modelfit["beta_file"],
+            ols_file=modelfit["ols_file"],
+            error_file=modelfit["error_file"],
+            design_file=modelfit["design_file"],
+        ).run().outputs
+
+        # Test output image shapes
+        assert nib.load(out.contrast_file).shape[-1] == n_contrasts
+        assert nib.load(out.variance_file).shape[-1] == n_contrasts
+        assert nib.load(out.tstat_file).shape[-1] == n_contrasts
+        assert len(np.loadtxt(out.name_file, str)) == n_contrasts
+
     def test_model_results(self, execdir, modelres):
 
         out = model.ModelResults(
