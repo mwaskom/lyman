@@ -1,3 +1,4 @@
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -309,31 +310,50 @@ def modelfit(timeseries):
 @pytest.fixture()
 def modelres(modelfit):
 
-    seed = sum(map(ord, "modelfit"))
+    seed = sum(map(ord, "modelres"))
     rs = np.random.RandomState(seed)
 
     vol_shape = modelfit["vol_shape"]
     affine = modelfit["affine"]
-    n_contrasts = len(modelfit["info"].contrasts)
 
-    model_dir = modelfit["model_dir"]
+    name_lists = [
+        ["a", "b", "c", "a-b"],
+        ["a", "b", "a-b"],
+    ]
+    run_ns = [len(n_list) for n_list in name_lists]
 
-    contrast_data = rs.normal(0, 5, vol_shape + (n_contrasts,))
-    contrast_file = str(model_dir.join("contrast.nii.gz"))
-    nib.save(nib.Nifti1Image(contrast_data, affine), contrast_file)
+    exp_name = modelfit["info"].experiment_name
+    model_name = modelfit["info"].model_name
+    session = "s1"
+    runs = ["r1", "r2"]
 
-    variance_data = rs.uniform(0, 5, vol_shape + (n_contrasts,))
-    variance_file = str(model_dir.join("variance.nii.gz"))
-    nib.save(nib.Nifti1Image(variance_data, affine), variance_file)
+    model_dir_base = (modelfit["proc_dir"]
+                      .join(modelfit["subject"])
+                      .join(exp_name)
+                      .join(model_name))
+    model_dirs = [
+        model_dir_base.mkdir("{}_{}".format(session, run))
+        for run in runs
+    ]
 
-    tstat_data = rs.normal(0, 2, vol_shape + (n_contrasts,))
-    tstat_file = str(model_dir.join("tstat.nii.gz"))
-    nib.save(nib.Nifti1Image(tstat_data, affine), tstat_file)
+    con_data = [rs.normal(0, 5, vol_shape + (n,)) for n in run_ns]
+    con_files = [str(d.join("contrast.nii.gz")) for d in model_dirs]
+    for d, f in zip(con_data, con_files):
+        nib.save(nib.Nifti1Image(d, affine), f)
+
+    var_data = [rs.uniform(0, 5, vol_shape + (n,)) for n in run_ns]
+    var_files = [str(d.join("variance.nii.gz")) for d in model_dirs]
+    for d, f in zip(var_data, var_files):
+        nib.save(nib.Nifti1Image(d, affine), f)
+
+    name_files = [str(d.join("contrast.txt")) for d in model_dirs]
+    for l, f in zip(name_lists, name_files):
+        np.savetxt(f, l, "%s")
 
     modelfit.update(
-        contrast_file=contrast_file,
-        variance_file=variance_file,
-        tstat_file=tstat_file,
+        contrast_files=con_files,
+        variance_files=var_files,
+        name_files=name_files,
     )
     return modelfit
 

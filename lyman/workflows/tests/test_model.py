@@ -1,4 +1,6 @@
 import os.path as op
+from copy import deepcopy
+import numpy as np
 import pandas as pd
 import nibabel as nib
 import nipype
@@ -278,22 +280,25 @@ class TestModelWorkflows(object):
         assert out.contrast_file == execdir.join("contrast.nii.gz")
         assert out.variance_file == execdir.join("variance.nii.gz")
         assert out.tstat_file == execdir.join("tstat.nii.gz")
+        assert out.name_file == execdir.join("contrast.txt")
 
         # Test output image shapes
-        # TODO this needs to be fixed once contrasts info is finished
-
-        # TODO we should also test "missing" contrast behavior here
+        n_contrasts = len(modelfit["info"].contrasts)
+        assert nib.load(out.contrast_file).shape[-1] == n_contrasts
+        assert nib.load(out.variance_file).shape[-1] == n_contrasts
+        assert nib.load(out.tstat_file).shape[-1] == n_contrasts
+        assert len(np.loadtxt(out.name_file, str)) == n_contrasts
 
     def test_model_results(self, execdir, modelres):
 
         out = model.ModelResults(
             info=modelres["info"].trait_get(),
             anat_file=modelres["anat_file"],
-            contrast_files=[modelres["contrast_file"]],
-            variance_files=[modelres["variance_file"]],
+            contrast_files=modelres["contrast_files"],
+            variance_files=modelres["variance_files"],
+            name_files=modelres["name_files"],
         ).run().outputs
 
-        result_directories = [
-            execdir.join(c) for c, _, _ in modelres["info"].contrasts
-        ]
+        contrast_names = [c for c, _, _ in modelres["info"].contrasts]
+        result_directories = [execdir.join(c) for c in contrast_names]
         assert out.result_directories == result_directories
