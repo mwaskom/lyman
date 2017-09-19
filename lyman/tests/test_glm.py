@@ -242,6 +242,43 @@ class TestDesignMatrix(object):
         assert np.array_equal(X1.values, X2.values)
 
 
+class TestContrastMatrix(object):
+
+    @pytest.fixture
+    def random(self):
+
+        seed = sum(map(ord, "contrast_matrix"))
+        return np.random.RandomState(seed)
+
+    @pytest.fixture
+    def design(self, random):
+
+        cols = list("abcd")
+        return pd.DataFrame(random.normal(0, 1, (48, 4)), columns=cols)
+
+    def test_contrast_matrix(self, design):
+
+        contrast = ("a", ["a"], [1])
+        C = glm.contrast_matrix(contrast, design)
+        assert np.array_equal(C, [1, 0, 0, 0])
+
+        contrast = ("c", ["c"], [1])
+        C = glm.contrast_matrix(contrast, design)
+        assert np.array_equal(C, [0, 0, 1, 0])
+
+        contrast = ("a-c", ["a", "c"], [1, -1])
+        C = glm.contrast_matrix(contrast, design)
+        assert np.array_equal(C, [1, 0, -1, 0])
+
+        contrast = ("a-c", ["c", "a"], [-1, 1])
+        C = glm.contrast_matrix(contrast, design)
+        assert np.array_equal(C, [1, 0, -1, 0])
+
+        contrast = ("a-bd", ["a", "b", "d"], [1, -.5, -.5])
+        C = glm.contrast_matrix(contrast, design)
+        assert np.array_equal(C, [1, -.5, 0, -.5])
+
+
 class TestLinearModel(object):
 
     @pytest.fixture()

@@ -166,7 +166,7 @@ def conditions_to_regressors(name, conditions, hrf_model,
     hires_input = pd.Series(hires_input, name=name)
     hires_output = hrf_model.transform(hires_input)
 
-    # TODO this is bad!
+    # TODO It's annoying that we have to do this!
     if isinstance(hires_output, (pd.Series, pd.DataFrame)):
         hires_output = (hires_output,)
 
@@ -174,7 +174,6 @@ def conditions_to_regressors(name, conditions, hrf_model,
     output = []
     for hires_col in hires_output:
         # TODO having to do this is a pain!
-        # TODO also this doesn't handle 1D outputs:
         if hires_col is None:
             output.append(None)
             continue
@@ -313,7 +312,12 @@ def contrast_matrix(contrast, design_matrix):
         Contrast weights with regressor names as the index.
 
     """
-    pass
+    columns = design_matrix.columns.tolist()
+    C = np.zeros(len(columns))
+    _, names, weights = contrast
+    for name, weight in zip(names, weights):
+        C[columns.index(name)] = weight
+    return C
 
 
 def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
