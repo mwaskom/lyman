@@ -271,6 +271,7 @@ class TestModelWorkflows(object):
             beta_file=modelfit["beta_file"],
             ols_file=modelfit["ols_file"],
             error_file=modelfit["error_file"],
+            design_file=modelfit["design_file"],
         ).run().outputs
 
         # Test output file names

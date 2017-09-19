@@ -60,7 +60,6 @@ def lyman_info(tmpdir):
         surface_smoothing=True,
         hpf_cutoff=10,
         save_residuals=True,
-        # TODO FIX
         contrasts=contrasts,
     )
 
@@ -97,6 +96,7 @@ def lyman_info(tmpdir):
         vol_shape=vol_shape,
         n_tp=n_tp,
         n_params=n_params,
+        design=design,
     )
 
 
@@ -263,6 +263,8 @@ def modelfit(timeseries):
     vol_shape = timeseries["vol_shape"]
     affine = timeseries["affine"]
     n_params = timeseries["n_params"]
+    n_tp = timeseries["n_tp"]
+    n_vox = np.product(vol_shape)
 
     model_dir = timeseries["model_dir"]
 
@@ -276,8 +278,10 @@ def modelfit(timeseries):
     beta_file = str(model_dir.join("beta.nii.gz"))
     nib.save(nib.Nifti1Image(beta_data, affine), beta_file)
 
-    ols_data = rs.uniform(0, 1, vol_shape + (n_params, n_params))
-    ols_data += ols_data.transpose(0, 1, 2, 4, 3)
+    ols_data = np.empty((n_vox, n_params, n_params))
+    for i in range(n_vox):
+        X = rs.normal(0, 1, (n_tp, n_params))
+        ols_data[i] = np.linalg.pinv(np.dot(X.T, X))
     ols_data = ols_data.reshape(vol_shape + (n_params ** 2,))
     ols_file = str(model_dir.join("ols.nii.gz"))
     nib.save(nib.Nifti1Image(ols_data, affine), ols_file)
@@ -286,12 +290,18 @@ def modelfit(timeseries):
     error_file = str(model_dir.join("error.nii.gz"))
     nib.save(nib.Nifti1Image(error_data, affine), error_file)
 
+    design_data = rs.normal(0, 1, (n_tp, n_params))
+    columns = np.sort(timeseries["design"]["condition"].unique())
+    design_file = str(model_dir.join("design.csv"))
+    pd.DataFrame(design_data, columns=columns).to_csv(design_file, index=False)
+
     timeseries.update(
         n_params=n_params,
         mask_file=mask_file,
         beta_file=beta_file,
         ols_file=ols_file,
         error_file=error_file,
+        design_file=design_file,
     )
     return timeseries
 
@@ -304,9 +314,7 @@ def modelres(modelfit):
 
     vol_shape = modelfit["vol_shape"]
     affine = modelfit["affine"]
-    n_params = modelfit["n_params"]
-    # TODO Fix this when constrast definition is done
-    n_contrasts = n_params
+    n_contrasts = len(modelfit["info"].contrasts)
 
     model_dir = modelfit["model_dir"]
 

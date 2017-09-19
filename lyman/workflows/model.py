@@ -200,7 +200,8 @@ def define_model_results_workflow(info, subjects, qc=True):
             [("mask_file", "mask_file"),
              ("beta_file", "beta_file"),
              ("error_file", "error_file"),
-             ("ols_file", "ols_file")]),
+             ("ols_file", "ols_file"),
+             ("design_file", "design_file")]),
 
         (data_input, model_results,
             [("anat_file", "anat_file")]),
@@ -373,6 +374,7 @@ class ModelResultsInput(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
+        design_file = traits.File(exists=True)
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -400,6 +402,7 @@ class ModelResultsInput(LymanInterface):
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
             error_file=op.join(model_path, "error.nii.gz"),
+            design_file=op.join(model_path, "design.csv"),
 
             output_path=model_path,
         )
@@ -582,6 +585,7 @@ class EstimateContrasts(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
+        design_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         contrast_file = traits.File(exists=True)
@@ -600,6 +604,8 @@ class EstimateContrasts(LymanInterface):
         SS = image_to_matrix(error_img, mask_img)
         XtXinv = image_to_matrix(ols_img, mask_img)
 
+        X = pd.read_csv(self.inputs.design_file)
+
         # Reshape the matrix form data to what the glm functions expect
         # TODO the shape/orientation of model parameter matrices needs some
         # more thinking / standardization
@@ -608,18 +614,9 @@ class EstimateContrasts(LymanInterface):
         XtXinv = XtXinv.reshape(n_ev, n_ev, n_vox).T
 
         # Obtain list of contrast matrices
-        # C = info.contrasts
-        # TODO how are we going to do this? Hardcode for now.
-        # TODO do we want to enforce vectors or do we ever want F stats
-        C = [np.array([1, 0, 0, 0]),
-             np.array([0, 1, 0, 0]),
-             np.array([0, 0, 1, 0]),
-             np.array([0, 0, 0, 1]),
-             np.array([1, -1, 0, 0]),
-             np.array([0, 0, 1, -1])]
-
-        # TODO to get tests to run make this dumber but more flexible
-        C = np.eye(B.shape[1])
+        # TODO handle contrasts with missing conditions
+        # and also add a contrast.txt file with names
+        C = [glm.contrast_matrix(c, X) for c in self.inputs.info["contrasts"]]
 
         # Estimate the contrasts, variances, and statistics in each voxel
         G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
