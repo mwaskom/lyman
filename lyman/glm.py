@@ -275,6 +275,7 @@ def build_design_matrix(conditions=None, hrf_model=None,
         condition_columns = pd.concat(condition_columns, axis=1)
 
         # High-pass filter the condition information
+        # TODO revisit to decide whether only conditions should be filtered
         if hpf_matrix is not None:
             prefilter_means = condition_columns.mean()
             condition_columns.values[:] = hpf_matrix.dot(condition_columns)
@@ -292,6 +293,8 @@ def build_design_matrix(conditions=None, hrf_model=None,
         columns = ["art{:02d}".format(i) for i in range(artifacts.sum())]
         indicators = pd.DataFrame(indicators, index, columns, np.float)
         design_components.append(indicators)
+
+    # TODO Add polynomial regressors as alternative to HPF?
 
     # -- Final assembly
     X = pd.concat(design_components, axis=1)
