@@ -9,6 +9,11 @@ from .signals import smooth_volume
 from .utils import image_to_matrix, matrix_to_image
 
 
+# =========================================================================== #
+# Design matrix construction
+# =========================================================================== #
+
+
 class HRFModel(object):
     """Abstract base class for HRF models used in design construction."""
     def transform(self, input):
@@ -110,17 +115,18 @@ class GammaHRF(HRFModel):
         return y, dy
 
 
-def conditions_to_regressors(name, conditions, hrf_model,
-                             n_tp, tr, res, shift):
+def condition_to_regressors(name, condition, hrf_model,
+                            n_tp, tr, res, shift):
     """Generate design matrix columns from information about event occurrence.
 
     Parameters
     ----------
     name : string
         Condition name.
-    conditions : dataframe
-        Must have onset (in seconds), duration (in seconds), and value (in
-        arbitrary units) columns; and should correspond to event occurrences.
+    condition : dataframe
+        Event information corresponding to a single condition. Must have onset
+        (in seconds), duration (in seconds), and value (in arbitrary units)
+        columns; and should correspond to event occurrences.
     hrf_model : HRFModel object
         Object that implements `.transform()` to return a basis set for the
         predicted response.
@@ -142,9 +148,9 @@ def conditions_to_regressors(name, conditions, hrf_model,
         matrix corresponding to this event type.
 
     """
-    onset = conditions["onset"]
-    duration = conditions["duration"]
-    value = conditions["value"]
+    onset = condition["onset"]
+    duration = condition["duration"]
+    value = condition["value"]
 
     # Define hires and output resolution timepoints
     hires_tps = np.arange(0, n_tp * tr, 1 / res)
@@ -261,8 +267,8 @@ def build_design_matrix(conditions=None, hrf_model=None,
         # Build regressors for each condition
         condition_columns = []
         for name, info in conditions.groupby("condition"):
-            cols = conditions_to_regressors(name, info, hrf_model,
-                                            n_tp, tr, res, shift)
+            cols = condition_to_regressors(name, info, hrf_model,
+                                           n_tp, tr, res, shift)
             condition_columns.extend(cols)
 
         # Assemble the initial component of the design matrix
@@ -318,6 +324,11 @@ def contrast_matrix(contrast, design_matrix):
     for name, weight in zip(names, weights):
         C[columns.index(name)] = weight
     return C
+
+
+# =========================================================================== #
+# Generalized least squares estimation
+# =========================================================================== #
 
 
 def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
@@ -587,6 +598,12 @@ def contrast_fixed_effects(G, V):
     con = var * (G / V).sum(axis=-1)
     t = con / np.sqrt(var)
     return con, var, t
+
+
+# =========================================================================== #
+# Temporal filtering
+# =========================================================================== #
+# TODO move to lyman.signals?
 
 
 def highpass_filter_matrix(n_tp, cutoff, tr=1):
