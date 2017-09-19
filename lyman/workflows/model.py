@@ -520,7 +520,7 @@ class ModelFit(LymanInterface):
 
         # Build the design matrix
         # TODO highpass filter
-        hrf_model = glm.GammaHRF(derivative=False)  # TODO info param
+        hrf_model = glm.GammaHRF(derivative=info.hrf_derivative)
         X = glm.build_design_matrix(design, hrf_model, n_tp=n_tp, tr=info.tr)
 
         # Save out the design matrix
