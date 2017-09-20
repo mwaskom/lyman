@@ -87,26 +87,7 @@ class ProjectInfo(HasTraits):
     )
 
 
-class ExperimentInfo(HasTraits):
-
-    experiment_name = Str(
-        desc="The name of the experiment."
-    )
-    tr = Float(
-        desc=dedent("""
-        The temporal resolution of the functional acquisition in seconds.
-        """),
-    )
-    crop_frames = Int(
-        0,
-        desc=dedent("""
-        The number of frames to remove from the beginning of each time series
-        during preprocessing.
-        """),
-    )
-
-
-class ModelInfo(ExperimentInfo):
+class ModelInfo(HasTraits):
 
     model_name = Str(
         desc="The name of the model."
@@ -164,7 +145,26 @@ class ModelInfo(ExperimentInfo):
     )
 
 
-class LymanInfo(ProjectInfo, ModelInfo):
+class ExperimentInfo(ModelInfo):
+
+    experiment_name = Str(
+        desc="The name of the experiment."
+    )
+    tr = Float(
+        desc=dedent("""
+        The temporal resolution of the functional acquisition in seconds.
+        """),
+    )
+    crop_frames = Int(
+        0,
+        desc=dedent("""
+        The number of frames to remove from the beginning of each time series
+        during preprocessing.
+        """),
+    )
+
+
+class LymanInfo(ProjectInfo, ExperimentInfo):
 
     pass
 
@@ -200,10 +200,9 @@ def load_scan_info(lyman_dir=None):
     return info
 
 
-def check_extra_vars(module_vars, spec, kind=None):
+def check_extra_vars(module_vars, spec):
     """Raise when unexpected information is defined to avoid errors."""
-    if kind is None:
-        kind = spec.__name__.lower().strip("info")
+    kind = spec.__name__.lower().strip("info")
     extra_vars = set(module_vars) - set(spec().trait_names())
     if extra_vars:
         msg = ("The following variables were unexpectedly present in the "
@@ -242,7 +241,7 @@ def info(experiment=None, model=None, lyman_dir=None):
 
     # --- Load project-level information
     project_info = load_info_from_module("project", lyman_dir)
-    check_extra_vars(project_info, ProjectInfo, "project")
+    check_extra_vars(project_info, ProjectInfo)
 
     # Load scan information
     project_info["scan_info"] = load_scan_info(lyman_dir)
@@ -253,7 +252,7 @@ def info(experiment=None, model=None, lyman_dir=None):
     else:
         experiment_info = load_info_from_module(experiment, lyman_dir)
         experiment_info["experiment_name"] = experiment
-        check_extra_vars(experiment_info, ModelInfo, "experiment")
+        check_extra_vars(experiment_info, ExperimentInfo)
 
     # --- Load the model-level information
     if model is None:
@@ -263,7 +262,7 @@ def info(experiment=None, model=None, lyman_dir=None):
             raise RuntimeError("Loading a model requires an experiment")
         model_info = load_info_from_module(experiment + "-" + model, lyman_dir)
         model_info["model_name"] = model
-        check_extra_vars(model_info, ModelInfo, "model")
+        check_extra_vars(model_info, ModelInfo)
 
     # TODO set default single parameter contrasts?
 
