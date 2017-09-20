@@ -733,14 +733,10 @@ class FinalizeUnwarping(LymanInterface):
         corr_img_frames = nib.load(self.inputs.corrected_file)
         corr_data = corr_img_frames.get_data()
 
-        # Jacobian modulate the corrected image
-        corr_mod_data = corr_data * jac_data
-        corr_img_frames = nib.Nifti1Image(corr_mod_data, affine, header)
-
         # Average the corrected image over the final dimension and write
-        corr_mod_data = corr_mod_data.mean(axis=-1)
+        corr_data = corr_data.mean(axis=-1)
         self.write_image("corrected_file", "func.nii.gz",
-                         corr_mod_data, affine, header)
+                         corr_data, affine, header)
 
         # Save the jacobian images using the raw geometry
         self.write_image("jacobian_file", "jacobian.nii.gz",
