@@ -33,6 +33,7 @@ class TestFrontend(object):
 
         experiment = dedent("""
         tr = .72
+        smooth_fwhm = 2.5
         """)
 
         model = dedent("""
