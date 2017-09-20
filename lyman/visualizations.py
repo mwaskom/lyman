@@ -674,3 +674,39 @@ class CarpetPlot(object):
                 ha="center", va="bottom", clip_on=False)
         ax.text(0, 103, "$-${}".format(vlim),
                 ha="center", va="top", clip_on=False)
+
+
+def plot_design_matrix(X):
+    """Show the design matrix as a transposed heatmap.
+
+    Parameters
+    ----------
+    X : dataframe
+        The design matrix with regressors in the columns.
+
+    Returns
+    -------
+    f : figure
+        The matplotlib figure with the heatmap drawn on the only axes.
+    """
+    X = X - X.min()
+    X = X / X.max()
+
+    n_col = X.shape[1]
+    figsize = 8, .5 * n_col
+    f, ax = plt.subplots(figsize=figsize)
+
+    ax.pcolormesh(X.T, cmap="gray")
+    ax.invert_yaxis()
+
+    for i in range(1, n_col):
+        ax.axhline(i, color="w", lw=1)
+
+    yticks = np.arange(n_col) + .5
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(X.columns)
+    ax.set_xticks([])
+
+    f.tight_layout()
+
+    return f

@@ -1,6 +1,7 @@
 import os.path as op
 import json
 import numpy as np
+import matplotlib.pyplot as plt
 import nibabel as nib
 
 from nipype.interfaces.base import traits, TraitedSpec, Bunch
@@ -96,9 +97,19 @@ class TestLymanInterface(object):
         ifc = utils.LymanInterface()
         ifc.write_visualization(out_field, out_path, viz)
 
-        assert op.exists("test.png")
+        assert op.exists(out_path)
         assert ifc._results == {out_field: op.join(execdir, out_path)}
         assert viz.closed
+
+        out_field = "test_figure"
+        out_path = "test_figure.png"
+
+        f = plt.figure()
+        ifc = utils.LymanInterface()
+        ifc.write_visualization(out_field, out_path, f)
+
+        assert op.exists(out_path)
+        assert ifc._results == {out_field: op.join(execdir, out_path)}
 
     def test_submit_cmdline(self, execdir):
 

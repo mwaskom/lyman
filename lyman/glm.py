@@ -1,10 +1,337 @@
 from __future__ import division
 import numpy as np
+import pandas as pd
 import scipy as sp
-from scipy import sparse
+from scipy import sparse, stats
+from scipy.interpolate import interp1d
 
 from .signals import smooth_volume
 from .utils import image_to_matrix, matrix_to_image
+
+
+# =========================================================================== #
+# Design matrix construction
+# =========================================================================== #
+
+
+class HRFModel(object):
+    """Abstract base class for HRF models used in design construction."""
+    def transform(self, input):
+        """Generate a basis set for the predicted response to the input."""
+        raise NotImplementedError
+
+
+class IdentityHRF(HRFModel):
+    """Model that does not alter input during transform; useful for testing."""
+    def transform(self, input):
+        """Return input witout altering."""
+        return input
+
+
+class GammaHRF(HRFModel):
+    """Gamma PDF model of HRF with undershoot and temporal derivative."""
+    def __init__(self, derivative=False, res=60, duration=32,
+                 pos_shape=6, pos_scale=1, neg_shape=16, neg_scale=1,
+                 ratio=1/6):
+        """Initialize the object with parameters that define response shape.
+
+        Parameters
+        ----------
+        derivative : bool
+            If True, include a temporal derivative basis function.
+        res : float
+            Sampling frequency at which to generate the convolution kernel.
+        duration : float
+            Duration of the convolution kernel.
+        pos_{shape, scale} : floats
+            Parameters for scipy.stats.gamma defining the initial positive
+            component of the response.
+        neg_{shape, scale} : floats
+            Parameters for scipy.stats.gamma defining the later negative
+            component of the response.
+        ratio : float
+            Ratio between the amplitude of the positive component to the
+            amplitude of the negative component.
+
+        """
+        pos = stats.gamma(pos_shape, scale=pos_scale).pdf
+        neg = stats.gamma(neg_shape, scale=neg_scale).pdf
+        tps = np.arange(0, duration, 1 / res, np.float)
+
+        y = pos(tps) - ratio * neg(tps)
+        y /= y.sum()
+
+        if derivative:
+            dydt = self._temporal_derivative(y)
+            self.kernel = y, dydt
+        else:
+            self.kernel = y, None
+
+    def _temporal_derivative(self, y):
+        """Compute the scaled temporal derivative of the input."""
+        from numpy import diff, sum, square, sqrt
+        dydt = np.zeros_like(y)
+        dydt[1:] = diff(y)
+        dydt *= sqrt(sum(square(y)) / sum(square(dydt)))
+        return dydt
+
+    def transform(self, input):
+        """Generate a prediction basis set for the input through convolution.
+
+        Parameters
+        ----------
+        input : array or series
+            Input data; should be one-dimensional
+
+        Returns
+        -------
+        output : pair of arrays or series or None
+            Output data; has same type of input, and the derivative output
+            is always included but may be None if the model has no derivative.
+
+        """
+        n_tp = len(input)
+        y, dydt = self.kernel
+
+        y = np.convolve(input, y)[:n_tp]
+        if dydt is None:
+            dy = None
+        else:
+            dy = np.convolve(input, dydt)[:n_tp]
+
+        if isinstance(input, pd.Series):
+            y = pd.Series(y, input.index, name=input.name)
+            if dy is not None:
+                dy = pd.Series(dy, input.index, name=input.name + "-dydt")
+
+        # TODO Is always returning a pair helpful or a nuisance?
+        # Upside: when building the design matrix, a flat column list can be
+        # extended, and then pd.concat will drop the Nones.
+        # Downside: when just interested in the canonical prediction, it's
+        # a minor pain to have to index into the return value.
+        # in any case, transform() should probably have the same behavior
+        # as kernel in terms of what it returns
+
+        return y, dy
+
+
+def condition_to_regressors(name, condition, hrf_model,
+                            n_tp, tr, res, shift):
+    """Generate design matrix columns from information about event occurrence.
+
+    Parameters
+    ----------
+    name : string
+        Condition name.
+    condition : dataframe
+        Event information corresponding to a single condition. Must have onset
+        (in seconds), duration (in seconds), and value (in arbitrary units)
+        columns; and should correspond to event occurrences.
+    hrf_model : HRFModel object
+        Object that implements `.transform()` to return a basis set for the
+        predicted response.
+    n_tp : int
+        Number of time points in the final output.
+    tr : float
+        Time resolution of the output regressor, in seconds.
+    res : float
+        Sampling resolution at which to construct the regressor and perform
+        convolution with the HRF model.
+    shift : float
+        Proportion of the TR to shift the predicted response when downsampling
+        to the output resolution.
+
+    Returns
+    -------
+    regressors : column(s)
+        One or more output regressors that will form columns in the design
+        matrix corresponding to this event type.
+
+    """
+    onset = condition["onset"]
+    duration = condition["duration"]
+    value = condition["value"]
+
+    # Define hires and output resolution timepoints
+    hires_tps = np.arange(0, n_tp * tr, 1 / res)
+    # TODO should output timepoints reflect shifting or not?
+    tps = np.arange(0, n_tp * tr, tr)
+
+    # Initialize the array that will be transformed
+    hires_input = np.zeros_like(hires_tps, np.float)
+
+    # Determine the time points at which each even starts and stops
+    onset_at = np.round(onset * res).astype(int)
+    offset_at = np.round((onset + duration) * res).astype(int)
+
+    # Insert specified amplitudes for each event duration
+    for start, end, value in zip(onset_at, offset_at, value):
+        hires_input[start:(end + 1)] = value
+
+    # Transform into a regressor basis set
+    hires_input = pd.Series(hires_input, name=name)
+    hires_output = hrf_model.transform(hires_input)
+
+    # TODO It's annoying that we have to do this!
+    if isinstance(hires_output, (pd.Series, pd.DataFrame)):
+        hires_output = (hires_output,)
+
+    # Downsample the predicted regressors to native sampling
+    output = []
+    for hires_col in hires_output:
+        # TODO having to do this is a pain!
+        if hires_col is None:
+            output.append(None)
+            continue
+        col = interp1d(hires_tps, hires_col)(tps + shift)
+        output.append(pd.Series(col, index=tps, name=hires_col.name))
+
+    return tuple(output)
+
+
+def build_design_matrix(conditions=None, hrf_model=None,
+                        regressors=None, artifacts=None,
+                        n_tp=None, tr=1, res=60, shift=.5,
+                        hpf_matrix=None, demean=True):
+    """Use design information to build a matrix for a BOLD time series GLM.
+
+    Parameters
+    ----------
+    conditions : dataframe
+        Must have `condition` (a string) and `onset` (in seconds) columns.  Can
+        also have `duration` (in seconds, defaulting to 0), and `value` (in
+        arbitrary units, defaulting to 1) columns; rows should correspond to
+        event occurrences.
+    hrf_model : HRFModel object
+        Object that implements `.transform()` to return a basis set for the
+        predicted response. Defaults to GammaHRF with default parameters.
+    regressors : dataframe
+        Additional columns to include in the design matrix without any
+        transformation (aside from optional de-meaning). It must have an
+        index with valid time points.
+    artifacts : boolean series
+        A Series indicating which row should have indicator regressors
+        included in the design matrix to account for signal artifacts.
+    n_tp : int
+        The number of timepoints in the
+    tr : float
+        Time resolution of the output regressors, in seconds.
+    res : float
+        Sampling resolution at which to construct the condition regressors and
+        perform convolution with the HRF model.
+    shift : float
+        Proportion of the TR to shift the predicted response when downsampling
+        to the output resolution.
+    hpf_matrix : n_tp x n_tp array
+        Matrix for high-pass filtering the condition regressors.
+    demean : bool
+        If True, each column in the output matrix will be mean-centered.
+
+    Returns
+    -------
+    X : dataframe
+        Design matrix with timepoints in rows and regressors in columns.
+
+    """
+    if hrf_model is None:
+        hrf_model = GammaHRF(res=res)
+
+    # -- Default design size and quality control on input shapes
+
+    if regressors is not None:
+        n_reg_tp = len(regressors)
+        n_tp = n_reg_tp if n_tp is None else n_tp
+        if n_tp != n_reg_tp:
+            err = "Size of regressors does not correspond with `n_tp`"
+            raise ValueError(err)
+
+    if artifacts is not None:
+        n_art_tp = len(artifacts)
+        n_tp = n_art_tp if n_tp is None else n_tp
+        if n_tp != n_art_tp:
+            err = "Size of artifacts does not correspond with `n_tp`"
+            raise ValueError(err)
+
+    index = pd.Index(np.arange(0, n_tp * tr, tr))
+
+    # -- Condition information (i.e. experimental design)
+    design_components = []
+    if conditions is not None:
+
+        # Default values for some fields
+        if "duration" not in conditions:
+            conditions.loc[:, "duration"] = 0
+        if "value" not in conditions:
+            conditions.loc[:, "value"] = 1
+
+        # Build regressors for each condition
+        condition_columns = []
+        for name, info in conditions.groupby("condition"):
+            cols = condition_to_regressors(name, info, hrf_model,
+                                           n_tp, tr, res, shift)
+            condition_columns.extend(cols)
+
+        # Assemble the initial component of the design matrix
+        condition_columns = pd.concat(condition_columns, axis=1)
+
+        # High-pass filter the condition information
+        # TODO revisit to decide whether only conditions should be filtered
+        if hpf_matrix is not None:
+            prefilter_means = condition_columns.mean()
+            condition_columns.values[:] = hpf_matrix.dot(condition_columns)
+            condition_columns += prefilter_means
+
+        design_components.append(condition_columns)
+
+    # -- Other regressors
+    if regressors is not None:
+        design_components.append(regressors)
+
+    # -- Indicator regressors for signal artifacts
+    if artifacts is not None:
+        indicators = np.eye(n_tp)[:, artifacts.astype(np.bool)]
+        columns = ["art{:02d}".format(i) for i in range(artifacts.sum())]
+        indicators = pd.DataFrame(indicators, index, columns, np.float)
+        design_components.append(indicators)
+
+    # TODO Add polynomial regressors as alternative to HPF?
+
+    # -- Final assembly
+    X = pd.concat(design_components, axis=1)
+    if demean:
+        X -= X.mean()
+
+    return X
+
+
+def contrast_matrix(contrast, design_matrix):
+    """Return a contrast matrix that is valid for a given design matrix.
+
+    Parameters
+    ----------
+    contrast : tuple
+        A tuple with (1) the name of the contrast, (2) the involved regressors,
+        and (3) the weight to use for each of those regressors.
+    design_matrix : dataframe
+        Design matrix with regressor names corresponding to contrast elements.
+
+    Returns
+    -------
+    contrast_matrix : series
+        Contrast weights with regressor names as the index.
+
+    """
+    columns = design_matrix.columns.tolist()
+    C = np.zeros(len(columns))
+    _, names, weights = contrast
+    for name, weight in zip(names, weights):
+        C[columns.index(name)] = weight
+    return C
+
+
+# =========================================================================== #
+# Generalized least squares estimation
+# =========================================================================== #
 
 
 def prewhiten_image_data(ts_img, mask_img, X, smooth_fwhm=5):
@@ -274,6 +601,12 @@ def contrast_fixed_effects(G, V):
     con = var * (G / V).sum(axis=-1)
     t = con / np.sqrt(var)
     return con, var, t
+
+
+# =========================================================================== #
+# Temporal filtering
+# =========================================================================== #
+# TODO move to lyman.signals?
 
 
 def highpass_filter_matrix(n_tp, cutoff, tr=1):

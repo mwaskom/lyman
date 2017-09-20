@@ -3,6 +3,7 @@ import subprocess as sp
 import json
 
 import numpy as np
+import matplotlib.pyplot as plt
 import nibabel as nib
 from nipype.interfaces.base import BaseInterface, TraitedSpec, traits
 
@@ -37,7 +38,11 @@ class LymanInterface(BaseInterface):
     def write_visualization(self, field, fname, viz):
         """Write a visualization to disk and assign path to output field."""
         fname = self.define_output(field, fname)
-        viz.savefig(fname, close=True)
+        if isinstance(viz, plt.Figure):
+            viz.savefig(fname, dpi=100)
+            plt.close(viz)
+        else:
+            viz.savefig(fname, close=True)
 
     def submit_cmdline(self, runtime, cmdline):
         """Submit a command-line job and capture the output."""

@@ -9,11 +9,9 @@ import nibabel as nib
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
-from moss import glm as mossglm  # TODO move into lyman
-
 from .. import glm, signals, surface
 from ..utils import LymanInterface, SaveInfo, image_to_matrix, matrix_to_image
-from ..visualizations import Mosaic, CarpetPlot
+from ..visualizations import Mosaic, CarpetPlot, plot_design_matrix
 
 
 def define_model_fit_workflow(info, subjects, sessions, qc=True):
@@ -163,7 +161,8 @@ def define_model_results_workflow(info, subjects, qc=True):
                              name="model_results",
                              joinsource="run_source",
                              joinfield=["contrast_files",
-                                        "variance_files"])
+                                        "variance_files",
+                                        "name_files"])
 
     # --- Data output
 
@@ -202,13 +201,15 @@ def define_model_results_workflow(info, subjects, qc=True):
             [("mask_file", "mask_file"),
              ("beta_file", "beta_file"),
              ("error_file", "error_file"),
-             ("ols_file", "ols_file")]),
+             ("ols_file", "ols_file"),
+             ("design_file", "design_file")]),
 
         (data_input, model_results,
             [("anat_file", "anat_file")]),
         (estimate_contrasts, model_results,
             [("contrast_file", "contrast_files"),
-             ("variance_file", "variance_files")]),
+             ("variance_file", "variance_files"),
+             ("name_file", "name_files")]),
 
         (run_source, save_info,
             [("run", "parameterization")]),
@@ -375,6 +376,7 @@ class ModelResultsInput(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
+        design_file = traits.File(exists=True)
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -402,6 +404,7 @@ class ModelResultsInput(LymanInterface):
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
             error_file=op.join(model_path, "error.nii.gz"),
+            design_file=op.join(model_path, "design.csv"),
 
             output_path=model_path,
         )
@@ -506,8 +509,7 @@ class ModelFit(LymanInterface):
         # Convert to percent signal change?
         # TODO
 
-        # Build the design matrix
-        # TODO move out of moss and simplify
+        # Get the design information for this run
         design_file = op.join(data_dir, subject, "design",
                               info.model_name + ".csv")
         design = pd.read_csv(design_file)
@@ -515,16 +517,19 @@ class ModelFit(LymanInterface):
         design = design.loc[run_rows]
         # TODO better error when this fails (maybe check earlier too)
         assert len(design) > 0
-        dmat = mossglm.DesignMatrix(design, ntp=n_tp, tr=info.tr)
-        X = dmat.design_matrix.values
+
+        # Build the design matrix
+        # TODO highpass filter
+        hrf_model = glm.GammaHRF(derivative=info.hrf_derivative)
+        X = glm.build_design_matrix(design, hrf_model, n_tp=n_tp, tr=info.tr)
 
         # Save out the design matrix
         design_file = self.define_output("design_file", "design.csv")
-        dmat.design_matrix.to_csv(design_file, index=False)
+        X.to_csv(design_file, index=False)
 
         # Prewhiten the data
         ts_img = nib.Nifti1Image(data, affine)
-        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X)
+        WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X.values)
 
         # Fit the final model
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
@@ -561,9 +566,8 @@ class ModelFit(LymanInterface):
         self.write_visualization("resid_plot", "resid.png", p)
 
         # Plot the deisgn matrix
-        # TODO update when improving design matrix code
-        design_plot = self.define_output("design_plot", "design.png")
-        dmat.plot(fname=design_plot, close=True)
+        f = plot_design_matrix(X)
+        self.write_visualization("design_plot", "design.png", f)
 
         # Plot the sigma squares image for QC
         error_m = Mosaic(mean_img, error_img, mask_img)
@@ -581,11 +585,13 @@ class EstimateContrasts(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
+        design_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         contrast_file = traits.File(exists=True)
         variance_file = traits.File(exists=True)
         tstat_file = traits.File(exists=True)
+        name_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -599,6 +605,9 @@ class EstimateContrasts(LymanInterface):
         SS = image_to_matrix(error_img, mask_img)
         XtXinv = image_to_matrix(ols_img, mask_img)
 
+        X = pd.read_csv(self.inputs.design_file)
+        param_names = X.columns
+
         # Reshape the matrix form data to what the glm functions expect
         # TODO the shape/orientation of model parameter matrices needs some
         # more thinking / standardization
@@ -607,18 +616,13 @@ class EstimateContrasts(LymanInterface):
         XtXinv = XtXinv.reshape(n_ev, n_ev, n_vox).T
 
         # Obtain list of contrast matrices
-        # C = info.contrasts
-        # TODO how are we going to do this? Hardcode for now.
-        # TODO do we want to enforce vectors or do we ever want F stats
-        C = [np.array([1, 0, 0, 0]),
-             np.array([0, 1, 0, 0]),
-             np.array([0, 0, 1, 0]),
-             np.array([0, 0, 0, 1]),
-             np.array([1, -1, 0, 0]),
-             np.array([0, 0, 1, -1])]
-
-        # TODO to get tests to run make this dumber but more flexible
-        C = np.eye(B.shape[1])
+        C = []
+        names = []
+        for contrast_spec in self.inputs.info["contrasts"]:
+            name, params, _ = contrast_spec
+            if set(params) <= set(param_names):
+                C.append(glm.contrast_matrix(contrast_spec, X))
+                names.append(name)
 
         # Estimate the contrasts, variances, and statistics in each voxel
         G, V, T = glm.iterative_contrast_estimation(B, SS, XtXinv, C)
@@ -630,6 +634,8 @@ class EstimateContrasts(LymanInterface):
         self.write_image("contrast_file", "contrast.nii.gz", contrast_img)
         self.write_image("variance_file", "variance.nii.gz", variance_img)
         self.write_image("tstat_file", "tstat.nii.gz", tstat_img)
+        name_file = self.define_output("name_file", "contrast.txt")
+        np.savetxt(name_file, names, "%s")
 
         return runtime
 
@@ -641,6 +647,7 @@ class ModelResults(LymanInterface):
         anat_file = traits.File(exists=True)
         contrast_files = traits.List(traits.File(exists=True))
         variance_files = traits.List(traits.File(exists=True))
+        name_files = traits.List(traits.File(exists=True))
 
     class output_spec(TraitedSpec):
         result_directories = traits.List(traits.Directory(exists=True))
@@ -653,7 +660,6 @@ class ModelResults(LymanInterface):
         anat_img = nib.load(self.inputs.anat_file)
         affine, header = anat_img.affine, anat_img.header
 
-        # TODO define contrasts properly accounting for missing EVs
         result_directories = []
         for i, contrast_tuple in enumerate(info.contrasts):
 
@@ -666,15 +672,19 @@ class ModelResults(LymanInterface):
             var_frames = []
 
             # Load the parameter and variance data for each run/contrast.
-            con_images = map(nib.load, self.inputs.contrast_files)
-            var_images = map(nib.load, self.inputs.variance_files)
+            con_images = [nib.load(f) for f in self.inputs.contrast_files]
+            var_images = [nib.load(f) for f in self.inputs.variance_files]
+            name_lists = [np.loadtxt(f, str).tolist()
+                          for f in self.inputs.name_files]
 
             # Files are input as a list of 4D images where list entries are
             # runs and the last axis is contrast; we want to concatenate runs
-            # for each contrast, so we need to transpose" the ordering.
-            for con_img, var_img in zip(con_images, var_images):
-                con_frames.append(con_img.get_data()[..., i])
-                var_frames.append(var_img.get_data()[..., i])
+            # for each contrast, so we need to transpose" the ordering
+            # while matching against the list of contrast names for that run.
+            for run, run_names in enumerate(name_lists):
+                con_idx = run_names.index(name)
+                con_frames.append(con_images[run].get_data()[..., con_idx])
+                var_frames.append(var_images[run].get_data()[..., con_idx])
 
             con_data = np.stack(con_frames, axis=-1)
             var_data = np.stack(var_frames, axis=-1)

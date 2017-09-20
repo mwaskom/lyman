@@ -145,7 +145,12 @@ class ModelInfo(ExperimentInfo):
         after model fitting.
         """),
     )
-    # TODO HRF model and params
+    hrf_derivative = Bool(
+        True,
+        desc=dedent("""
+        If True, include the temporal derivative of the HRF model.
+        """),
+    )
     # TODO model confounds and artifact-related params
     # TODO parameter names to filter the design and generate default contrasts?
     contrasts = List(
