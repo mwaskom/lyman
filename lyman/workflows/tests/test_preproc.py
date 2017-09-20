@@ -407,10 +407,9 @@ class TestPreprocWorkflow(object):
         assert np.array_equal(raw_data_out, raw_data[..., 0])
 
         # Test that the corrected image is a temporal average
-        jacobian_data = np.stack(jacobian_data, axis=-1)
-        modulated_data = (corrected_data * jacobian_data).mean(axis=-1)
+        corrected_data = corrected_data.mean(axis=-1)
         corrected_data_out = nib.load(out.corrected_file).get_data()
-        assert np.array_equal(corrected_data_out, modulated_data)
+        assert corrected_data_out == pytest.approx(corrected_data)
 
         # Test that the warp image has the right geometry
         warp_img_out = nib.load(out.warp_file)
@@ -426,6 +425,7 @@ class TestPreprocWorkflow(object):
         assert np.array_equal(warp_mask_out, warp_mask)
 
         # Test that the jacobians have same data but new geomtery
+        jacobian_data = np.stack(jacobian_data, axis=-1)
         jacobian_img_out = nib.load(out.jacobian_file)
         jacobian_data_out = jacobian_img_out.get_data()
         assert np.array_equal(jacobian_img_out.affine, affine)
