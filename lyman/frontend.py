@@ -195,7 +195,7 @@ def load_scan_info(lyman_dir=None):
 
     scan_fname = op.join(lyman_dir, "scans.yaml")
     with open(scan_fname) as fid:
-        info = yaml.load(fid)
+        info = yaml.load(fid, Loader=yaml.BaseLoader)
 
     return info
 
