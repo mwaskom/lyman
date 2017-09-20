@@ -33,10 +33,11 @@ class TestFrontend(object):
 
         experiment = dedent("""
         tr = .72
+        smooth_fwhm = 2.5
         """)
 
         model = dedent("""
-        tr = 1.5
+        smooth_fwhm = 4
         contrasts = [("a-b", ["a", "b"], [1, -1])]
         """)
 
@@ -79,9 +80,10 @@ class TestFrontend(object):
 
         info = frontend.info("exp_alpha")
         assert info.tr == .72
+        assert info.smooth_fwhm == 2.5
 
         info = frontend.info("exp_alpha", "model_a")
-        assert info.tr == 1.5
+        assert info.smooth_fwhm == 4
         assert info.contrasts == [("a-b", ["a", "b"], [1, -1])]
 
         with pytest.raises(TraitError):

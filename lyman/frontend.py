@@ -87,26 +87,7 @@ class ProjectInfo(HasTraits):
     )
 
 
-class ExperimentInfo(HasTraits):
-
-    experiment_name = Str(
-        desc="The name of the experiment."
-    )
-    tr = Float(
-        desc=dedent("""
-        The temporal resolution of the functional acquisition in seconds.
-        """),
-    )
-    crop_frames = Int(
-        0,
-        desc=dedent("""
-        The number of frames to remove from the beginning of each time series
-        during preprocessing.
-        """),
-    )
-
-
-class ModelInfo(ExperimentInfo):
+class ModelInfo(HasTraits):
 
     model_name = Str(
         desc="The name of the model."
@@ -164,7 +145,26 @@ class ModelInfo(ExperimentInfo):
     )
 
 
-class LymanInfo(ProjectInfo, ModelInfo):
+class ExperimentInfo(ModelInfo):
+
+    experiment_name = Str(
+        desc="The name of the experiment."
+    )
+    tr = Float(
+        desc=dedent("""
+        The temporal resolution of the functional acquisition in seconds.
+        """),
+    )
+    crop_frames = Int(
+        0,
+        desc=dedent("""
+        The number of frames to remove from the beginning of each time series
+        during preprocessing.
+        """),
+    )
+
+
+class LymanInfo(ProjectInfo, ExperimentInfo):
 
     pass
 
@@ -195,7 +195,7 @@ def load_scan_info(lyman_dir=None):
 
     scan_fname = op.join(lyman_dir, "scans.yaml")
     with open(scan_fname) as fid:
-        info = yaml.load(fid)
+        info = yaml.load(fid, Loader=yaml.BaseLoader)
 
     return info
 
@@ -206,7 +206,7 @@ def check_extra_vars(module_vars, spec):
     extra_vars = set(module_vars) - set(spec().trait_names())
     if extra_vars:
         msg = ("The following variables were unexpectedly present in the "
-               "{} information module: {}".format(kind, extra_vars))
+               "{} information module: {}".format(kind, ", ".join(extra_vars)))
         raise RuntimeError(msg)
 
 
