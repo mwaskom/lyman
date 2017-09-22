@@ -1,10 +1,14 @@
+pyyaml
+traits
 numpy
 scipy
 matplotlib
 pandas
-traits
-networkx
-pyyaml
+nibabel
+nipype
+
 pytest
+pytest-cov
+flake8
 pydotplus
 graphviz

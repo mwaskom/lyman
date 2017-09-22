@@ -10,29 +10,19 @@ before_install:
   - hash -r
   - conda config --set always_yes yes --set changeps1 no
   - conda update -q conda
+  - conda config --add channels conda-forge 
   - conda info -a
   - cp testing/matplotlibrc .
-
-  # TODO I think these lines and the related files can be removed
-  - export FSLDIR=`pwd`/testing
-  - export SUBJECTS_DIR=`pwd`/testing
 
 install:
   - conda create -q -n testenv pip python=$TRAVIS_PYTHON_VERSION
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
-  # TODO if we use conda-forge can install everything with conda (I think)
-  - pip install -r testing/pip_requirements.txt
   - pip install git+https://github.com/nipy/nipype  # Needed until nipype 0.14
   - pip install .
 
 before_script:
-  # TODO Skip linting while things are in flux; also need to move to flake8
-  # - if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then
-  #    pip install pep8==1.5;
-  #    pip install https://github.com/dcramer/pyflakes/tarball/master;
-  #    make lint;
-  #  fi
+    - make lint
 
 script:
     - make test
