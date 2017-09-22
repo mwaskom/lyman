@@ -2,13 +2,12 @@ export SHELL := /bin/bash
 
 test:
 
-	py.test
+	pytest
 
 coverage:
 
-	nosetests --cover-erase --with-coverage --cover-html --cover-package lyman
+	pytest --cov=lyman lyman
 
 lint:
 
-	pyflakes -x W lyman
-	pep8 --exclude lyman/workflows/archive lyman
+	flake8 lyman
