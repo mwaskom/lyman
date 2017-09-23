@@ -6,9 +6,9 @@ matplotlib
 pandas
 nibabel
 nipype
-
 pytest
 pytest-cov
+codecov
 flake8
 pydotplus
 graphviz

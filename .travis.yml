@@ -27,4 +27,7 @@ before_script:
     - make lint
 
 script:
-    - make test
+    - make coverage
+
+after_success:
+    - codecov
