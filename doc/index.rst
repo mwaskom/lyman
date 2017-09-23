@@ -1,5 +1,5 @@
-Neuroimaging analysis in Python
-===============================
+lyman: Neuroimaging analysis in Python
+======================================
 
 .. raw:: html
 
@@ -38,7 +38,7 @@ backwards compatible.
    installing
    releases
    workflow
-   experiments
+   analysis_params
    glossary
    issues
    commandline

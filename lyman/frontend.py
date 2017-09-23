@@ -23,21 +23,22 @@ class ProjectInfo(HasTraits):
     data_dir = Str(
         "../data",
         desc=dedent("""
-        A relative path to the directory where raw data is stored.
+        The location where raw data is stored. Should be defined relative
+        to the LYMAN_DIR.
         """),
     )
     proc_dir = Str(
         "../proc",
         desc=dedent("""
-        A relative path to the directory where lyman workflows will output
-        persistent data.
+        The location where lyman workflows will output persistent data. Should
+        be defined relative to the LYMAN_DIR.
         """),
     )
     cache_dir = Str(
         "../cache",
         desc=dedent("""
-        A relative path to the directory where lyman workflows will write
-        intermediate files during execution.
+        The location where lyman workflows will write intermediate files during
+        execution. Should be defined relative to the LYMAN_DIR.
         """),
     )
     remove_cache = Bool(
@@ -91,7 +92,9 @@ class ProjectInfo(HasTraits):
 class ModelInfo(HasTraits):
 
     model_name = Str(
-        desc="The name of the model."
+        desc=dedent("""
+        The name of the model (automatically populated from module name).
+        """)
     )
     smooth_fwhm = Either(
         Float(2), None,
@@ -149,7 +152,9 @@ class ModelInfo(HasTraits):
 class ExperimentInfo(ModelInfo):
 
     experiment_name = Str(
-        desc="The name of the experiment."
+        desc=dedent("""
+        The name of the experiment (automatically populated from module name).
+        """),
     )
     tr = Float(
         desc=dedent("""

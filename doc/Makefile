@@ -44,6 +44,7 @@ clean:
 	rm -rf $(BUILDDIR)/*
 	rm -rf commandline
 	rm -rf graphs
+	rm -rf traits
 
 commandline:
 	mkdir -p commandline
@@ -59,7 +60,11 @@ graphs:
 	lyman template --graph graphs/template.dot --no-qc
 	lyman preproc --graph graphs/preproc.dot --no-qc
 
-html: commandline graphs
+traits:
+	mkdir -p traits
+	python write_trait_help.py
+
+html: commandline graphs traits
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
 	@echo
 	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."

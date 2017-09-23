@@ -1,3 +1,5 @@
+.. _workflows:
+
 Nipype Processing Workflows
 ===========================
 
