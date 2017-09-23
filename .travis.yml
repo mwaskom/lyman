@@ -18,6 +18,8 @@ install:
   - conda create -q -n testenv pip python=$TRAVIS_PYTHON_VERSION
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
+  - conda remove networkx
+  - conda install networkx=1.11  # Needed until nipype GH#2171 is merged
   - pip install git+https://github.com/nipy/nipype  # Needed until nipype 0.14
   - pip install .
 
