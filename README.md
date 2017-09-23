@@ -1,7 +1,7 @@
 Lyman: a Python fMRI Analysis Ecosystem
 =======================================
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.824307.svg)](https://doi.org/10.5281/zenodo.824307)
+[![Build Status](https://travis-ci.org/mwaskom/lyman.svg?branch=master)](https://travis-ci.org/mwaskom/lyman) [![codecov](https://codecov.io/gh/mwaskom/lyman/branch/master/graph/badge.svg)](https://codecov.io/gh/mwaskom/lyman) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.824307.svg)](https://doi.org/10.5281/zenodo.824307)
 
 Lyman is a high-level ecosystem for analyzing neuroimaging data using
 open-source software. It aims to support an analysis workflow that is powerful,
