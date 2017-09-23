@@ -100,6 +100,9 @@ class TestFrontend(object):
 
         lyman_dir_new.move(execdir.join("lyman"))
 
+        del os.environ["LYMAN_DIR"]
+        info = frontend.info()
+
     def test_subjects(self, lyman_dir, execdir):
 
         subjects = frontend.subjects()
@@ -132,6 +135,10 @@ class TestFrontend(object):
 
         with pytest.raises(RuntimeError):
             frontend.subjects(["subj02"], ["sess01", "sess02"])
+
+        del os.environ["LYMAN_DIR"]
+        subjects = frontend.subjects()
+        assert subjects == []
 
     def test_execute(self, lyman_dir, execdir):
 
