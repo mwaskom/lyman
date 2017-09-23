@@ -1,9 +1,9 @@
-pyyaml
-traits
 numpy
 scipy
 matplotlib
 pandas
+pyyaml
+traits
 nibabel
 nipype
 pytest
