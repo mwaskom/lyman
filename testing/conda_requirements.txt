@@ -2,9 +2,13 @@ numpy
 scipy
 matplotlib
 pandas
-traits
-networkx
 pyyaml
+traits
+nibabel
+nipype
 pytest
+pytest-cov
+codecov
+flake8
 pydotplus
 graphviz

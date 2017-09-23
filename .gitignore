@@ -1,3 +1,5 @@
 .DS_Store
 lyman.egg-info
 doc/_build
+cover
+.coverage

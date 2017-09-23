@@ -1,103 +1,44 @@
-Lyman: a Python fMRI Analysis Ecosystem
-=======================================
+lyman: fMRI analysis in Python
+==============================
 
+[![PyPI Version](https://img.shields.io/pypi/v/lyman.svg)](https://pypi.org/project/lyman/)
+[![License](https://img.shields.io/pypi/l/lyman.svg)](https://github.com/mwaskom/lyman/blob/master/LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.824307.svg)](https://doi.org/10.5281/zenodo.824307)
+[![Build Status](https://travis-ci.org/mwaskom/lyman.svg?branch=master)](https://travis-ci.org/mwaskom/lyman)
+[![Code Coverage](https://codecov.io/gh/mwaskom/lyman/branch/master/graph/badge.svg)](https://codecov.io/gh/mwaskom/lyman)
 
-Lyman is a high-level ecosystem for analyzing neuroimaging data using
-open-source software. It aims to support an analysis workflow that is powerful,
-flexible, and reproducible, while automating as much of the processing as
-possible.
-
+Lyman is a library for analyzing neuroimaging data using open-source software. It provides an interface to [nipype](http://nipype.readthedocs.io/) processing workflows and a library of Python classes and functions for signal processing, model fitting, visualization and other tasks.
 
 Documentation
 -------------
 
 Online documentation can be found
-[here](http://www.cns.nyu.edu/~mwaskom/software/lyman)
+[here](http://www.cns.nyu.edu/~mwaskom/software/lyman).
 
 Dependencies
 ------------
 
-Python 2.7 or 3.6
+Lyman supports Python 3.6 and does not support Python 2.
 
-### External
-
-- [FSL](http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/)
-
-- [Freesurfer](https://surfer.nmr.mgh.harvard.edu/)
-
-- [ANTS](http://stnava.github.io/ANTs/) (optional)
-
-### Python
-
-
-- Core scientific Python environment (ipython, numpy, scipy, matplotlib)
-
-- [pandas](https://github.com/pydata/pandas)
-
-- [scikit-learn](https://github.com/scikit-learn/scikit-learn)
-
-- [scikit-image](https://github.com/scikit-image/scikit-image)
-
-- [nipype](https://github.com/nipy/nipype)
-
-- [nibabel](https://github.com/nipy/nibabel)
-
-- [seaborn](https://github.com/mwaskom/seaborn)
-
-- [moss](https://github.com/mwaskom/moss)
+Lyman preprocessing requires [FSL](http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/) and [Freesurfer](https://surfer.nmr.mgh.harvard.edu/). Information about Python library dependency information is available in the [online documentation](http://www.cns.nyu.edu/~mwaskom/software/lyman/installing.html#dependencies).
 
 Installation
 ------------
 
-To install the released version, just do
+Released versions can be installed from PyPI:
 
     pip install lyman
 
-You may instead want to use the development version from Github, by running
+It is also possible to install unreleased code from Github:
 
     pip install git+https://github.com/mwaskom/lyman.git
-
-Basic Workflow
---------------
-
-All stages of processing assume that your anatomical data have been
-processed in Freesurfer (recon-all)
-
-- `run_warp.py`: estimate anatomical normalization
-
-- `anatomy_snapshots.py`: generate static images summarizing the Freesurfer reconstruction.
-
-- `run_fmri.py`: perform subject-level functional preprocessing and analyses
-
-- `make_masks.py`: generate ROI masks in native EPI space from a variety of sources
-
-- `run_group.py`: perform basic whole-brain mixed-effects analyses
-
-- `surface_snapshots.py`: plot the results of the subject- and group-level models on a surface mesh
-
-Ziegler
--------
-
-The processing scripts generate a variety of static images that can be used for quality control and understanding the analysis. The best way to browse these is with the [ziegler](https://github.com/mwaskom/ziegler) app, which runs in the browser and makes it easy to visualize the data.
-
-Development
------------
-
-https://github.com/mwaskom/lyman
-
-Please [submit](https://github.com/mwaskom/lyman/issues/new) any bugs you
-encounter to the Github issue tracker.
-
-Testing
--------
-
-[![Build Status](https://travis-ci.org/mwaskom/lyman.svg?branch=master)](https://travis-ci.org/mwaskom/lyman)
-
-You can exercise the unit-test suite by running `nosetests` in the source directory.
 
 License
 -------
 
-Released under a BSD (3-clause) license
+Lyman is freely available under the BSD (3-clause) license.
 
+Support
+-------
+
+Lyman is publicly released with some hope that it might be useful but no promise of support. With that said, reproducible bugs may be reported to the [Github issue tracker](https://github.com/mwaskom/lyman/issues).
