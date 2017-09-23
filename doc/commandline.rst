@@ -1,7 +1,7 @@
 .. _commandline:
 
-Lyman Command-Line Interface
-============================
+Command-Line Interface
+======================
 
 The Nipype workflows for processing MRI data and estimating univariate models
 are controlled through a set of command-line scripts, in concert with the
