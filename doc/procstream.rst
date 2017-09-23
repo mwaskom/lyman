@@ -1,47 +1,14 @@
 Nipype Processing Workflows
 ===========================
 
-Functional Preprocessing
-------------------------
-
-.. image:: ../graphs/preproc.dot.svg
-
-Timeseries Model
-----------------
-
-.. image:: ../graphs/model.dot.svg
-
-Anatomical Normalization
-------------------------
-
-Using ANTS
-~~~~~~~~~~
-
-.. image:: ../graphs/antswarp.dot.svg
-
-Using FSL
-~~~~~~~~~
-
-.. image:: ../graphs/fslwarp.dot.svg
-
-
-Coregistration
---------------
-
-.. image:: ../graphs/reg.dot.svg
-
-Fixed Effects Model
+Template generation
 -------------------
 
-.. image:: ../graphs/mni_ffx.dot.svg
+.. image:: graphs/template.dot.svg
+   :width: 800px
 
-Mixed Effects Model
--------------------
+Functional preprocessing
+------------------------
 
-.. image:: ../graphs/volume_group.dot.svg
-
-Surface OLS Model
------------------
-
-.. image:: ../graphs/surface_group.dot.svg
-
+.. image:: graphs/preproc.dot.svg
+   :width: 800px

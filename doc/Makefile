@@ -18,40 +18,48 @@ I18NSPHINXOPTS  = $(PAPEROPT_$(PAPER)) $(SPHINXOPTS) .
 
 help:
 	@echo "Please use \`make <target>' where <target> is one of"
-	@echo "  html       to make standalone HTML files"
-	@echo "  dirhtml    to make HTML files named index.html in directories"
-	@echo "  singlehtml to make a single large HTML file"
-	@echo "  pickle     to make pickle files"
-	@echo "  json       to make JSON files"
-	@echo "  htmlhelp   to make HTML files and a HTML help project"
-	@echo "  qthelp     to make HTML files and a qthelp project"
-	@echo "  devhelp    to make HTML files and a Devhelp project"
-	@echo "  epub       to make an epub"
-	@echo "  latex      to make LaTeX files, you can set PAPER=a4 or PAPER=letter"
-	@echo "  latexpdf   to make LaTeX files and run them through pdflatex"
-	@echo "  text       to make text files"
-	@echo "  man        to make manual pages"
-	@echo "  texinfo    to make Texinfo files"
-	@echo "  info       to make Texinfo files and run them through makeinfo"
-	@echo "  gettext    to make PO message catalogs"
-	@echo "  changes    to make an overview of all changed/added/deprecated items"
-	@echo "  linkcheck  to check all external links for integrity"
-	@echo "  doctest    to run all doctests embedded in the documentation (if enabled)"
+	@echo "  commandline  to generate command line help text"
+	@echo "  graphs		  to generate nipype workflow graphs"
+	@echo "  html         to make standalone HTML files"
+	@echo "  dirhtml      to make HTML files named index.html in directories"
+	@echo "  singlehtml   to make a single large HTML file"
+	@echo "  pickle       to make pickle files"
+	@echo "  json         to make JSON files"
+	@echo "  htmlhelp     to make HTML files and a HTML help project"
+	@echo "  qthelp       to make HTML files and a qthelp project"
+	@echo "  devhelp      to make HTML files and a Devhelp project"
+	@echo "  epub         to make an epub"
+	@echo "  latex        to make LaTeX files, you can set PAPER=a4 or PAPER=letter"
+	@echo "  latexpdf     to make LaTeX files and run them through pdflatex"
+	@echo "  text         to make text files"
+	@echo "  man          to make manual pages"
+	@echo "  texinfo      to make Texinfo files"
+	@echo "  info         to make Texinfo files and run them through makeinfo"
+	@echo "  gettext      to make PO message catalogs"
+	@echo "  changes      to make an overview of all changed/added/deprecated items"
+	@echo "  linkcheck    to check all external links for integrity"
+	@echo "  doctest      to run all doctests embedded in the documentation (if enabled)"
 
 clean:
-	-rm -rf $(BUILDDIR)/*
+	rm -rf $(BUILDDIR)/*
+	rm -rf commandline
+	rm -rf graphs
 
-cmdline:
+commandline:
 	mkdir -p commandline
-	python ../scripts/run_fmri.py -h > commandline/run_fmri.txt
-	python ../scripts/run_group.py -h > commandline/run_group.txt
-	python ../scripts/run_warp.py -h > commandline/run_warp.txt
-	python ../scripts/make_masks.py -h > commandline/make_masks.txt
-	python ../scripts/anatomy_snapshots.py -h > commandline/anatomy_snapshots.txt
-	python ../scripts/surface_snapshots.py -h > commandline/surface_snapshots.txt
-	python ../scripts/view_ffx_results.py -h > commandline/view_ffx_results.txt
+	lyman -h > commandline/lyman.txt
+	lyman template -h > commandline/lyman-template.txt
+	lyman preproc -h > commandline/lyman-preproc.txt
+	lyman model -h > commandline/lyman-model.txt
+	lyman model-fit -h > commandline/lyman-model-fit.txt
+	lyman model-res -h > commandline/lyman-model-res.txt
 
-html:
+graphs:
+	mkdir -p graphs
+	lyman template --graph graphs/template.dot --no-qc
+	lyman preproc --graph graphs/preproc.dot --no-qc
+
+html: commandline graphs
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
 	@echo
 	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."
