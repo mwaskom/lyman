@@ -33,7 +33,6 @@ Neuroimaging analysis in Python
    workflow
    analysis_params
    glossary
-   issues
    commandline
    procstream
 

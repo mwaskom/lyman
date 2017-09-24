@@ -24,6 +24,8 @@ Lyman version 2 comprises a set major change to the library (and an essentially 
 
 - There is better support for experiments where subjects are scanned in multiple sessions.
 
+- The contrast estimation code now properly handles contrasts between parameter estimates where one of the parameters is undefined in some runs.
+
 - Spatial smoothing is performed using a novel algorithm that smooths in volume space using Gaussian weights determined by distance on the surface manifold.
 
 - A number of static images that were generated for quality control have been removed, and others have been added. 
