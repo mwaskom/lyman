@@ -1,7 +1,7 @@
 .. _workflows:
 
-Nipype Processing Workflows
-===========================
+Nipype workflow graphs
+======================
 
 Template generation
 -------------------

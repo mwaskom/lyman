@@ -7,17 +7,19 @@ To control the execution of the lyman processing workflows, it is necessary to
 provide information about different aspects of the dataset, image acquisition,
 and experimental design. This information is generally communicated through text files stored in different locations. They are documented here.
 
+.. _scan_file:
+
 Scan information
 ----------------
 
-There must be a file called ``scans.yaml`` saved in the :term:`lyman_dir`. It
-should contain specifiers for every :term:`subject`, :term:`session`, and
-:term:`run` in the :term:`project`.  The expected structure of the file is complicated
-to explain, although it is fairly straightforward when you see an example. The
-file is essentially a set of nested dictionaries: a dictionary mapping
-:term:`subject` names to a dictionary mapping :term:`session` ids to a
-dictionary mapping :term:`experiment` names to a list of :term:`run` ids. That
-is, something like this::
+There must be a file called ``scans.yaml`` saved in the :term:`lyman
+directory`. It should contain specifiers for every :term:`subject`,
+:term:`session`, and :term:`run` in the :term:`project`.  The expected
+structure of the file is complicated to explain, although it is fairly
+straightforward when you see an example. The file is essentially a set of
+nested dictionaries: a dictionary mapping :term:`subject` names to a dictionary
+mapping :term:`session` ids to a dictionary mapping :term:`experiment` names to
+a list of :term:`run` ids. That is, something like this::
 
     subj01:
       sess01:
@@ -32,22 +34,26 @@ is, something like this::
 Note that the session and run identifiers can be any string: instead of
 ``sess01`` you could use a date and instead of ``run01`` you could use a time.
 
+.. _project_file:
+
 Project-level parameters
 ------------------------
 
 Information that is consistent for the entire :term:`project` must be defined
-in a file named ``project.py`` that is present in the :term:`lyman_dir`. Note
-that this is a Python module that can define the following variables. Some
+in a file named ``project.py`` that is present in the :term:`lyman directory`.
+Note that this is a Python module that can define the following variables. Some
 parameters have default values that will be used if the variable is not present
 in the project file.
 
 .. include:: traits/project.txt
 
+.. _experiment_file:
+
 Experiment-level parameters
 ---------------------------
 
 Information that is consistent for an entire experiment must be defined in a
-file named ``<experiment>.py`` that is present in the :term:`lyman_dir`.
+file named ``<experiment>.py`` that is present in the :term:`lyman directory`.
 Like the :term:`project` file, this should be a Python module that defines the
 variables explained below. The :term:`experiment` file can also define
 :term:`model` parameters that are documented further below. In this case, every
@@ -56,11 +62,13 @@ overridden in the specific model file.
 
 .. include:: traits/experiment.txt
 
+.. _model_file:
+
 Model-level parameters
 ----------------------
 
 Information that is specific to a particular model must be defined in a file
-named ``<experiment>-<model>.py`` that is present in the :term:`lyman_dir`.
+named ``<experiment>-<model>.py`` that is present in the :term:`lyman directory`.
 This is also a Python module that defines the variables listed below. Note that
 as explained above, model-level parameters that are defined in the experiment
 file will be used in all models associated with that experiment, although an
