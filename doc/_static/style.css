@@ -1,0 +1,15 @@
+.jumbotron {
+
+    padding-left: 42px !important;
+    padding-right: 18px !important;
+    padding-top: 18px !important;
+    padding-bottom: 18px !important;
+
+}
+
+/* Not working yet! */
+a.headerlink {
+
+    opacity=.2 !important;
+
+}
