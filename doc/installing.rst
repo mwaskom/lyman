@@ -21,19 +21,18 @@ Neuroimaging packages
 ~~~~~~~~~~~~~~~~~~~~~
 
 Lyman's preprocessing workflows take advantage of image registration algorithms
-from established neuroimaging analysis libraries. These must be installed to run
-the lyman workflows, but the lyman signal processing, modeling, and
-visualization library code are independent of them.
+from established neuroimaging analysis libraries, so these packages must be
+installed to run the lyman workflows.
 
 - Freesurfer 6+
 
-- FSL 5.0.7+
+- FSL 5.0.9+
 
 Python libraries 
 ~~~~~~~~~~~~~~~~
 
 Lyman also depends on a number of packages from the scientific Python
-ecosystem. They will be included automatically if they are not present when you first install lyman.
+ecosystem. They will be installed automatically if they are not present when you install lyman.
 
 - numpy
 

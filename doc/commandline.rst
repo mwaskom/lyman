@@ -1,6 +1,6 @@
 .. _commandline:
 
-Command-Line Interface
+Command-line interface
 ======================
 
 ``lyman``

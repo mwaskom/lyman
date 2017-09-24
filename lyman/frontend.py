@@ -24,21 +24,21 @@ class ProjectInfo(HasTraits):
         "../data",
         desc=dedent("""
         The location where raw data is stored. Should be defined relative
-        to the LYMAN_DIR.
+        to the ``lyman_dir``.
         """),
     )
     proc_dir = Str(
         "../proc",
         desc=dedent("""
         The location where lyman workflows will output persistent data. Should
-        be defined relative to the LYMAN_DIR.
+        be defined relative to the ``lyman_dir``.
         """),
     )
     cache_dir = Str(
         "../cache",
         desc=dedent("""
         The location where lyman workflows will write intermediate files during
-        execution. Should be defined relative to the LYMAN_DIR.
+        execution. Should be defined relative to the ``lyman_dir``.
         """),
     )
     remove_cache = Bool(
@@ -83,8 +83,8 @@ class ProjectInfo(HasTraits):
     scan_info = Dict(
         Str, Dict(Str, Dict(Str, List(Str))),
         desc=dedent("""
-        Information about scanning sessions, populted by reading the
-        ``scan_info.yaml`` file.
+        Information about scanning sessions. (Automatically populated by
+        reading the ``scan_info.yaml`` file).
         """),
     )
 
@@ -93,7 +93,7 @@ class ModelInfo(HasTraits):
 
     model_name = Str(
         desc=dedent("""
-        The name of the model (automatically populated from module name).
+        The name of the model. (Automatically populated from module name).
         """)
     )
     smooth_fwhm = Either(
@@ -153,7 +153,7 @@ class ExperimentInfo(ModelInfo):
 
     experiment_name = Str(
         desc=dedent("""
-        The name of the experiment (automatically populated from module name).
+        The name of the experiment. (Automatically populated from module name).
         """),
     )
     tr = Float(

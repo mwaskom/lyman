@@ -44,7 +44,7 @@ Neuroimaging analysis in Python
       <div class="col-md-8">
 
 Lyman is a platform for analyzing neuroimaging (primarily MRI) data using
-Python. It offers a command-line based interface to a set of `Nipype
+Python. It comprises a command-line interface to a set of `Nipype
 <http://nipype.readthedocs.io>`_ data processing workflows and a library of
 classes and functions for signal processing, model fitting, visualization and
 other tasks.

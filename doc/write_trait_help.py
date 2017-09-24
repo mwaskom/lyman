@@ -22,8 +22,9 @@ if __name__ == "__main__":
             fid.write(".. glossary::\n\n")
             for trait, default in group_traits.items():
                 fid.write(indent(trait, "   "))
-                fid.write(indent(group_info.trait(trait).desc, "    "))
-                if default:
+                desc = group_info.trait(trait).desc
+                fid.write(indent(desc, "    "))
+                if "Automatically populated" not in desc:
                     default_text = "(Defaults to ``{}``)".format(default)
                     fid.write(indent(default_text, "    "))
                 fid.write("\n\n")
