@@ -3,8 +3,40 @@
 Release notes
 =============
 
-v1.0 (July 7, 2017)
+v2.0.0 (Unreleased)
 -------------------
+
+Lyman version 2 comprises a set major change to the library (and an essentially complete rewrite of the codebase). Major aspects of the changes are summarized here; more details are available throughout the collection of related `pull requests <https://github.com/mwaskom/lyman/projects/1>`_.
+
+- The preprocessing workflow now transforms all images into a cross-experiment functional template space that is defined in register with the Freesurfer anatomy. All spatial operations (motion-correction, unwarping, and transformation into template space) are applied in one step to minimize interpolation error.
+
+- Preprocessing has been streamlined to involve mainly spatial transformations of the images, The various signal-processing operations (smoothing, temporal filtering, artifact detection) are now considered part of the modeling workflow, meaning that parameters that control these operations are model-specific. There are no longer separate "smoothed" and "unsmoothed" paths through the workflows.
+
+- Model-fitting and contrast estimation are now implemented in Python, instead of FSL binaries (although univariate model fitting still uses the FILM GLS prewhitening algorithm).
+
+- An experiment-independent ``template`` workflow has been added, and the ``reg`` and ``ffx`` workflows have been removed.
+
+- There is no longer the concept of an "altmodel"; instead, different models are a first-class level of the lyman organization hierarchy.
+
+- Lyman currently supports only HCP-style datasets that include a single pair of spin-echo EPI images with opposite phase encoding directions, which are used for unwarping susceptibility-induced distortions and registration to the anatomy.
+
+- There is currently no support for anatomical normalization or group analyses.
+
+- There is better support for experiments where subjects are scanned in multiple sessions.
+
+- Spatial smoothing is performed using a novel algorithm that smooths in volume space using Gaussian weights determined by distance on the surface manifold.
+
+- A number of static images that were generated for quality control have been removed, and others have been added. 
+
+- The command-line interface has changed so that all interaction happens through a single ``lyman`` command line script that has sub-modes corresponding to different workflows (and, in the future, other functionality such as results visualization).
+
+- Automated test coverage of the codebase has been dramatically improved.
+
+- Various aspects of the supporting library code has been moved from `moss <https://github.com/mwaskom/moss>`_ into lyman itself, and moss is no longer a dependency of lyman.
+
+
+v1.0.0 (July 7, 2017)
+---------------------
 
 This release is being marked as version 1.0 to signify that it is the final iteration of lyman as it existed in the versions leading up to 1.0. From here on, there will be major, breaking changes to the workflows, both from an API perspective and in terms of what kind of analyses are supported. It is possible, but not promised, that minor bugs will be fixed on the 1.0 branch. But going forward, all major development will take place in a 2.0 version that might look substantially different.
 
