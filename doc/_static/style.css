@@ -1,15 +1,30 @@
 .jumbotron {
-
     padding-left: 42px !important;
     padding-right: 18px !important;
     padding-top: 18px !important;
     padding-bottom: 18px !important;
-
 }
+
+
+blockquote p {
+    font-size: 12px !important;
+}
+
+
+blockquote {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    margin: 0 0 0px !important;
+}
+
+
+code {
+    color: #303a4c !important;
+    background-color: #ffffff !important;
+}
+
 
 /* Not working yet! */
 a.headerlink {
-
     opacity=.2 !important;
-
 }
