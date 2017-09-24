@@ -1,82 +1,52 @@
 .. _installing:
 
-Installing lyman
-================
+Installation and dependencies
+=============================
 
+Installing
+----------
 
-To install lyman, you can run
+Stable versions can be installed from PyPI:
 
     pip install lyman
 
-This will install the stable version. To get the development version, you
-should run
+It is also possible to install development code from Github:
 
-   pip install git+git://github.com/mwaskom/lyman.git
-
-However, there are a number of dependencies that should be installed first.
+    pip install git+https://github.com/mwaskom/lyman.git
 
 Dependencies
 ------------
 
-As a high-level package, lyman depends on a relatively large amount of external
-software. Getting set up to run an initial analysis can thus be somewhat of a
-hassle, which I apologize for. Below, I attempt to list the required packages
-and versions that are known to work with lyman. This isn't updated that often,
-so later versions of these libraries will probably work. Older ones might too.
-It's a hard problem.
+Neuroimaging packages
+~~~~~~~~~~~~~~~~~~~~~
 
-Depending on what you are trying to do, it may not be necessary to install all
-of these packages. In the event that you don't want to exhaust this list, the
-unit tests and the ``-dontrun`` switch for the command line interfaces can be
-useful for finding missing dependencies.
+Lyman's preprocessing workflows take advantage of image registration algorithms
+from established neuroimaging analysis libraries. These must be installed to run
+the lyman workflows, but the lyman signal processing, modeling, and
+visualization library code are independent of them.
 
-Lyman requires Python 2.7 or 3.6, although support for the latter is relatively
-new and may be incomplete. We strongly recommend using the `Anaconda
-<https://store.continuum.io/cshop/anaconda/>`_ distribution, which ships with
-the majority of the Python packages needed to run lyman. The rest can be easily
-installed with `conda`, or failing that, `pip`.
-
-
-Non-Python Software
-~~~~~~~~~~~~~~~~~~~
-
-- Freesurfer 5.3
+- Freesurfer 6+
 
 - FSL 5.0.7+
 
-.. note::
+Python libraries 
+~~~~~~~~~~~~~~~~
 
-   Due to changes in FSL, the lyman 0.0.7 and earlier only compatibile
-   with FSL 5.0.6 and earlier, and lyman 0.0.8 and later are only compatibile
-   with FSL 5.0.7 and later.
-
-- ANTs 1.9
-
-.. note::
-
-    Lyman is not compatible with later versions of ANTs.
-
-Python Packages
-~~~~~~~~~~~~~~~
+Lyman also depends on a number of packages from the scientific Python
+ecosystem. They will be included automatically if they are not present when you first install lyman.
 
 - numpy
 
 - scipy
 
-- matplotlib
+- pandas
 
-- seaborn
+- matplotlib
 
 - nipype
 
 - nibabel
 
-- pandas
+- traits
 
-- scikit-learn
-
-- scikit-image
-
-- moss
-
-- pysurfer
+- pyyaml

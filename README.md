@@ -25,11 +25,11 @@ Lyman preprocessing requires [FSL](http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/) and [
 Installation
 ------------
 
-Released versions can be installed from PyPI:
+Stable versions can be installed from PyPI:
 
     pip install lyman
 
-It is also possible to install unreleased code from Github:
+It is also possible to install development code from Github:
 
     pip install git+https://github.com/mwaskom/lyman.git
 
