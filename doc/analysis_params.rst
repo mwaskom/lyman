@@ -32,7 +32,7 @@ a list of :term:`run` ids. That is, something like this::
         exp_b: [run_1, run_3]
 
 Note that the session and run identifiers can be any string: instead of
-``sess01`` you could use a date and instead of ``run01`` you could use a time.
+``sess01`` you could use a date and instead of ``run_1`` you could use a time.
 
 .. _project_file:
 

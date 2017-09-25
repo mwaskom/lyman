@@ -25,7 +25,7 @@ The first hierarchy of concepts pertains to the granularity of data:
 Analysis parameterization
 -------------------------
 
-The first hierarchy of concepts pertains to the granularity of analysis
+The second hierarchy of concepts pertains to the granularity of analysis
 parameterization:
 
 .. glossary::
