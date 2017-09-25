@@ -1,6 +1,7 @@
 """Forward facing lyman tools with information about ecosystem."""
 import os
 import os.path as op
+import tempfile
 import re
 import sys
 import imp
@@ -22,21 +23,22 @@ class ProjectInfo(HasTraits):
     data_dir = Str(
         "../data",
         desc=dedent("""
-        A relative path to the directory where raw data is stored.
+        The location where raw data is stored. Should be defined relative
+        to the ``lyman_dir``.
         """),
     )
     proc_dir = Str(
         "../proc",
         desc=dedent("""
-        A relative path to the directory where lyman workflows will output
-        persistent data.
+        The location where lyman workflows will output persistent data. Should
+        be defined relative to the ``lyman_dir``.
         """),
     )
     cache_dir = Str(
         "../cache",
         desc=dedent("""
-        A relative path to the directory where lyman workflows will write
-        intermediate files during execution.
+        The location where lyman workflows will write intermediate files during
+        execution. Should be defined relative to the ``lyman_dir``.
         """),
     )
     remove_cache = Bool(
@@ -81,8 +83,8 @@ class ProjectInfo(HasTraits):
     scan_info = Dict(
         Str, Dict(Str, Dict(Str, List(Str))),
         desc=dedent("""
-        Information about scanning sessions, populted by reading the
-        ``scan_info.yaml`` file.
+        Information about scanning sessions. (Automatically populated by
+        reading the ``scan_info.yaml`` file).
         """),
     )
 
@@ -90,7 +92,9 @@ class ProjectInfo(HasTraits):
 class ModelInfo(HasTraits):
 
     model_name = Str(
-        desc="The name of the model."
+        desc=dedent("""
+        The name of the model. (Automatically populated from module name).
+        """)
     )
     smooth_fwhm = Either(
         Float(2), None,
@@ -148,7 +152,9 @@ class ModelInfo(HasTraits):
 class ExperimentInfo(ModelInfo):
 
     experiment_name = Str(
-        desc="The name of the experiment."
+        desc=dedent("""
+        The name of the experiment. (Automatically populated from module name).
+        """),
     )
     tr = Float(
         desc=dedent("""
@@ -191,7 +197,10 @@ def load_info_from_module(module_name, lyman_dir):
 def load_scan_info(lyman_dir=None):
     """Load information about subjects, sessions, and runs from scans.yaml."""
     if lyman_dir is None:
-        lyman_dir = os.environ["LYMAN_DIR"]
+        lyman_dir = os.environ.get("LYMAN_DIR", None)
+
+    if lyman_dir is None:
+        return {}
 
     scan_fname = op.join(lyman_dir, "scans.yaml")
     with open(scan_fname) as fid:
@@ -237,14 +246,15 @@ def info(experiment=None, model=None, lyman_dir=None):
 
     """
     if lyman_dir is None:
-        lyman_dir = os.environ["LYMAN_DIR"]
+        lyman_dir = os.environ.get("LYMAN_DIR", None)
 
     # --- Load project-level information
-    project_info = load_info_from_module("project", lyman_dir)
-    check_extra_vars(project_info, ProjectInfo)
-
-    # Load scan information
-    project_info["scan_info"] = load_scan_info(lyman_dir)
+    if lyman_dir is None:
+        project_info = {}
+    else:
+        project_info = load_info_from_module("project", lyman_dir)
+        check_extra_vars(project_info, ProjectInfo)
+        project_info["scan_info"] = load_scan_info(lyman_dir)
 
     # --- Load the experiment-level information
     if experiment is None:
@@ -273,9 +283,17 @@ def info(experiment=None, model=None, lyman_dir=None):
             .trait_set(**model_info))
 
     # Ensure that directories are specified as real absolute paths
+    if lyman_dir is None:
+        base = op.join(tempfile.mkdtemp(), "lyman")
+    else:
+        base = lyman_dir
     directories = ["data_dir", "proc_dir", "cache_dir"]
     orig = info.trait_get(directories)
-    full = {k: op.abspath(op.join(lyman_dir, v)) for k, v in orig.items()}
+    full = {k: op.abspath(op.join(base, v)) for k, v in orig.items()}
+    for d in full.values():
+        if not op.exists(d):
+            os.mkdir(d)
+
     info.trait_set(**full)
 
     return info
@@ -311,7 +329,10 @@ def subjects(subject_arg=None, sessions=None, lyman_dir=None):
     scan_info = load_scan_info(lyman_dir)
 
     if lyman_dir is None:
-        lyman_dir = os.environ["LYMAN_DIR"]
+        lyman_dir = os.environ.get("LYMAN_DIR", None)
+
+    if lyman_dir is None:
+        return []
 
     # -- Parse the input
 
@@ -413,7 +434,7 @@ def execute(wf, args, info):
     # After successful completion of the workflow, optionally delete the
     # intermediate files, which are not usually needed aside from debugging
     # (persistent outputs go into the `info.proc_dir`).
-    if info.remove_cache and not args.debug:
+    if info.remove_cache and not args.debug and op.exists(cache_dir):
         shutil.rmtree(cache_dir)
 
     return res

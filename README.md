@@ -1,5 +1,5 @@
-lyman: fMRI analysis in Python
-==============================
+lyman: neuroimaging analysis in Python
+======================================
 
 [![PyPI Version](https://img.shields.io/pypi/v/lyman.svg)](https://pypi.org/project/lyman/)
 [![License](https://img.shields.io/pypi/l/lyman.svg)](https://github.com/mwaskom/lyman/blob/master/LICENSE)
@@ -7,7 +7,7 @@ lyman: fMRI analysis in Python
 [![Build Status](https://travis-ci.org/mwaskom/lyman.svg?branch=master)](https://travis-ci.org/mwaskom/lyman)
 [![Code Coverage](https://codecov.io/gh/mwaskom/lyman/branch/master/graph/badge.svg)](https://codecov.io/gh/mwaskom/lyman)
 
-Lyman is a library for analyzing neuroimaging data using open-source software. It provides an interface to [nipype](http://nipype.readthedocs.io/) processing workflows and a library of Python classes and functions for signal processing, model fitting, visualization and other tasks.
+Lyman is a platform for analyzing neuroimaging (primarily MRI) data using Python. It comprises an interface to [Nipype](http://nipype.readthedocs.io/) data processing workflows and a library of classes and functions for signal processing, model fitting, visualization, and other tasks.
 
 Documentation
 -------------
@@ -25,11 +25,11 @@ Lyman preprocessing requires [FSL](http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/) and [
 Installation
 ------------
 
-Released versions can be installed from PyPI:
+Stable versions can be installed from PyPI:
 
     pip install lyman
 
-It is also possible to install unreleased code from Github:
+It is also possible to install development code from Github:
 
     pip install git+https://github.com/mwaskom/lyman.git
 

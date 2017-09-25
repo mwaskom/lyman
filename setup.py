@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 
 DISTNAME = 'lyman'
-DESCRIPTION = 'Lyman: fMRI analysis in Python'
+DESCRIPTION = 'lyman: neuroimaging analysis in Python'
 MAINTAINER = 'Michael Waskom'
 MAINTAINER_EMAIL = 'mwaskom@nyu.edu'
 LICENSE = 'BSD (3-clause)'
