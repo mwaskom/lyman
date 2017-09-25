@@ -1,47 +1,67 @@
-Lyman: an fMRI Analysis Ecosystem
-=================================
+.. raw:: html
 
-Lyman is a high-level ecosystem for analyzing neuroimaging data using
-open-source software. It aims to support an analysis workflow that is
-powerful, flexible, and reproducible, while automating as much of the
-processing as possible.
+  <div style="clear: both"></div>
+  <div class="container-fluid">
+    <div class="row">
+      <div class="jumbotron">
 
-Lyman offers a command-line based interface to a set of pipelines, where FSL,
-Freesurfer, and Python-based tools are integrated using `Nipype
-<http://nipy.sourceforge.net/nipype/>`_. These pipelines will take raw Nifti
-files and process them all the way through a basic group analysis with minimal
-manual intervention. Important intermediate files that might be useful for
-later analysis are saved in predictable locations at the completion of the
-pipelines.
+lyman
+=====
 
-Because the processing is heavily automated, lyman also generates a
-number of static plots and images that are useful for understanding the results
-of the analyses and diagnosing any problems that might arise. These files are
-stored alongside the data they correspond with in the output directories.
-Although it is possible to manually browse them, a much better approach is to
-use the companion `zielger <https://github.com/mwaskom/ziegler>`_ webapp, which
-is tightly integrated with the lyman results and makes it very easy to
-understand what has happened with your data.
+Neuroimaging analysis in Python
 
-Lyman is provided freely and with open source in the hope that it might be
-useful. However, there is no guarantee of support or stability. There has been
-some effort put into documentation, but not every aspect of using the tools
-will be obvious. Lyman supports a specific approach to analyzing data and may
-not work for every experiment. Finally, the code may change between releases in
-a way that is not backwards compatible.
+.. raw:: html
 
-Documentation Contents
-----------------------
+      </div>
+    </div>
+
+.. raw:: html
+
+    <div class="row">
+      <div class="col-md-4">
+        <div class="panel panel-default">
+          <div class="panel-heading">
+            <h2 class="panel-title">Documentation Contents</h3>
+          </div>
+          <div class="panel-body">
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    installing
    releases
-   workflow
-   experiments
    glossary
-   issues
+   analysis_params
    commandline
-   procstream
+   workflows
 
+.. raw:: html
+
+          </div>
+        </div>
+      </div>
+      <div class="col-md-8">
+
+Lyman is a platform for analyzing neuroimaging (primarily MRI) data using
+Python. It comprises a command-line interface to a set of `Nipype
+<http://nipype.readthedocs.io>`_ data processing workflows and a library of
+classes and functions for signal processing, model fitting, visualization, and
+other tasks.
+
+Lyman integrates tools from `FSL <https://fsl.fmrib.ox.ac.uk/>`_, `Freesurfer
+<https://surfer.nmr.mgh.harvard.edu/>`_, and the `scientific Python
+<https://scipy.org/>`_ ecosystem to support a powerful, flexible, and
+reproducible approach to data analysis. Image processing is highly automated
+and requires minimal manual intervention while generating visualizations that
+enable rigorous quality control.
+
+Lyman is distributed with some hope that it might be useful but no promise of
+support or stability. The platform supports a specific approach to analyzing
+data and may not work for every study. The code is documented, but not every
+aspect of how the tools should be used will be obvious. Finally, the code is likely to change between releases without backwards compatibility.
+
+.. raw:: html
+
+      </div>
+    </div>
+  </div>

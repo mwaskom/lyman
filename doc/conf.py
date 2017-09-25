@@ -100,11 +100,12 @@ html_theme = 'bootstrap'
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
-    'source_link_position': "footer",
     'bootswatch_theme': "yeti",
     'navbar_sidebarrel': False,
     'bootstrap_version': "3",
-    'navbar_links': [("Github", "https://github.com/mwaskom/lyman", True)],
+    'navbar_links': [
+        ("Github", "https://github.com/mwaskom/lyman", True)
+    ],
 
     }
 
@@ -157,7 +158,7 @@ html_static_path = ['_static']
 #html_split_index = False
 
 # If true, links to the reST sources are added to the pages.
-#html_show_sourcelink = True
+html_show_sourcelink = False
 
 # If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
 #html_show_sphinx = True
@@ -250,3 +251,6 @@ texinfo_documents = [
 
 # How to display URL addresses: 'footnote', 'no', or 'inline'.
 #texinfo_show_urls = 'footnote'
+
+def setup(app):
+    app.add_stylesheet('style.css')
