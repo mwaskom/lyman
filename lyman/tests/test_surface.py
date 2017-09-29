@@ -47,3 +47,10 @@ class TestSurfaceMeasure(object):
         sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
         for v in range(sm.n_v):
             assert isinstance(sm(v), dict)
+
+
+class TestVolToSurf(object):
+
+    def test_vol_to_surf(self, template):
+
+        pass
