@@ -1,4 +1,4 @@
-from copy import deepcopy
+import os
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -22,6 +22,8 @@ def lyman_info(tmpdir):
     data_dir = tmpdir.mkdir("data")
     proc_dir = tmpdir.mkdir("analysis")
     cache_dir = tmpdir.mkdir("cache")
+
+    os.environ["SUBJECTS_DIR"] = str(data_dir)
 
     # TODO probably get these from default info functions
     scan_info = {
@@ -120,7 +122,7 @@ def freesurfer(lyman_info):
     nib.save(nib.MGHImage(norm_data.astype("uint8"), affine), norm_file)
 
     orig_file = str(mri_dir.join("orig.mgz"))
-    nib.save(nib.MGHImage(norm_data.astype("uint8"), affine), norm_file)
+    nib.save(nib.MGHImage(norm_data.astype("uint8"), affine), orig_file)
 
     wmparc_vals = [1000, 10, 11, 16, 8, 3000, 5001, 7, 46, 4]
     wmparc_data = rs.choice(wmparc_vals, vol_shape) * mask
@@ -176,11 +178,12 @@ def template(freesurfer):
     surf_file = str(template_dir.join("surf.nii.gz"))
     nib.save(nib.Nifti1Image(surf_data, affine), surf_file)
 
+    mesh_name = "graymid"
     verts = rs.uniform(-1, 1, (n_verts, 3))
     faces = np.array([(i, i + 1, i + 2) for i in range(n_verts - 2)])
     surf_dir = freesurfer["data_dir"].join(subject).join("surf")
-    mesh_files = (str(surf_dir.join("lh.graymid")),
-                  str(surf_dir.join("rh.graymid")))
+    mesh_files = (str(surf_dir.join("lh." + mesh_name)),
+                  str(surf_dir.join("rh." + mesh_name)))
     for fname in mesh_files:
         nib.freesurfer.write_geometry(fname, verts, faces)
 
@@ -192,6 +195,7 @@ def template(freesurfer):
         anat_file=anat_file,
         mask_file=mask_file,
         surf_file=surf_file,
+        mesh_name=mesh_name,
         mesh_files=mesh_files,
     )
     return freesurfer

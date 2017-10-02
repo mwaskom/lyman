@@ -1,3 +1,4 @@
+import nibabel as nib
 import pytest
 
 from .. import surface
@@ -53,4 +54,21 @@ class TestVolToSurf(object):
 
     def test_vol_to_surf(self, template):
 
-        pass
+        anat_img = nib.load(template["anat_file"])
+        vert_img = nib.load(template["surf_file"])
+
+        v, _ = nib.freesurfer.read_geometry(template["mesh_files"][0])
+        n_verts = len(v,)
+        n_frames = vert_img.shape[-1]
+
+        surf_data = surface.vol_to_surf(
+            anat_img, "lh", template["mesh_name"], template["subject"],
+        )
+
+        assert surf_data.shape == (n_verts,)
+
+        surf_data = surface.vol_to_surf(
+            vert_img, "lh", template["mesh_name"], template["subject"],
+        )
+
+        assert surf_data.shape == (n_verts, n_frames)
