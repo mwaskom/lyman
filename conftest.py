@@ -1,4 +1,4 @@
-from copy import deepcopy
+import os
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -22,6 +22,8 @@ def lyman_info(tmpdir):
     data_dir = tmpdir.mkdir("data")
     proc_dir = tmpdir.mkdir("analysis")
     cache_dir = tmpdir.mkdir("cache")
+
+    os.environ["SUBJECTS_DIR"] = str(data_dir)
 
     # TODO probably get these from default info functions
     scan_info = {
@@ -119,6 +121,9 @@ def freesurfer(lyman_info):
     norm_file = str(mri_dir.join("norm.mgz"))
     nib.save(nib.MGHImage(norm_data.astype("uint8"), affine), norm_file)
 
+    orig_file = str(mri_dir.join("orig.mgz"))
+    nib.save(nib.MGHImage(norm_data.astype("uint8"), affine), orig_file)
+
     wmparc_vals = [1000, 10, 11, 16, 8, 3000, 5001, 7, 46, 4]
     wmparc_data = rs.choice(wmparc_vals, vol_shape) * mask
     wmparc_file = str(mri_dir.join("wmparc.mgz"))
@@ -127,23 +132,24 @@ def freesurfer(lyman_info):
     lyman_info.update(
         subject=subject,
         norm_file=norm_file,
+        orig_file=orig_file,
         wmparc_file=wmparc_file,
     )
     return lyman_info
 
 
 @pytest.fixture()
-def template(lyman_info):
+def template(freesurfer):
 
     subject = "subj01"
-    template_dir = (lyman_info["proc_dir"]
+    template_dir = (freesurfer["proc_dir"]
                     .mkdir(subject)
                     .mkdir("template"))
 
     seed = sum(map(ord, "template"))
     rs = np.random.RandomState(seed)
 
-    vol_shape = lyman_info["vol_shape"]
+    vol_shape = freesurfer["vol_shape"]
     affine = np.array([[-2, 0, 0, 10],
                        [0, -2, -1, 10],
                        [0, 1, 2, 5],
@@ -172,15 +178,16 @@ def template(lyman_info):
     surf_file = str(template_dir.join("surf.nii.gz"))
     nib.save(nib.Nifti1Image(surf_data, affine), surf_file)
 
+    mesh_name = "graymid"
     verts = rs.uniform(-1, 1, (n_verts, 3))
     faces = np.array([(i, i + 1, i + 2) for i in range(n_verts - 2)])
-    surf_dir = lyman_info["data_dir"].join(subject).join("surf")
-    mesh_files = (str(surf_dir.join("lh.graymid")),
-                  str(surf_dir.join("rh.graymid")))
+    surf_dir = freesurfer["data_dir"].join(subject).join("surf")
+    mesh_files = (str(surf_dir.join("lh." + mesh_name)),
+                  str(surf_dir.join("rh." + mesh_name)))
     for fname in mesh_files:
         nib.freesurfer.write_geometry(fname, verts, faces)
 
-    lyman_info.update(
+    freesurfer.update(
         vol_shape=vol_shape,
         subject=subject,
         reg_file=reg_file,
@@ -188,9 +195,10 @@ def template(lyman_info):
         anat_file=anat_file,
         mask_file=mask_file,
         surf_file=surf_file,
+        mesh_name=mesh_name,
         mesh_files=mesh_files,
     )
-    return lyman_info
+    return freesurfer
 
 
 @pytest.fixture()

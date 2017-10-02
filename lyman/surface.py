@@ -1,3 +1,5 @@
+import os
+import os.path as op
 import heapq
 from itertools import product
 import numpy as np
@@ -100,3 +102,81 @@ class SurfaceMeasure(object):
             f_dist[i] = t_dist[i]
 
         return f_dist
+
+
+def vol_to_surf(data_img, hemi, surf, subject,
+                null_value=0, subjects_dir=None):
+    """Sample data from a volume image onto a surface mesh.
+
+    This function assumes that ``data_img`` is in register with the anatomy
+    and loads data from the Freesurfer data directory hierarchy.
+
+    Parameters
+    ----------
+    data_img : nibabel image
+        Input volume image; can be 3D or 4D.
+    hemi : lh | rh
+        Hemisphere code; with ``surf`` finds surface mesh geometry file.
+    surf : string
+        Surface name, with ``hemi`` finds surface mesh geometry file.
+    subject : string
+        Subject ID to locate data in data directory.
+    null_value : float
+        Value to use for surface vertices that are outside the volume field
+        of view.
+    subjects_dir : string
+        Path to the Freesurfer data directory root; if absent, get from the
+        SUBJECTS_DIR environment variable.
+
+    Returns
+    -------
+    surf_data : n_vert (x n_tp) array
+        Data as a vector (for 3D inputs) or matrix (for 4D inputs).
+
+    """
+    from numpy.linalg import inv
+
+    # Locate the Freesurfer files
+    if subjects_dir is None:
+        subjects_dir = os.environ["SUBJECTS_DIR"]
+    anat_file = op.join(subjects_dir, subject, "mri", "orig.mgz")
+    surf_file = op.join(subjects_dir, subject,
+                        "surf", "{}.{}".format(hemi, surf))
+
+    # Convert input to MGH format and load volumes
+    data = data_img.get_data()
+    data_img = nib.MGHImage(data, data_img.affine, data_img.header)
+    anat_img = nib.load(anat_file)
+
+    # Get affines that map to scanner and tkr spaces
+    Tanat = anat_img.affine
+    Tdata = data_img.affine
+    Kanat = anat_img.header.get_vox2ras_tkr()
+
+    # Compute the full transform
+    # This takes surface xyz -> anat ijk -> scanner xyz -> data ijk
+    xfm = inv(Tdata).dot(Tanat).dot(inv(Kanat))
+
+    # Find volume coordinates corresponding to the surface vertices
+    vertices, _ = nib.freesurfer.read_geometry(surf_file)
+    vertices = nib.affines.apply_affine(xfm, vertices)
+    i, j, k = np.round(vertices).astype(int).T
+
+    # Find a mask for surfaces vertices that are in the volume FOV
+    ii, jj, kk = data.shape[:3]
+    fov = (np.in1d(i, np.arange(ii))
+           & np.in1d(j, np.arange(jj))
+           & np.in1d(k, np.arange(kk)))
+
+    # Initialize the output array
+    n_v = len(vertices)
+    if len(data.shape) == 3:
+        shape = (n_v,)
+    else:
+        shape = (n_v, data.shape[-1])
+    surf_data = np.full(shape, null_value, np.float)
+
+    # Sample from the volume array into the surface array
+    surf_data[fov] = data[i[fov], j[fov], k[fov]]
+
+    return surf_data
