@@ -142,7 +142,7 @@ class TestMosaic(VisualizationFixture):
     def test_plot_mask_edges(self, images, closefig):
 
         m = viz.Mosaic(images["anat_img"], images["mask_img"])
-        m.plot_mask_edges("cube:0:0")
+        m.plot_mask_edges("red")
 
     def test_savefig(self, images, closefig):
 

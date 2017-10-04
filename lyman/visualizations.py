@@ -1,4 +1,5 @@
 from __future__ import division
+import warnings
 from six import string_types
 
 import numpy as np
@@ -188,20 +189,18 @@ class Mosaic(object):
         self._map("imshow", mask_fov, cmap="bone", vmin=0, vmax=3,
                   interpolation="nearest", alpha=.5)
 
-    def _map(self, func_name, data, ignore_value_error=False, **kwargs):
+    def _map(self, func_name, data, **kwargs):
         """Apply a named function to a 3D volume of data on each axes."""
         transpose_orders = dict(s=(0, 1, 2), c=(1, 0, 2), a=(2, 0, 1))
         slice_key = self.slice_dir[0]
         slices = data.transpose(*transpose_orders[slice_key])
         for slice, ax in zip(slices, self.axes.flat):
+            if np.isnan(slice).all():
+                continue  # avoid bug in matplotlib 2.1.0
             func = getattr(ax, func_name)
-            try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
                 func(np.rot90(slice), **kwargs)
-            except ValueError as err:
-                if ignore_value_error:
-                    pass
-                else:
-                    raise err
 
     def plot_activation(self, thresh=2, vmin=None, vmax=None, vmax_perc=99,
                         vfloor=None, pos_cmap="Reds_r", neg_cmap=None,
@@ -347,7 +346,7 @@ class Mosaic(object):
                                           self.y_slice,
                                           self.z_slice]
 
-        self._map("contour", slices, ignore_value_error=True,
+        self._map("contour", slices,
                   levels=[0, 1], cmap=cmap, vmin=0, vmax=1,
                   linewidths=linewidth)
 

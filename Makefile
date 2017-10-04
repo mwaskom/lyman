@@ -6,7 +6,7 @@ test:
 
 coverage:
 
-	pytest --cov=lyman lyman
+	pytest --cov=lyman --cov-config=.coveragerc lyman
 
 lint:
 
