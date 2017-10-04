@@ -1,0 +1,4 @@
+[run]
+omit = 
+    lyman/tests/*
+    lyman/workflows/tests/*

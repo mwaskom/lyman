@@ -2,6 +2,6 @@
 lyman.egg-info
 doc/_build
 cover
-.coverage*
+.coverage
 .cache
 matplotlibrc
