@@ -221,7 +221,8 @@ def define_model_results_workflow(info, subjects, qc=True):
         (estimate_contrasts, run_output,
             [("contrast_file", "@contrast"),
              ("variance_file", "@variance"),
-             ("tstat_file", "@tstat")]),
+             ("tstat_file", "@tstat"),
+             ("name_file", "@names")]),
 
         (subject_source, results_path,
             [("subject", "subject")]),
