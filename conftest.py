@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -20,7 +21,7 @@ def execdir(tmpdir):
 def lyman_info(tmpdir):
 
     data_dir = tmpdir.mkdir("data")
-    proc_dir = tmpdir.mkdir("analysis")
+    proc_dir = tmpdir.mkdir("proc")
     cache_dir = tmpdir.mkdir("cache")
 
     os.environ["SUBJECTS_DIR"] = str(data_dir)
@@ -331,6 +332,9 @@ def modelres(modelfit):
     ]
     run_ns = [len(n_list) for n_list in name_lists]
 
+    info = deepcopy(modelfit["info"])
+    info.contrasts.insert(2, ("c", ["c"], [1]))
+
     exp_name = modelfit["info"].experiment_name
     model_name = modelfit["info"].model_name
     session = "s1"
@@ -360,6 +364,7 @@ def modelres(modelfit):
         np.savetxt(f, l, "%s")
 
     modelfit.update(
+        info=info,
         contrast_files=con_files,
         variance_files=var_files,
         name_files=name_files,

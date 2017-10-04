@@ -682,9 +682,10 @@ class ModelResults(LymanInterface):
             # for each contrast, so we need to transpose" the ordering
             # while matching against the list of contrast names for that run.
             for run, run_names in enumerate(name_lists):
-                con_idx = run_names.index(name)
-                con_frames.append(con_images[run].get_data()[..., con_idx])
-                var_frames.append(var_images[run].get_data()[..., con_idx])
+                if name in run_names:
+                    con_idx = run_names.index(name)
+                    con_frames.append(con_images[run].get_data()[..., con_idx])
+                    var_frames.append(var_images[run].get_data()[..., con_idx])
 
             con_data = np.stack(con_frames, axis=-1)
             var_data = np.stack(var_frames, axis=-1)
