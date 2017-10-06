@@ -170,7 +170,7 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     ----------
     data_img : nibabel image
         3D or 4D image data.
-    fwhm : positive float
+    fwhm : positive float or None
         Size of isotropic smoothing kernel in mm.
     mask_img : nibabel image
         3D binary image defining smoothing range.
@@ -186,6 +186,9 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
 
     """
     data = data_img.get_data().astype(np.float, copy=not inplace)
+
+    if fwhm is None or fwhm == 0:
+        return nib.Nifti1Image(data, data_img.affine, data_img.header)
 
     if np.ndim(data) == 3:
         need_squeeze = True
@@ -278,7 +281,7 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
         Object for measuring distance along a cortical mesh.
     vertids : 1d numpy array
         Array of vertex IDs corresponding to each cortical voxel.
-    fwhm : float
+    fwhm : float or None
         Size of the smoothing kernel, in mm.
     exclude : 1d numpy array
         Binary array defining voxels that should be excluded and interpolated
@@ -292,6 +295,10 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
         Matrix with smoothing weights.
 
     """
+    # Handle null smoothing
+    if fwhm is None:
+        return sparse.diags(np.ones_like(vertids)).tocsr()
+
     # Define the weighting function
     if fwhm <= 0:
         raise ValueError("Smoothing kernel fwhm must be positive")

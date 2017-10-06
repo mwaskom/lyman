@@ -123,6 +123,15 @@ class TestSignals(object):
 
         assert std_4 < std_2 < std_0
 
+    def test_smooth_volume_no_smoothing(self, random):
+
+        shape = 12, 8, 4
+        orig_data = random.normal(0, 1, shape)
+        orig_img = nib.Nifti1Image(orig_data, np.eye(4))
+        new_data = signals.smooth_volume(orig_img, fwhm=None,).get_data()
+
+        assert np.array_equal(orig_data, new_data)
+
     def test_smooth_volume_mask(self, random):
 
         shape = 12, 8, 4
@@ -239,6 +248,10 @@ class TestSignals(object):
         with pytest.raises(RuntimeError):
             signals.smoothing_matrix(sm, vertids, 1)
 
+        # Test null smoothing
+        S = signals.smoothing_matrix(sm, vertids, None)
+        assert np.array_equal(S.toarray(), np.eye(n_vox))
+
     def test_smooth_surface(self, random, meshdata):
 
         shape = 4, 3, 2
@@ -275,8 +288,7 @@ class TestSignals(object):
         assert np.array_equal(out_data[~ribbon], data[~ribbon])
 
         n_tp = shape[-1]
-        noise_vox = surf_vox[0]
-        noise_mask = vertvol == noise_vox
+        noise_mask = vertvol == vertvol.max()
         data[noise_mask] = random.normal(10, 10, n_tp)
         noise_img = nib.Nifti1Image(noise_mask.astype(int), affine)
 
