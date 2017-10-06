@@ -629,6 +629,9 @@ def highpass_filter_matrix(n_tp, cutoff, tr=1):
         Filter matrix.
 
     """
+    if cutoff is None:
+        return np.eye(n_tp)
+
     cutoff = cutoff / tr
     sig2n = np.square(cutoff / np.sqrt(2))
 

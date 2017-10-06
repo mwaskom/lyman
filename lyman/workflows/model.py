@@ -456,6 +456,7 @@ class ModelFit(LymanInterface):
         # Load the timeseries
         ts_img = nib.load(self.inputs.ts_file)
         affine, header = ts_img.affine, ts_img.header
+        n_tp = ts_img.shape[-1]
 
         # Load the anatomical segmentation and fine analysis mask
         run_mask = nib.load(self.inputs.mask_file).get_data() > 0
@@ -490,7 +491,6 @@ class ModelFit(LymanInterface):
         mean_img = nib.Nifti1Image(mean, affine, header)
 
         # Temporally filter the data
-        n_tp = ts_img.shape[-1]
         hpf_matrix = glm.highpass_filter_matrix(n_tp,
                                                 info.hpf_cutoff,
                                                 info.tr)
@@ -520,9 +520,10 @@ class ModelFit(LymanInterface):
         assert len(design) > 0
 
         # Build the design matrix
-        # TODO highpass filter
         hrf_model = glm.GammaHRF(derivative=info.hrf_derivative)
-        X = glm.build_design_matrix(design, hrf_model, n_tp=n_tp, tr=info.tr)
+        X = glm.build_design_matrix(design, hrf_model,
+                                    n_tp=n_tp, tr=info.tr,
+                                    hpf_matrix=hpf_matrix)
 
         # Save out the design matrix
         design_file = self.define_output("design_file", "design.csv")
