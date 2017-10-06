@@ -377,6 +377,12 @@ def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
         Image like ``data_img`` but after smoothing.
 
     """
+    # TODO in vol_to_surf we are using the Freesurfer construct of providing
+    # subject and surface names and using the Freesurfer directory structure
+    # to find files. Is there a compelling reason not to do that here?
+
+    # ---
+
     # Load the data
     data = data_img.get_data().astype(np.float, copy=not inplace)
     vertvol = vert_img.get_data()

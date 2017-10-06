@@ -453,6 +453,8 @@ class ModelFit(LymanInterface):
         info = Bunch(self.inputs.info)
         data_dir = self.inputs.data_dir
 
+        # --- Data loading
+
         # Load the timeseries
         ts_img = nib.load(self.inputs.ts_file)
         affine, header = ts_img.affine, ts_img.header
@@ -466,23 +468,33 @@ class ModelFit(LymanInterface):
         n_vox = mask.sum()
         mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
 
+        # --- Spatial filtering
+
+        fwhm = info.smooth_fwhm
+
         # Load the noise segmentation
-        # TODO implement noisy voxel removal
+        # TODO implement parameterization of noisy voxel removal
         noise_img = nib.load(self.inputs.noise_file)
 
-        # Spatially filter the data
-        fwhm = info.smooth_fwhm
+        # Volumetric smoothing
         # TODO use smooth_segmentation instead?
-        signals.smooth_volume(ts_img, fwhm, mask_img, noise_img, inplace=True)
+        filt_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise_img)
 
+        # Cortical maniforl smoothing
         if info.surface_smoothing:
-            # TODO this is double smoothing the surface voxels!
+
             vert_data = nib.load(self.inputs.surf_file).get_data()
+            ribbon = (vert_data > -1).any(axis=-1)
+
             for i, mesh_file in enumerate(self.inputs.mesh_files):
                 sm = surface.SurfaceMeasure.from_file(mesh_file)
                 vert_img = nib.Nifti1Image(vert_data[..., i], affine)
                 signals.smooth_surface(ts_img, vert_img, sm, fwhm, noise_img,
                                        inplace=True)
+
+            filt_img.get_data()[ribbon] = ts_img.get_data()[ribbon]
+
+        ts_img = filt_img
 
         # Compute the mean image for later
         # TODO limit to gray matter voxels?
@@ -490,15 +502,20 @@ class ModelFit(LymanInterface):
         mean = data.mean(axis=-1)
         mean_img = nib.Nifti1Image(mean, affine, header)
 
+        # --- Temporal filtering
+
         # Temporally filter the data
         hpf_matrix = glm.highpass_filter_matrix(n_tp,
                                                 info.hpf_cutoff,
                                                 info.tr)
         data[mask] = np.dot(hpf_matrix, data[mask].T).T
+        data[mask] -= data[mask].mean(axis=-1, keepdims=True)
 
         # TODO remove the mean from the data
         # data[gray_mask] += mean[gray_mask, np.newaxis]
-        data[~mask] = 0  # TODO this is done within smoothing actually
+        data[~mask] = 0
+
+        # --- Confound extraction
 
         # Define confound regressons from various sources
         # TODO
@@ -507,8 +524,7 @@ class ModelFit(LymanInterface):
         # Detect artifact frames
         # TODO
 
-        # Convert to percent signal change?
-        # TODO
+        # --- Design construction
 
         # Get the design information for this run
         design_file = op.join(data_dir, subject, "design",
@@ -529,6 +545,11 @@ class ModelFit(LymanInterface):
         design_file = self.define_output("design_file", "design.csv")
         X.to_csv(design_file, index=False)
 
+        # --- Model estimation
+
+        # Convert to percent signal change?
+        # TODO
+
         # Prewhiten the data
         ts_img = nib.Nifti1Image(data, affine)
         WY, WX = glm.prewhiten_image_data(ts_img, mask_img, X.values)
@@ -537,6 +558,8 @@ class ModelFit(LymanInterface):
         B, SS, XtXinv, E = glm.iterative_ols_fit(WY, WX)
 
         # TODO should we re-compute the tSNR on the residuals?
+
+        # --- Results output
 
         # Convert outputs to image format
         beta_img = matrix_to_image(B.T, mask_img)
@@ -552,6 +575,8 @@ class ModelFit(LymanInterface):
         self.write_image("ols_file", "ols.nii.gz", ols_img)
         if info.save_residuals:
             self.write_image("resid_file", "resid.nii.gz", resid_img)
+
+        # --- Quality control visualization
 
         # Make some QC plots
         # We want a version of the resid data with an intact mean so that
