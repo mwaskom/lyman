@@ -479,8 +479,9 @@ class ModelFit(LymanInterface):
         fwhm = info.smooth_fwhm
 
         # Load the noise segmentation
-        # TODO implement parameterization of noisy voxel removal
-        noise_img = nib.load(self.inputs.noise_file)
+        noise_img = None
+        if info.interpolate_noise:
+            noise_img = nib.load(self.inputs.noise_file)
 
         # Volumetric smoothing
         # TODO use smooth_segmentation instead?
