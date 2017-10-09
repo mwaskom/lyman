@@ -185,7 +185,7 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
         Image like ``data_img`` but after smoothing.
 
     """
-    data = data_img.get_data().astype(np.float, copy=not inplace)
+    data = _load_float_data_maybe_copy(data_img, inplace)
 
     if fwhm is None or fwhm == 0:
         return nib.Nifti1Image(data, data_img.affine, data_img.header)
@@ -247,7 +247,7 @@ def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
 
     """
     affine, header = data_img.affine, data_img.header
-    data = data_img.get_data().astype(np.float, copy=not inplace)
+    data = _load_float_data_maybe_copy(data_img, inplace)
 
     seg = seg_img.get_data()
     seg_ids = np.sort(np.unique(seg))
@@ -382,9 +382,8 @@ def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
     # to find files. Is there a compelling reason not to do that here?
 
     # ---
-
     # Load the data
-    data = data_img.get_data().astype(np.float, copy=not inplace)
+    data = _load_float_data_maybe_copy(data_img, inplace)
     vertvol = vert_img.get_data()
     noise = None if noise_img is None else noise_img.get_data()
 
@@ -402,3 +401,19 @@ def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
     data[ribbon] = S * surf_data
 
     return nib.Nifti1Image(data, data_img.affine, data_img.header)
+
+
+def _load_float_data_maybe_copy(img, inplace):
+    """Load data from an image and convert to a float dtype, optionally copying.
+
+    This function preserves input float dtypes but converts others to np.float.
+
+    """
+    dtype = img.get_data_dtype()
+    if np.issubdtype(dtype, np.float):
+        to_dtype = dtype
+    else:
+        to_dtype = np.float
+        if inplace:
+            raise ValueError("Cannot operate on non-float data in place")
+    return img.get_data().astype(to_dtype, copy=not inplace)
