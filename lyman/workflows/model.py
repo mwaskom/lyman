@@ -487,19 +487,26 @@ class ModelFit(LymanInterface):
         # TODO use smooth_segmentation instead?
         filt_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise_img)
 
-        # Cortical maniforl smoothing
+        # Cortical manifold smoothing
         if info.surface_smoothing:
 
-            vert_data = nib.load(self.inputs.surf_file).get_data()
-            ribbon = (vert_data > -1).any(axis=-1)
+            filt_data = filt_img.get_data()
 
-            for i, mesh_file in enumerate(self.inputs.mesh_files):
+            # Note that this is a little brittle as it assumes mesh files
+            # and surface vertex volumes have the same order
+            mesh_files = self.inputs.mesh_files
+            surf_imgs = nib.four_to_three(nib.load(self.inputs.surf_file))
+            for mesh_file, vert_img in zip(mesh_files, surf_imgs):
+
                 sm = surface.SurfaceMeasure.from_file(mesh_file)
-                vert_img = nib.Nifti1Image(vert_data[..., i], affine)
-                signals.smooth_surface(ts_img, vert_img, sm, fwhm, noise_img,
-                                       inplace=True)
+                signals.smooth_surface(
+                    ts_img, vert_img, sm, fwhm, noise_img, inplace=True,
+                )
 
-            filt_img.get_data()[ribbon] = ts_img.get_data()[ribbon]
+                ribbon = vert_img.get_data() > -1
+                filt_data[ribbon] = ts_img.get_data()[ribbon]
+
+            filt_img = nib.Nifti1Image(filt_data, affine, header)
 
         ts_img = filt_img
 
