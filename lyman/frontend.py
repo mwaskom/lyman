@@ -110,10 +110,11 @@ class ModelInfo(HasTraits):
         """),
     )
     interpolate_noise = Bool(
-        True,
+        False,
         desc=dedent("""
         If True, identify locally noisy voxels and replace replace their values
-        using interpolation during spatial filtering.
+        using interpolation during spatial filtering. Warning: this option is
+        still being refined.
         """),
     )
     hpf_cutoff = Either(
