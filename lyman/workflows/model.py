@@ -462,9 +462,15 @@ class ModelFit(LymanInterface):
 
         # Load the anatomical segmentation and fine analysis mask
         run_mask = nib.load(self.inputs.mask_file).get_data() > 0
+
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
-        mask = (seg > 0) & (seg < 5) & run_mask
+        gray_seg = (seg > 0) & (seg < 5)
+
+        vert_img = nib.load(self.inputs.surf_file)
+        ribbon = vert_img.get_data().max(axis=-1) > -1
+
+        mask = (ribbon | gray_seg) & run_mask
         n_vox = mask.sum()
         mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
 
