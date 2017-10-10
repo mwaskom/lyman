@@ -62,6 +62,7 @@ def lyman_info(tmpdir):
         model_name="model_a",
         smooth_fwhm=4,
         surface_smoothing=True,
+        interpolate_noise=True,
         hpf_cutoff=10,
         hrf_derivative=False,
         save_residuals=True,
