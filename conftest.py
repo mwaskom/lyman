@@ -160,6 +160,20 @@ def template(freesurfer):
     reg_file = str(template_dir.join("anat2func.mat"))
     np.savetxt(reg_file, np.random.randn(4, 4))
 
+    lut = pd.DataFrame([
+            ["Unknown", 0, 0, 0, 0],
+            ["Cortical-gray-matter", 59, 95, 138, 255],
+            ["Subcortical-gray-matter", 91, 129, 129, 255],
+            ["Brain-stem", 126, 163, 209, 255],
+            ["Cerebellar-gray-matter", 168, 197, 233, 255],
+            ["Superficial-white-matter", 206, 129, 134, 255],
+            ["Deep-white-matter", 184, 103, 109, 255],
+            ["Cerebellar-white-matter", 155, 78, 73, 255],
+            ["CSF", 251, 221, 122, 255]
+        ])
+    lut_file = str(template_dir.join("seg.lut"))
+    lut.to_csv(lut_file, sep="\t", header=False, index=True)
+
     seg_data = rs.randint(0, 7, vol_shape)
     seg_file = str(template_dir.join("seg.nii.gz"))
     nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
@@ -192,8 +206,9 @@ def template(freesurfer):
     freesurfer.update(
         vol_shape=vol_shape,
         subject=subject,
-        reg_file=reg_file,
+        lut_file=lut_file,
         seg_file=seg_file,
+        reg_file=reg_file,
         anat_file=anat_file,
         mask_file=mask_file,
         surf_file=surf_file,

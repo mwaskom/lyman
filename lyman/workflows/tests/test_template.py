@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+import nibabel as nib
 import nipype
 
 from ..template import (define_template_workflow,
@@ -51,18 +54,28 @@ class TestTemplateWorkflow(object):
         output_path = "{}/template".format(freesurfer["subject"])
         assert out.output_path == output_path
 
-    def test_anatomical_segmentation(self, execdir, freesurfer):
+    def test_anatomical_segmentation(self, execdir, template):
 
         out = AnatomicalSegmentation(
-            wmparc_file=freesurfer["wmparc_file"],
+            surf_file=template["surf_file"],
+            wmparc_file=template["wmparc_file"],
         ).run().outputs
 
+        assert out.lut_file == execdir.join("seg.lut")
         assert out.seg_file == execdir.join("seg.nii.gz")
         assert out.mask_file == execdir.join("mask.nii.gz")
+
+        lut = pd.read_csv(out.lut_file, sep="\t", header=None)
+        assert lut.shape == (9, 6)
+
+        seg = nib.load(out.seg_file).get_data()
+        surf = (nib.load(template["surf_file"]).get_data() > -1).any(axis=-1)
+        assert np.all(seg[surf] == 1)
 
     def test_template_report(self, execdir, template):
 
         out = TemplateReport(
+            lut_file=template["lut_file"],
             seg_file=template["seg_file"],
             mask_file=template["mask_file"],
             surf_file=template["surf_file"],

@@ -1,6 +1,7 @@
 import os.path as op
 
 import numpy as np
+import pandas as pd
 from scipy import ndimage
 import matplotlib as mpl
 import nibabel as nib
@@ -47,15 +48,6 @@ def define_template_workflow(info, subjects, qc=True):
                                      reg_header=True),
                       "invert_reg")
 
-    # --- Segementation of anatomical tissue in functional space
-
-    transform_wmparc = Node(fs.ApplyVolTransform(inverse=True,
-                                                 interp="nearest",
-                                                 args="--keep-precision"),
-                            "transform_wmparc")
-
-    anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
-
     # --- Identification of surface vertices
 
     hemi_source = Node(IdentityInterface(["hemi"]), "hemi_source",
@@ -72,6 +64,15 @@ def define_template_workflow(info, subjects, qc=True):
                              name="combine_hemis",
                              joinsource="hemi_source",
                              joinfield="in_files")
+
+    # --- Segementation of anatomical tissue in functional space
+
+    transform_wmparc = Node(fs.ApplyVolTransform(inverse=True,
+                                                 interp="nearest",
+                                                 args="--keep-precision"),
+                            "transform_wmparc")
+
+    anat_segment = Node(AnatomicalSegmentation(), "anat_segment")
 
     # --- Template QC
 
@@ -115,15 +116,6 @@ def define_template_workflow(info, subjects, qc=True):
         (reorient_image, invert_reg,
             [("out_file", "moving_image")]),
 
-        (reorient_image, transform_wmparc,
-            [("out_file", "source_file")]),
-        (template_input, transform_wmparc,
-            [("wmparc_file", "target_file")]),
-        (invert_reg, transform_wmparc,
-            [("reg_file", "reg_file")]),
-        (transform_wmparc, anat_segment,
-            [("transformed_file", "wmparc_file")]),
-
         (hemi_source, tag_surf,
             [("hemi", "hemi")]),
         (invert_reg, tag_surf,
@@ -133,6 +125,17 @@ def define_template_workflow(info, subjects, qc=True):
         (tag_surf, combine_hemis,
             [("vertexvol_file", "in_files")]),
 
+        (reorient_image, transform_wmparc,
+            [("out_file", "source_file")]),
+        (template_input, transform_wmparc,
+            [("wmparc_file", "target_file")]),
+        (invert_reg, transform_wmparc,
+            [("reg_file", "reg_file")]),
+        (transform_wmparc, anat_segment,
+            [("transformed_file", "wmparc_file")]),
+        (combine_hemis, anat_segment,
+            [("merged_file", "surf_file")]),
+
         (template_input, template_output,
             [("output_path", "container")]),
         (reorient_image, template_output,
@@ -141,6 +144,7 @@ def define_template_workflow(info, subjects, qc=True):
             [("fsl_file", "@anat2func")]),
         (anat_segment, template_output,
             [("seg_file", "@seg"),
+             ("lut_file", "@lut"),
              ("mask_file", "@mask")]),
         (combine_hemis, template_output,
             [("merged_file", "@surf")]),
@@ -154,11 +158,12 @@ def define_template_workflow(info, subjects, qc=True):
 
         (reorient_image, template_qc,
             [("out_file", "anat_file")]),
-        (anat_segment, template_qc,
-            [("seg_file", "seg_file"),
-             ("mask_file", "mask_file")]),
         (combine_hemis, template_qc,
             [("merged_file", "surf_file")]),
+        (anat_segment, template_qc,
+            [("lut_file", "lut_file"),
+             ("seg_file", "seg_file"),
+             ("mask_file", "mask_file")]),
 
         (subject_source, save_info,
             [("subject", "parameterization")]),
@@ -214,19 +219,22 @@ class TemplateInput(LymanInterface):
 class AnatomicalSegmentation(LymanInterface):
 
     class input_spec(TraitedSpec):
+        surf_file = traits.File(exists=True)
         wmparc_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
+        lut_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
-        # Load the template-space wmparc and reclassify voxels
+        # Load the template-space wmparc files
         fs_img = nib.load(self.inputs.wmparc_file)
         fs_data = fs_img.get_data()
         affine, header = fs_img.affine, fs_img.header
 
+        # Remap the wmparc ids to more general classifications
         seg_data = np.zeros_like(fs_data)
 
         seg_ids = [
@@ -244,9 +252,30 @@ class AnatomicalSegmentation(LymanInterface):
             mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
             seg_data[mask] = seg_val
 
+        # Reclassify any surface voxel as cortical gray matter
+        surf_img = nib.load(self.inputs.surf_file)
+        surf_data = (surf_img.get_data() > -1).any(axis=-1)
+        seg_data[surf_data] = 1
+
+        # Generate a lookup table for the new segmentation
+        lut = pd.DataFrame([
+            ["Unknown", 0, 0, 0, 0],
+            ["Cortical-gray-matter", 59, 95, 138, 255],
+            ["Subcortical-gray-matter", 91, 129, 177, 255],
+            ["Brain-stem", 126, 163, 209, 255],
+            ["Cerebellar-gray-matter", 168, 197, 233, 255],
+            ["Superficial-white-matter", 206, 129, 134, 255],
+            ["Deep-white-matter", 184, 103, 109, 255],
+            ["Cerebellar-white-matter", 155, 78, 73, 255],
+            ["CSF", 251, 221, 122, 255]
+        ])
+
+        # Write out the new segmentation image and lookup table
         self.write_image("seg_file", "seg.nii.gz", seg_data, affine, header)
 
-        # TODO Write a seg.lut for Freeview
+        # Write a the RGB lookup table as a text file
+        lut_file = self.define_output("lut_file", "seg.lut")
+        lut.to_csv(lut_file, sep="\t", header=False, index=True)
 
         # --- Whole brain mask
 
@@ -265,6 +294,7 @@ class AnatomicalSegmentation(LymanInterface):
 class TemplateReport(LymanInterface):
 
     class input_spec(TraitedSpec):
+        lut_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
@@ -286,11 +316,10 @@ class TemplateReport(LymanInterface):
 
         # Anatomical segmentation
         seg_img = nib.load(self.inputs.seg_file)
-        seg_data = seg_img.get_data().astype(np.float)  # TODO fix in Mosaic
-        seg_cmap = mpl.colors.ListedColormap(  # TODO get from seg lut
-            ['#3b5f8a', '#5b81b1', '#7ea3d1', '#a8c5e9',
-             '#ce8186', '#b8676d', '#9b4e53', '#fbdd7a']
-         )
+        seg_data = seg_img.get_data().astype(np.float)
+        seg_lut = pd.read_csv(self.inputs.lut_file, sep="\t", header=None)
+        seg_rgb = seg_lut.loc[1:, [2, 3, 4]].values / 255
+        seg_cmap = mpl.colors.ListedColormap(seg_rgb)
         m_seg = Mosaic(anat_img, seg_data, mask_img,
                        step=2, tight=True, show_mask=False)
         m_seg.plot_overlay(seg_cmap, 1, 8, thresh=.5, fmt=None)
