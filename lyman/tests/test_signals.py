@@ -123,6 +123,15 @@ class TestSignals(object):
 
         assert std_4 < std_2 < std_0
 
+    def test_smooth_volume_no_smoothing(self, random):
+
+        shape = 12, 8, 4
+        orig_data = random.normal(0, 1, shape)
+        orig_img = nib.Nifti1Image(orig_data, np.eye(4))
+        new_data = signals.smooth_volume(orig_img, fwhm=None,).get_data()
+
+        assert np.array_equal(orig_data, new_data)
+
     def test_smooth_volume_mask(self, random):
 
         shape = 12, 8, 4
@@ -159,7 +168,8 @@ class TestSignals(object):
     def test_smooth_volume_inplace(self, random):
 
         shape = 12, 8, 4
-        data_img = nib.Nifti1Image(random.normal(0, 1, shape), np.eye(4))
+        data = random.normal(0, 1, shape).astype(np.float32)
+        data_img = nib.Nifti1Image(data, np.eye(4))
         out_img = signals.smooth_volume(data_img, 4, inplace=True)
         assert np.array_equal(data_img.get_data(), out_img.get_data())
 
@@ -239,6 +249,10 @@ class TestSignals(object):
         with pytest.raises(RuntimeError):
             signals.smoothing_matrix(sm, vertids, 1)
 
+        # Test null smoothing
+        S = signals.smoothing_matrix(sm, vertids, None)
+        assert np.array_equal(S.toarray(), np.eye(n_vox))
+
     def test_smooth_surface(self, random, meshdata):
 
         shape = 4, 3, 2
@@ -247,7 +261,7 @@ class TestSignals(object):
 
         sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
 
-        data = random.normal(10, 2, shape)
+        data = random.normal(10, 2, shape).astype(np.float32)
         data_img = nib.Nifti1Image(data, affine)
 
         surf_vox = random.choice(np.arange(np.product(shape)), sm.n_v, False)
@@ -275,8 +289,7 @@ class TestSignals(object):
         assert np.array_equal(out_data[~ribbon], data[~ribbon])
 
         n_tp = shape[-1]
-        noise_vox = surf_vox[0]
-        noise_mask = vertvol == noise_vox
+        noise_mask = vertvol == vertvol.max()
         data[noise_mask] = random.normal(10, 10, n_tp)
         noise_img = nib.Nifti1Image(noise_mask.astype(int), affine)
 
@@ -293,3 +306,25 @@ class TestSignals(object):
                                          inplace=True)
 
         assert np.array_equal(out_img.get_data(), data)
+
+    def test_load_float_maybe_inplace(self, random):
+
+        dtype = np.float32
+        input_data = random.randn(10).astype(dtype)
+        img = nib.Nifti1Image(input_data, np.eye(4))
+
+        data = signals._load_float_data_maybe_copy(img, True)
+        assert data.dtype == dtype
+        assert data is input_data
+
+        data = signals._load_float_data_maybe_copy(img, False)
+        assert data.dtype == dtype
+        assert data is not input_data
+
+        data = random.randint(0, 1, 10)
+        img = nib.Nifti1Image(data, np.eye(4))
+        data = signals._load_float_data_maybe_copy(img, False)
+        assert data.dtype == np.float
+
+        with pytest.raises(ValueError):
+            data = signals._load_float_data_maybe_copy(img, True)

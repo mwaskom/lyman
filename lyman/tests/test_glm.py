@@ -492,6 +492,11 @@ class TestHighpassFilter(object):
         # Test row normalization
         assert F.sum(axis=1) == approx(np.zeros(n_tp))
 
+        # Test no filter
+        cutoff = None
+        F = glm.highpass_filter_matrix(n_tp, cutoff, tr)
+        assert np.array_equal(F, np.eye(n_tp))
+
     def test_highpass_filter_spectrum(self, test_data):
 
         orig = test_data["orig"][:, 0]

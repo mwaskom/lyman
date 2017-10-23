@@ -170,7 +170,7 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     ----------
     data_img : nibabel image
         3D or 4D image data.
-    fwhm : positive float
+    fwhm : positive float or None
         Size of isotropic smoothing kernel in mm.
     mask_img : nibabel image
         3D binary image defining smoothing range.
@@ -185,7 +185,10 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
         Image like ``data_img`` but after smoothing.
 
     """
-    data = data_img.get_data().astype(np.float, copy=not inplace)
+    data = _load_float_data_maybe_copy(data_img, inplace)
+
+    if fwhm is None or fwhm == 0:
+        return nib.Nifti1Image(data, data_img.affine, data_img.header)
 
     if np.ndim(data) == 3:
         need_squeeze = True
@@ -244,7 +247,7 @@ def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
 
     """
     affine, header = data_img.affine, data_img.header
-    data = data_img.get_data().astype(np.float, copy=not inplace)
+    data = _load_float_data_maybe_copy(data_img, inplace)
 
     seg = seg_img.get_data()
     seg_ids = np.sort(np.unique(seg))
@@ -278,7 +281,7 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
         Object for measuring distance along a cortical mesh.
     vertids : 1d numpy array
         Array of vertex IDs corresponding to each cortical voxel.
-    fwhm : float
+    fwhm : float or None
         Size of the smoothing kernel, in mm.
     exclude : 1d numpy array
         Binary array defining voxels that should be excluded and interpolated
@@ -292,6 +295,10 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
         Matrix with smoothing weights.
 
     """
+    # Handle null smoothing
+    if fwhm is None:
+        return sparse.diags(np.ones_like(vertids)).tocsr()
+
     # Define the weighting function
     if fwhm <= 0:
         raise ValueError("Smoothing kernel fwhm must be positive")
@@ -370,8 +377,13 @@ def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
         Image like ``data_img`` but after smoothing.
 
     """
+    # TODO in vol_to_surf we are using the Freesurfer construct of providing
+    # subject and surface names and using the Freesurfer directory structure
+    # to find files. Is there a compelling reason not to do that here?
+
+    # ---
     # Load the data
-    data = data_img.get_data().astype(np.float, copy=not inplace)
+    data = _load_float_data_maybe_copy(data_img, inplace)
     vertvol = vert_img.get_data()
     noise = None if noise_img is None else noise_img.get_data()
 
@@ -389,3 +401,19 @@ def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
     data[ribbon] = S * surf_data
 
     return nib.Nifti1Image(data, data_img.affine, data_img.header)
+
+
+def _load_float_data_maybe_copy(img, inplace):
+    """Load data from an image and convert to a float dtype, optionally copying.
+
+    This function preserves input float dtypes but converts others to np.float.
+
+    """
+    dtype = img.get_data_dtype()
+    if np.issubdtype(dtype, np.float):
+        to_dtype = dtype
+    else:
+        to_dtype = np.float
+        if inplace:
+            raise ValueError("Cannot operate on non-float data in place")
+    return img.get_data().astype(to_dtype, copy=not inplace)
