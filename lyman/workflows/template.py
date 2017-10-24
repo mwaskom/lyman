@@ -131,6 +131,8 @@ def define_template_workflow(info, subjects, qc=True):
             [("wmparc_file", "target_file")]),
         (invert_reg, transform_wmparc,
             [("reg_file", "reg_file")]),
+        (reorient_image, anat_segment,
+            [("out_file", "anat_file")]),
         (transform_wmparc, anat_segment,
             [("transformed_file", "wmparc_file")]),
         (combine_hemis, anat_segment,
@@ -219,6 +221,7 @@ class TemplateInput(LymanInterface):
 class AnatomicalSegmentation(LymanInterface):
 
     class input_spec(TraitedSpec):
+        anat_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
         wmparc_file = traits.File(exists=True)
 
@@ -229,10 +232,13 @@ class AnatomicalSegmentation(LymanInterface):
 
     def _run_interface(self, runtime):
 
+        # Load the template-space anatomy to define affine/header
+        anat_img = nib.load(self.inputs.anat_file)
+        affine, header = anat_img.affine, anat_img.header
+
         # Load the template-space wmparc files
         fs_img = nib.load(self.inputs.wmparc_file)
         fs_data = fs_img.get_data()
-        affine, header = fs_img.affine, fs_img.header
 
         # Remap the wmparc ids to more general classifications
         seg_data = np.zeros_like(fs_data)
