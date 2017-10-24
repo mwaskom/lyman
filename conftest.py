@@ -424,13 +424,12 @@ def meshdata(execdir):
                  4: {2: sqrt3, 3: sqrt8}}
 
     subj = "subj01"
-    hemi = "lh"
     surf = "white"
 
-    fname = str(execdir.mkdir(subj)
-                       .mkdir("surf")
-                       .join("{}.{}".format(hemi, surf)))
-    nib.freesurfer.write_geometry(fname, verts, faces)
+    surf_dir = execdir.mkdir(subj).mkdir("surf")
+    for hemi in ["lh", "rh"]:
+        fname = str(surf_dir.join("{}.{}".format(hemi, surf)))
+        nib.freesurfer.write_geometry(fname, verts, faces)
 
     meshdata = dict(
         verts=verts,
@@ -438,8 +437,8 @@ def meshdata(execdir):
         neighbors=neighbors,
         fname=fname,
         subj=subj,
-        hemi=hemi,
         surf=surf,
+        hemi=hemi,
     )
 
     orig_subjects_dir = os.environ.get("SUBJECTS_DIR", None)

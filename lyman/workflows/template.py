@@ -255,7 +255,7 @@ class AnatomicalSegmentation(LymanInterface):
         fs_data = fs_img.get_data()
 
         # Remap the wmparc ids to more general classifications
-        seg_data = np.zeros_like(fs_data)
+        seg_data = np.zeros_like(fs_data, np.int8)
 
         seg_ids = [
             np.arange(1000, 3000),  # Cortical gray matter

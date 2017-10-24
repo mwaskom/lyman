@@ -259,19 +259,23 @@ class TestSignals(object):
         affine = np.eye(4)
         fwhm = 4
 
-        sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
+        n_v = len(meshdata["verts"])
+        subject = meshdata["subj"]
+        surf = meshdata["surf"]
 
         data = random.normal(10, 2, shape).astype(np.float32)
         data_img = nib.Nifti1Image(data, affine)
 
-        surf_vox = random.choice(np.arange(np.product(shape)), sm.n_v, False)
-        vertvol = np.full(shape, -1, np.int)
-        vertvol.flat[surf_vox] = np.arange(sm.n_v)
+        surf_vox = random.choice(np.arange(np.product(shape)), n_v, False)
+        vertvol = np.full(shape + (2,), -1, np.int)
+        vertvol.flat[surf_vox] = np.arange(n_v)
         vert_img = nib.Nifti1Image(vertvol, affine)
 
-        ribbon = vertvol > -1
+        ribbon = (vertvol > -1).any(axis=-1)
 
-        out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm)
+        out_img = signals.smooth_surface(
+            data_img, vert_img, surf, subject, fwhm
+        )
         out_data = out_img.get_data()
 
         assert out_data[ribbon].std() < data[ribbon].std()
@@ -282,30 +286,42 @@ class TestSignals(object):
         data = random.normal(10, 2, shape)
         data_img = nib.Nifti1Image(data, affine)
 
-        out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm)
+        out_img = signals.smooth_surface(
+            data_img, vert_img, surf, subject, fwhm
+        )
         out_data = out_img.get_data()
 
         assert out_data[ribbon].std() < data[ribbon].std()
         assert np.array_equal(out_data[~ribbon], data[~ribbon])
 
         n_tp = shape[-1]
-        noise_mask = vertvol == vertvol.max()
+        noise_mask = vertvol[..., 0] == vertvol.max()
         data[noise_mask] = random.normal(10, 10, n_tp)
         noise_img = nib.Nifti1Image(noise_mask.astype(int), affine)
 
-        noise_out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm)
-        clean_out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm,
-                                               noise_img)
+        noise_out_img = signals.smooth_surface(
+            data_img, vert_img, surf, subject, fwhm
+        )
+        clean_out_img = signals.smooth_surface(
+            data_img, vert_img, surf, subject, fwhm, noise_img
+        )
 
         noise_sd = noise_out_img.get_data()[noise_mask].std()
         clean_sd = clean_out_img.get_data()[noise_mask].std()
 
         assert clean_sd < noise_sd
 
-        out_img = signals.smooth_surface(data_img, vert_img, sm, fwhm,
-                                         inplace=True)
+        out_img = signals.smooth_surface(
+            data_img, vert_img, surf, subject, fwhm, inplace=True
+        )
 
         assert np.array_equal(out_img.get_data(), data)
+
+        with pytest.raises(ValueError):
+            vert_img = nib.Nifti1Image(vertvol[..., 0], affine)
+            out_img = signals.smooth_surface(
+                data_img, vert_img, surf, subject, fwhm,
+            )
 
     def test_load_float_maybe_inplace(self, random):
 

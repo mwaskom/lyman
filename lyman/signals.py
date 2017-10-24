@@ -4,6 +4,7 @@ from scipy.ndimage import gaussian_filter
 import nibabel as nib
 
 from .utils import check_mask
+from .surface import SurfaceMeasure
 
 
 def detrend(data, axis=-1, replace_mean=False):
@@ -351,25 +352,31 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
     return S.tocsr()
 
 
-def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
-                   inplace=False):
-    """Smooth voxels corresponding to cortex using surface-based distances.
+def smooth_surface(data_img, vert_img, surf, subject, fwhm, noise_img=None,
+                   inplace=False, subjects_dir=None):
+    """Smooth cortical voxels with Gaussian weighted surface distances.
 
     Parameters
     ----------
     data_img : nibabel image
         3D or 4D input data.
-    vert_img : nibabel image
+    vert_img : 4D nibabel image
         Image where voxels have their corresponding surfave vertex ID or are -1
-        if they are not considered part of cortex.
-    measure : SurfaceMeasure object
-        Object for measuring distance along a cortical mesh.
+        if they do not correspond to cortex. The first frame should have left
+        hemisphere vertices and the second right hemisphere vertices.
+    surf : string
+        Name of the surface defining the mesh geometry.
+    subject : string
+        Subject ID to locate data in data directory.
     fwhm : float
         Size of smoothing kernel in mm.
     noise_img : nibabel image
         Binary image defining voxels that should be interpolated out.
     inplace :bool
         If True, overwrite data in data_img. Otherwise perform a copy.
+    subjects_dir : string
+        Path to the Freesurfer data directory root; if absent, get from the
+        SUBJECTS_DIR environment variable.
 
     Returns
     -------
@@ -377,28 +384,32 @@ def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
         Image like ``data_img`` but after smoothing.
 
     """
-    # TODO in vol_to_surf we are using the Freesurfer construct of providing
-    # subject and surface names and using the Freesurfer directory structure
-    # to find files. Is there a compelling reason not to do that here?
-
     # ---
     # Load the data
     data = _load_float_data_maybe_copy(data_img, inplace)
     vertvol = vert_img.get_data()
     noise = None if noise_img is None else noise_img.get_data()
 
-    # Extract the cortical data
-    ribbon = vertvol > -1
-    vertids = vertvol[ribbon]
-    surf_data = data[ribbon]
-    if noise is not None:
-        noise = noise[ribbon]
+    if not (len(vertvol.shape) == 4) and (vertvol.shape[-1] == 2):
+        raise ValueError("`vert_img` must have two frames (lh and rh verts)")
 
-    # Generate a smoothing matrix
-    S = smoothing_matrix(measure, vertids, fwhm, noise)
+    for i, hemi in enumerate(["lh", "rh"]):
 
-    # Smooth the data
-    data[ribbon] = S * surf_data
+        # Extract the cortical data
+        ribbon = vertvol[..., i] > -1
+        vertids = vertvol[ribbon, i]
+        surf_data = data[ribbon]
+        if noise is None:
+            surf_noise = None
+        else:
+            surf_noise = noise[ribbon]
+
+        # Generate a smoothing matrix
+        measure = SurfaceMeasure.from_names(subject, hemi, surf, subjects_dir)
+        S = smoothing_matrix(measure, vertids, fwhm, surf_noise)
+
+        # Smooth the data
+        data[ribbon] = S * surf_data
 
     return nib.Nifti1Image(data, data_img.affine, data_img.header)
 

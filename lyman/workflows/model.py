@@ -9,7 +9,7 @@ import nibabel as nib
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
-from .. import glm, signals, surface
+from .. import glm, signals
 from ..utils import LymanInterface, SaveInfo, image_to_matrix, matrix_to_image
 from ..visualizations import Mosaic, CarpetPlot, plot_design_matrix
 
@@ -40,7 +40,6 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
 
     data_input = Node(ModelFitInput(experiment=experiment,
                                     model=model,
-                                    data_dir=info.data_dir,
                                     proc_dir=info.proc_dir),
                       "data_input")
 
@@ -83,8 +82,7 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
              ("mask_file", "mask_file"),
              ("ts_file", "ts_file"),
              ("noise_file", "noise_file"),
-             ("mc_file", "mc_file"),
-             ("mesh_files", "mesh_files")]),
+             ("mc_file", "mc_file")]),
 
         (data_input, data_output,
             [("output_path", "container")]),
@@ -300,7 +298,6 @@ class ModelFitInput(LymanInterface):
     class input_spec(TraitedSpec):
         experiment = traits.Str()
         model = traits.Str()
-        data_dir = traits.Directory(exists=True)
         proc_dir = traits.Directory(exists=True)
         subject = traits.Str()
         run_tuple = traits.Tuple(traits.Str(), traits.Str())
@@ -315,8 +312,6 @@ class ModelFitInput(LymanInterface):
         ts_file = traits.File(exists=True)
         noise_file = traits.File(Exists=True)
         mc_file = traits.File(exists=True)
-        mesh_files = traits.Tuple(traits.File(exists=True),
-                                  traits.File(exists=True))
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -327,10 +322,8 @@ class ModelFitInput(LymanInterface):
 
         experiment = self.inputs.experiment
         model = self.inputs.model
-        data_dir = self.inputs.data_dir
         proc_dir = self.inputs.proc_dir
 
-        surface_path = op.join(data_dir, subject, "surf")
         template_path = op.join(proc_dir, subject, "template")
         timeseries_path = op.join(proc_dir, subject, experiment,
                                   "timeseries", run_key)
@@ -348,9 +341,6 @@ class ModelFitInput(LymanInterface):
             ts_file=op.join(timeseries_path, "func.nii.gz"),
             noise_file=op.join(timeseries_path, "noise.nii.gz"),
             mc_file=op.join(timeseries_path, "mc.csv"),
-
-            mesh_files=(op.join(surface_path, "lh.graymid"),
-                        op.join(surface_path, "rh.graymid")),
 
             output_path=op.join(proc_dir, subject, experiment, model, run_key)
         )
@@ -431,8 +421,6 @@ class ModelFit(LymanInterface):
         mask_file = traits.File(exists=True)
         noise_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
-        mesh_files = traits.Tuple(traits.File(exists=True),
-                                  traits.File(exists=True))
 
     class output_spec(TraitedSpec):
         mask_file = traits.File(exists=True)
@@ -486,22 +474,16 @@ class ModelFit(LymanInterface):
         # Cortical manifold smoothing
         if info.surface_smoothing:
 
+            vert_img = nib.load(self.inputs.surf_file)
+
+            signals.smooth_surface(
+                ts_img, vert_img, "graymid", subject,
+                fwhm, noise_img, inplace=True,
+            )
+
+            ribbon = vert_img.get_data().max(axis=-1) > -1
             filt_data = filt_img.get_data()
-
-            # Note that this is a little brittle as it assumes mesh files
-            # and surface vertex volumes have the same order
-            mesh_files = self.inputs.mesh_files
-            surf_imgs = nib.four_to_three(nib.load(self.inputs.surf_file))
-            for mesh_file, vert_img in zip(mesh_files, surf_imgs):
-
-                sm = surface.SurfaceMeasure.from_file(mesh_file)
-                signals.smooth_surface(
-                    ts_img, vert_img, sm, fwhm, noise_img, inplace=True,
-                )
-
-                ribbon = vert_img.get_data() > -1
-                filt_data[ribbon] = ts_img.get_data()[ribbon]
-
+            filt_data[ribbon] = ts_img.get_data()[ribbon]
             filt_img = nib.Nifti1Image(filt_data, affine, header)
 
         ts_img = filt_img
