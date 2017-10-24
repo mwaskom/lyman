@@ -20,6 +20,15 @@ class TestSurfaceMeasure(object):
         for v, v_n in sm.neighbors.items():
             assert v_n == pytest.approx(meshdata["neighbors"][v])
 
+    def test_surface_measure_neighbors_from_names(self, meshdata):
+
+        sm = surface.SurfaceMeasure.from_names(
+            meshdata["subj"], meshdata["hemi"], meshdata["surf"]
+        )
+
+        for v, v_n in sm.neighbors.items():
+            assert v_n == pytest.approx(meshdata["neighbors"][v])
+
     def test_surface_measure_distance(self, meshdata):
 
         sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
@@ -62,13 +71,13 @@ class TestVolToSurf(object):
         n_frames = vert_img.shape[-1]
 
         surf_data = surface.vol_to_surf(
-            anat_img, "lh", template["mesh_name"], template["subject"],
+            anat_img, template["subject"], "lh", template["mesh_name"],
         )
 
         assert surf_data.shape == (n_verts,)
 
         surf_data = surface.vol_to_surf(
-            vert_img, "lh", template["mesh_name"], template["subject"],
+            vert_img, template["subject"], "lh", template["mesh_name"],
         )
 
         assert surf_data.shape == (n_verts, n_frames)

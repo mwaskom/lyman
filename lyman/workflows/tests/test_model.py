@@ -170,7 +170,6 @@ class TestModelWorkflows(object):
         out = model.ModelFitInput(
             experiment=exp_name,
             model=model_name,
-            data_dir=str(timeseries["data_dir"]),
             proc_dir=str(timeseries["proc_dir"]),
             subject=subject,
             run_tuple=run_tuple,
@@ -185,7 +184,6 @@ class TestModelWorkflows(object):
         assert out.ts_file == timeseries["ts_file"]
         assert out.noise_file == timeseries["noise_file"]
         assert out.mc_file == timeseries["mc_file"]
-        assert out.mesh_files == timeseries["mesh_files"]
         assert out.output_path == timeseries["model_dir"]
 
     def test_model_results_input(self, modelfit):
@@ -228,7 +226,6 @@ class TestModelWorkflows(object):
             mask_file=timeseries["mask_file"],
             noise_file=timeseries["noise_file"],
             mc_file=timeseries["mc_file"],
-            mesh_files=timeseries["mesh_files"],
         ).run().outputs
 
         # Test output file names

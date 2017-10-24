@@ -4,6 +4,7 @@ from scipy.ndimage import gaussian_filter
 import nibabel as nib
 
 from .utils import check_mask
+from .surface import SurfaceMeasure
 
 
 def detrend(data, axis=-1, replace_mean=False):
@@ -171,7 +172,8 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     data_img : nibabel image
         3D or 4D image data.
     fwhm : positive float or None
-        Size of isotropic smoothing kernel in mm.
+        Size of isotropic smoothing kernel, in mm, or None to return input
+        (as float and possibly copied).
     mask_img : nibabel image
         3D binary image defining smoothing range.
     noise_img : nibabel image
@@ -223,7 +225,7 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     return nib.Nifti1Image(data, data_img.affine, data_img.header)
 
 
-def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
+def smooth_segmentation(data_img, seg_img, fwhm, noise_img=None,
                         inplace=False):
     """Filter each compartment of a segmentation with an isotropic gaussian.
 
@@ -231,10 +233,11 @@ def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
     ----------
     data_img : nibabel image
         3D or 4D image data.
-    fwhm : positive float
-        Size of isotropic smoothing kernel in mm.
     seg_img : nibabel image
         3D label image defining smoothing ranges.
+    fwhm : positive float or None
+        Size of isotropic smoothing kernel, in mm, or None to return input
+        (as float and possibly copied).
     noise_img : nibabel image
         3D binary image defining voxels to be interpolated out.
     inplace : bool
@@ -281,8 +284,8 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
         Object for measuring distance along a cortical mesh.
     vertids : 1d numpy array
         Array of vertex IDs corresponding to each cortical voxel.
-    fwhm : float or None
-        Size of the smoothing kernel, in mm.
+    fwhm : positive float or None
+        Size of the smoothing kernel, in mm, or None to return identity matrix.
     exclude : 1d numpy array
         Binary array defining voxels that should be excluded and interpolated
         during smoothing.
@@ -351,25 +354,32 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
     return S.tocsr()
 
 
-def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
-                   inplace=False):
-    """Smooth voxels corresponding to cortex using surface-based distances.
+def smooth_surface(data_img, vert_img, fwhm, subject, surf="graymid",
+                   noise_img=None, inplace=False, subjects_dir=None):
+    """Smooth cortical voxels with Gaussian weighted surface distances.
 
     Parameters
     ----------
     data_img : nibabel image
         3D or 4D input data.
-    vert_img : nibabel image
+    vert_img : 4D nibabel image
         Image where voxels have their corresponding surfave vertex ID or are -1
-        if they are not considered part of cortex.
-    measure : SurfaceMeasure object
-        Object for measuring distance along a cortical mesh.
-    fwhm : float
-        Size of smoothing kernel in mm.
+        if they do not correspond to cortex. The first frame should have left
+        hemisphere vertices and the second right hemisphere vertices.
+    fwhm : positive float or None
+        Size of isotropic smoothing kernel, in mm, or None to return input
+        (as float and possibly copied).
+    subject : string
+        Subject ID to locate data in data directory.
+    surf : string
+        Name of the surface defining the mesh geometry.
     noise_img : nibabel image
         Binary image defining voxels that should be interpolated out.
     inplace :bool
         If True, overwrite data in data_img. Otherwise perform a copy.
+    subjects_dir : string
+        Path to the Freesurfer data directory root; if absent, get from the
+        SUBJECTS_DIR environment variable.
 
     Returns
     -------
@@ -377,28 +387,32 @@ def smooth_surface(data_img, vert_img, measure, fwhm, noise_img=None,
         Image like ``data_img`` but after smoothing.
 
     """
-    # TODO in vol_to_surf we are using the Freesurfer construct of providing
-    # subject and surface names and using the Freesurfer directory structure
-    # to find files. Is there a compelling reason not to do that here?
-
     # ---
     # Load the data
     data = _load_float_data_maybe_copy(data_img, inplace)
     vertvol = vert_img.get_data()
     noise = None if noise_img is None else noise_img.get_data()
 
-    # Extract the cortical data
-    ribbon = vertvol > -1
-    vertids = vertvol[ribbon]
-    surf_data = data[ribbon]
-    if noise is not None:
-        noise = noise[ribbon]
+    if not (len(vertvol.shape) == 4) and (vertvol.shape[-1] == 2):
+        raise ValueError("`vert_img` must have two frames (lh and rh verts)")
 
-    # Generate a smoothing matrix
-    S = smoothing_matrix(measure, vertids, fwhm, noise)
+    for i, hemi in enumerate(["lh", "rh"]):
 
-    # Smooth the data
-    data[ribbon] = S * surf_data
+        # Extract the cortical data
+        ribbon = vertvol[..., i] > -1
+        vertids = vertvol[ribbon, i]
+        surf_data = data[ribbon]
+        if noise is None:
+            surf_noise = None
+        else:
+            surf_noise = noise[ribbon]
+
+        # Generate a smoothing matrix
+        measure = SurfaceMeasure.from_names(subject, hemi, surf, subjects_dir)
+        S = smoothing_matrix(measure, vertids, fwhm, surf_noise)
+
+        # Smooth the data
+        data[ribbon] = S * surf_data
 
     return nib.Nifti1Image(data, data_img.affine, data_img.header)
 

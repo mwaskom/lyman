@@ -56,7 +56,13 @@ class SurfaceMeasure(object):
         f, v = nib.freesurfer.read_geometry(fname)
         return cls(f, v)
 
-    # TODO add from_names method to load from subject, hemi, surf
+    @classmethod
+    def from_names(cls, subj, hemi, surf, subjects_dir=None):
+        """Initialize from Freesurfer-style names."""
+        if subjects_dir is None:
+            subjects_dir = os.environ["SUBJECTS_DIR"]
+        fname = op.join(subjects_dir, subj, "surf", "{}.{}".format(hemi, surf))
+        return cls.from_file(fname)
 
     def __call__(self, vert, maxdistance=np.inf):
         """Return the distances from input to other vertices.
@@ -106,7 +112,7 @@ class SurfaceMeasure(object):
         return f_dist
 
 
-def vol_to_surf(data_img, hemi, surf, subject,
+def vol_to_surf(data_img, subject, hemi, surf="graymid",
                 null_value=0, subjects_dir=None):
     """Sample data from a volume image onto a surface mesh.
 
@@ -117,12 +123,12 @@ def vol_to_surf(data_img, hemi, surf, subject,
     ----------
     data_img : nibabel image
         Input volume image; can be 3D or 4D.
+    subject : string
+        Subject ID to locate data in data directory.
     hemi : lh | rh
         Hemisphere code; with ``surf`` finds surface mesh geometry file.
     surf : string
         Surface name, with ``hemi`` finds surface mesh geometry file.
-    subject : string
-        Subject ID to locate data in data directory.
     null_value : float
         Value to use for surface vertices that are outside the volume field
         of view.
