@@ -468,8 +468,8 @@ class ModelFit(LymanInterface):
             noise_img = nib.load(self.inputs.noise_file)
 
         # Volumetric smoothing
-        # TODO use smooth_segmentation instead?
-        filt_img = signals.smooth_volume(ts_img, fwhm, mask_img, noise_img)
+        filt_img = signals.smooth_segmentation(ts_img, seg_img,
+                                               fwhm, noise_img)
 
         # Cortical manifold smoothing
         if info.surface_smoothing:
