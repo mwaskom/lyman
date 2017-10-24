@@ -69,16 +69,15 @@ class TestTemplateWorkflow(object):
         assert out.seg_file == execdir.join("seg.nii.gz")
         assert out.mask_file == execdir.join("mask.nii.gz")
 
-        # Test that segmentation is integer typed
-        seg_img = nib.load(out.seg_file)
-        assert np.issubdtype(seg_img.header.get_data_dtype(), "uint8")
-
         # Test size of the lookup table
         lut = pd.read_csv(out.lut_file, sep="\t", header=None)
         assert lut.shape == (9, 6)
 
+        # Test that segmentation is integer typed
+        seg = nib.load(out.seg_file).get_data()
+        assert np.array_equal(seg, seg.astype("uint8"))
+
         # Test that the segmentation cortical gray matches surface vertices
-        seg = seg_img.get_data()
         surf = (nib.load(template["surf_file"]).get_data() > -1).any(axis=-1)
         assert np.all(seg[surf] == 1)
 
