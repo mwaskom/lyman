@@ -181,7 +181,7 @@ class TestSignals(object):
         data_img = nib.Nifti1Image(data, np.eye(4))
         seg_img = nib.Nifti1Image(seg, np.eye(4))
 
-        out_img = signals.smooth_segmentation(data_img, 4, seg_img)
+        out_img = signals.smooth_segmentation(data_img, seg_img, 4)
         assert out_img.get_data() == pytest.approx(data.astype(np.float))
 
     def test_smooth_segmentation_inplace(self, random):
@@ -194,7 +194,7 @@ class TestSignals(object):
         data_img = nib.Nifti1Image(data, np.eye(4))
         seg_img = nib.Nifti1Image(seg, np.eye(4))
 
-        out_img = signals.smooth_segmentation(data_img, 4, seg_img,
+        out_img = signals.smooth_segmentation(data_img, seg_img, 4,
                                               inplace=True)
         assert np.array_equal(out_img.get_data(), data.astype(np.float))
 
@@ -274,7 +274,7 @@ class TestSignals(object):
         ribbon = (vertvol > -1).any(axis=-1)
 
         out_img = signals.smooth_surface(
-            data_img, vert_img, surf, subject, fwhm
+            data_img, vert_img, fwhm, subject, surf,
         )
         out_data = out_img.get_data()
 
@@ -287,7 +287,7 @@ class TestSignals(object):
         data_img = nib.Nifti1Image(data, affine)
 
         out_img = signals.smooth_surface(
-            data_img, vert_img, surf, subject, fwhm
+            data_img, vert_img, fwhm, subject, surf,
         )
         out_data = out_img.get_data()
 
@@ -300,10 +300,10 @@ class TestSignals(object):
         noise_img = nib.Nifti1Image(noise_mask.astype(int), affine)
 
         noise_out_img = signals.smooth_surface(
-            data_img, vert_img, surf, subject, fwhm
+            data_img, vert_img, fwhm, subject, surf,
         )
         clean_out_img = signals.smooth_surface(
-            data_img, vert_img, surf, subject, fwhm, noise_img
+            data_img, vert_img, fwhm, subject, surf, noise_img
         )
 
         noise_sd = noise_out_img.get_data()[noise_mask].std()
@@ -312,7 +312,7 @@ class TestSignals(object):
         assert clean_sd < noise_sd
 
         out_img = signals.smooth_surface(
-            data_img, vert_img, surf, subject, fwhm, inplace=True
+            data_img, vert_img, fwhm, subject, surf, inplace=True
         )
 
         assert np.array_equal(out_img.get_data(), data)
@@ -320,7 +320,7 @@ class TestSignals(object):
         with pytest.raises(ValueError):
             vert_img = nib.Nifti1Image(vertvol[..., 0], affine)
             out_img = signals.smooth_surface(
-                data_img, vert_img, surf, subject, fwhm,
+                data_img, vert_img, fwhm, subject, surf,
             )
 
     def test_load_float_maybe_inplace(self, random):

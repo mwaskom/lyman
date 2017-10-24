@@ -71,13 +71,13 @@ class TestVolToSurf(object):
         n_frames = vert_img.shape[-1]
 
         surf_data = surface.vol_to_surf(
-            anat_img, "lh", template["mesh_name"], template["subject"],
+            anat_img, template["subject"], "lh", template["mesh_name"],
         )
 
         assert surf_data.shape == (n_verts,)
 
         surf_data = surface.vol_to_surf(
-            vert_img, "lh", template["mesh_name"], template["subject"],
+            vert_img, template["subject"], "lh", template["mesh_name"],
         )
 
         assert surf_data.shape == (n_verts, n_frames)

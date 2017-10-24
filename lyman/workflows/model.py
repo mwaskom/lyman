@@ -475,10 +475,9 @@ class ModelFit(LymanInterface):
         if info.surface_smoothing:
 
             vert_img = nib.load(self.inputs.surf_file)
-
             signals.smooth_surface(
-                ts_img, vert_img, "graymid", subject,
-                fwhm, noise_img, inplace=True,
+                ts_img, vert_img, fwhm, subject,
+                noise_img=noise_img, inplace=True,
             )
 
             ribbon = vert_img.get_data().max(axis=-1) > -1

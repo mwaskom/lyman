@@ -224,7 +224,7 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     return nib.Nifti1Image(data, data_img.affine, data_img.header)
 
 
-def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
+def smooth_segmentation(data_img, seg_img, fwhm, noise_img=None,
                         inplace=False):
     """Filter each compartment of a segmentation with an isotropic gaussian.
 
@@ -232,10 +232,10 @@ def smooth_segmentation(data_img, fwhm, seg_img, noise_img=None,
     ----------
     data_img : nibabel image
         3D or 4D image data.
-    fwhm : positive float
-        Size of isotropic smoothing kernel in mm.
     seg_img : nibabel image
         3D label image defining smoothing ranges.
+    fwhm : positive float
+        Size of isotropic smoothing kernel in mm.
     noise_img : nibabel image
         3D binary image defining voxels to be interpolated out.
     inplace : bool
@@ -352,8 +352,8 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
     return S.tocsr()
 
 
-def smooth_surface(data_img, vert_img, surf, subject, fwhm, noise_img=None,
-                   inplace=False, subjects_dir=None):
+def smooth_surface(data_img, vert_img, fwhm, subject, surf="graymid",
+                   noise_img=None, inplace=False, subjects_dir=None):
     """Smooth cortical voxels with Gaussian weighted surface distances.
 
     Parameters
@@ -364,12 +364,12 @@ def smooth_surface(data_img, vert_img, surf, subject, fwhm, noise_img=None,
         Image where voxels have their corresponding surfave vertex ID or are -1
         if they do not correspond to cortex. The first frame should have left
         hemisphere vertices and the second right hemisphere vertices.
-    surf : string
-        Name of the surface defining the mesh geometry.
-    subject : string
-        Subject ID to locate data in data directory.
     fwhm : float
         Size of smoothing kernel in mm.
+    subject : string
+        Subject ID to locate data in data directory.
+    surf : string
+        Name of the surface defining the mesh geometry.
     noise_img : nibabel image
         Binary image defining voxels that should be interpolated out.
     inplace :bool
