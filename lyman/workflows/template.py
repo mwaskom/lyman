@@ -269,7 +269,7 @@ class AnatomicalSegmentation(LymanInterface):
         ]
 
         for seg_val, id_vals in enumerate(seg_ids, 1):
-            mask = np.in1d(fs_data.flat, id_vals).reshape(seg_data.shape)
+            mask = np.isin(fs_data, id_vals)
             seg_data[mask] = seg_val
 
         # Reclassify any surface voxel as cortical gray matter
