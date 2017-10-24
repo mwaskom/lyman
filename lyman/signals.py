@@ -172,7 +172,8 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     data_img : nibabel image
         3D or 4D image data.
     fwhm : positive float or None
-        Size of isotropic smoothing kernel in mm.
+        Size of isotropic smoothing kernel, in mm, or None to return input
+        (as float and possibly copied).
     mask_img : nibabel image
         3D binary image defining smoothing range.
     noise_img : nibabel image
@@ -234,8 +235,9 @@ def smooth_segmentation(data_img, seg_img, fwhm, noise_img=None,
         3D or 4D image data.
     seg_img : nibabel image
         3D label image defining smoothing ranges.
-    fwhm : positive float
-        Size of isotropic smoothing kernel in mm.
+    fwhm : positive float or None
+        Size of isotropic smoothing kernel, in mm, or None to return input
+        (as float and possibly copied).
     noise_img : nibabel image
         3D binary image defining voxels to be interpolated out.
     inplace : bool
@@ -282,8 +284,8 @@ def smoothing_matrix(measure, vertids, fwhm, exclude=None, minpool=6):
         Object for measuring distance along a cortical mesh.
     vertids : 1d numpy array
         Array of vertex IDs corresponding to each cortical voxel.
-    fwhm : float or None
-        Size of the smoothing kernel, in mm.
+    fwhm : positive float or None
+        Size of the smoothing kernel, in mm, or None to return identity matrix.
     exclude : 1d numpy array
         Binary array defining voxels that should be excluded and interpolated
         during smoothing.
@@ -364,8 +366,9 @@ def smooth_surface(data_img, vert_img, fwhm, subject, surf="graymid",
         Image where voxels have their corresponding surfave vertex ID or are -1
         if they do not correspond to cortex. The first frame should have left
         hemisphere vertices and the second right hemisphere vertices.
-    fwhm : float
-        Size of smoothing kernel in mm.
+    fwhm : positive float or None
+        Size of isotropic smoothing kernel, in mm, or None to return input
+        (as float and possibly copied).
     subject : string
         Subject ID to locate data in data directory.
     surf : string
