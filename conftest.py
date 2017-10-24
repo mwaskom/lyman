@@ -84,6 +84,7 @@ def lyman_info(tmpdir):
         subject_dir = data_dir.mkdir(subject)
         subject_dir.mkdir("mri")
         subject_dir.mkdir("surf")
+        subject_dir.mkdir("label")
         subject_dir.mkdir("func")
         design_dir = subject_dir.mkdir("design")
         design.to_csv(design_dir.join("model_a.csv"))
@@ -111,6 +112,7 @@ def freesurfer(lyman_info):
 
     subject = "subj01"
     mri_dir = lyman_info["data_dir"].join(subject).join("mri")
+    label_dir = lyman_info["data_dir"].join(subject).join("label")
 
     seed = sum(map(ord, "freesurfer"))
     rs = np.random.RandomState(seed)
@@ -131,11 +133,21 @@ def freesurfer(lyman_info):
     wmparc_file = str(mri_dir.join("wmparc.mgz"))
     nib.save(nib.MGHImage(wmparc_data.astype("int16"), affine), wmparc_file)
 
+    n = 10
+    fmt = ["%d", "%.3f", "%.3f", "%.3f", "%.9f"]
+    label_data = np.c_[np.arange(n), np.zeros((n, 4))]
+    label_files = {}
+    for hemi in ["lh", "rh"]:
+        fname = str(label_dir.join("{}.cortex.label".format(hemi)))
+        label_files[hemi] = fname
+        np.savetxt(fname, label_data, fmt=fmt, header=str(n))
+
     lyman_info.update(
         subject=subject,
         norm_file=norm_file,
         orig_file=orig_file,
         wmparc_file=wmparc_file,
+        label_files=label_files,
     )
     return lyman_info
 

@@ -6,6 +6,7 @@ import nipype
 from ..template import (define_template_workflow,
                         TemplateInput,
                         AnatomicalSegmentation,
+                        MaskWithLabel,
                         TemplateReport)
 
 
@@ -32,7 +33,8 @@ class TestTemplateWorkflow(object):
                           "crop_image", "zoom_image", "reorient_image",
                           "generate_reg", "invert_reg",
                           "transform_wmparc", "anat_segment",
-                          "hemi_source", "tag_surf", "combine_hemis",
+                          "hemi_source", "combine_hemis",
+                          "tag_surf", "mask_cortex",
                           "save_info", "template_qc", "template_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes
@@ -50,6 +52,7 @@ class TestTemplateWorkflow(object):
 
         assert out.norm_file == freesurfer["norm_file"]
         assert out.wmparc_file == freesurfer["wmparc_file"]
+        assert out.label_files == freesurfer["label_files"]
 
         output_path = "{}/template".format(freesurfer["subject"])
         assert out.output_path == output_path
@@ -74,6 +77,17 @@ class TestTemplateWorkflow(object):
         seg = nib.load(out.seg_file).get_data()
         surf = (nib.load(template["surf_file"]).get_data() > -1).any(axis=-1)
         assert np.all(seg[surf] == 1)
+
+    def test_mask_label(self, execdir, template):
+
+        out = MaskWithLabel(
+            in_file=template["surf_file"],
+            label_files=template["label_files"],
+            hemi="lh",
+            fill_value=-1,
+        ).run().outputs
+
+        assert out.out_file == execdir.join("masked.nii.gz")
 
     def test_template_report(self, execdir, template):
 

@@ -59,6 +59,8 @@ def define_template_workflow(info, subjects, qc=True):
                                             mkmask=True),
                     "tag_surf")
 
+    mask_cortex = Node(MaskWithLabel(fill_value=-1), "mask_cortex")
+
     combine_hemis = JoinNode(fsl.Merge(dimension="t",
                                        merged_file="surf.nii.gz"),
                              name="combine_hemis",
@@ -122,8 +124,14 @@ def define_template_workflow(info, subjects, qc=True):
             [("reg_file", "reg_file")]),
         (reorient_image, tag_surf,
             [("out_file", "template_file")]),
-        (tag_surf, combine_hemis,
-            [("vertexvol_file", "in_files")]),
+        (template_input, mask_cortex,
+            [("label_files", "label_files")]),
+        (hemi_source, mask_cortex,
+            [("hemi", "hemi")]),
+        (tag_surf, mask_cortex,
+            [("vertexvol_file", "in_file")]),
+        (mask_cortex, combine_hemis,
+            [("out_file", "in_files")]),
 
         (reorient_image, transform_wmparc,
             [("out_file", "source_file")]),
@@ -199,17 +207,23 @@ class TemplateInput(LymanInterface):
     class output_spec(TraitedSpec):
         norm_file = traits.File(exists=True)
         wmparc_file = traits.File(exists=True)
+        label_files = traits.Dict(key_trait=traits.Str,
+                                  value_trait=traits.File(exists=True))
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
 
         output_path = "{}/template".format(self.inputs.subject)
         mri_dir = op.join(self.inputs.data_dir, self.inputs.subject, "mri")
+        label_dir = op.join(self.inputs.data_dir, self.inputs.subject, "label")
 
         results = dict(
 
             norm_file=op.join(mri_dir, "norm.mgz"),
             wmparc_file=op.join(mri_dir, "wmparc.mgz"),
+
+            label_files=dict(lh=op.join(label_dir, "lh.cortex.label"),
+                             rh=op.join(label_dir, "rh.cortex.label")),
 
             output_path=output_path,
 
@@ -293,6 +307,32 @@ class AnatomicalSegmentation(LymanInterface):
         brainmask = ndimage.binary_fill_holes(brainmask)
         brainmask = brainmask.astype(np.uint8)
         self.write_image("mask_file", "mask.nii.gz", brainmask, affine, header)
+
+        return runtime
+
+
+class MaskWithLabel(LymanInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+        label_files = traits.Dict(traits.Str, traits.File)
+        hemi = traits.Enum("lh", "rh")
+        fill_value = traits.Float()
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+        affine, header = img.affine, img.header
+        data = img.get_data()
+
+        label_file = self.inputs.label_files[self.inputs.hemi]
+        label_vertices = nib.freesurfer.read_label(label_file)
+
+        data[~np.isin(data, label_vertices)] = self.inputs.fill_value
+        self.write_image("out_file", "masked.nii.gz", data, affine, header)
 
         return runtime
 
