@@ -605,7 +605,7 @@ class CarpetPlot(object):
     def setup_figure(self):
         """Initialize and organize the matplotlib objects."""
         width, height = 8, 10
-        f = plt.figure(figsize=(width, height), facecolor="0")
+        f = plt.figure(figsize=(width, height))
 
         gs = plt.GridSpec(nrows=2, ncols=2,
                           left=.07, right=.98,
