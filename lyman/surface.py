@@ -56,7 +56,13 @@ class SurfaceMeasure(object):
         f, v = nib.freesurfer.read_geometry(fname)
         return cls(f, v)
 
-    # TODO add from_names method to load from subject, hemi, surf
+    @classmethod
+    def from_names(cls, subj, hemi, surf, subjects_dir=None):
+        """Initialize from Freesurfer-style names."""
+        if subjects_dir is None:
+            subjects_dir = os.environ["SUBJECTS_DIR"]
+        fname = op.join(subjects_dir, subj, "surf", "{}.{}".format(hemi, surf))
+        return cls.from_file(fname)
 
     def __call__(self, vert, maxdistance=np.inf):
         """Return the distances from input to other vertices.

@@ -20,6 +20,15 @@ class TestSurfaceMeasure(object):
         for v, v_n in sm.neighbors.items():
             assert v_n == pytest.approx(meshdata["neighbors"][v])
 
+    def test_surface_measure_neighbors_from_names(self, meshdata):
+
+        sm = surface.SurfaceMeasure.from_names(
+            meshdata["subj"], meshdata["hemi"], meshdata["surf"]
+        )
+
+        for v, v_n in sm.neighbors.items():
+            assert v_n == pytest.approx(meshdata["neighbors"][v])
+
     def test_surface_measure_distance(self, meshdata):
 
         sm = surface.SurfaceMeasure(meshdata["verts"], meshdata["faces"])
