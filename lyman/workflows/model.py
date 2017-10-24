@@ -461,18 +461,14 @@ class ModelFit(LymanInterface):
         n_tp = ts_img.shape[-1]
 
         # Load the anatomical segmentation and fine analysis mask
-        run_mask = nib.load(self.inputs.mask_file).get_data() > 0
-
         seg_img = nib.load(self.inputs.seg_file)
+        mask_img = nib.load(self.inputs.mask_file)
+
         seg = seg_img.get_data()
-        gray_seg = (seg > 0) & (seg < 5)
-
-        vert_img = nib.load(self.inputs.surf_file)
-        ribbon = vert_img.get_data().max(axis=-1) > -1
-
-        mask = (ribbon | gray_seg) & run_mask
-        n_vox = mask.sum()
+        mask = mask_img.get_data()
+        mask = (mask > 0) & (seg > 0) & (seg < 5)
         mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
+        n_vox = mask.sum()
 
         # --- Spatial filtering
 

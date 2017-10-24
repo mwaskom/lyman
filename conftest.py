@@ -84,6 +84,7 @@ def lyman_info(tmpdir):
         subject_dir = data_dir.mkdir(subject)
         subject_dir.mkdir("mri")
         subject_dir.mkdir("surf")
+        subject_dir.mkdir("label")
         subject_dir.mkdir("func")
         design_dir = subject_dir.mkdir("design")
         design.to_csv(design_dir.join("model_a.csv"))
@@ -111,6 +112,7 @@ def freesurfer(lyman_info):
 
     subject = "subj01"
     mri_dir = lyman_info["data_dir"].join(subject).join("mri")
+    label_dir = lyman_info["data_dir"].join(subject).join("label")
 
     seed = sum(map(ord, "freesurfer"))
     rs = np.random.RandomState(seed)
@@ -131,11 +133,21 @@ def freesurfer(lyman_info):
     wmparc_file = str(mri_dir.join("wmparc.mgz"))
     nib.save(nib.MGHImage(wmparc_data.astype("int16"), affine), wmparc_file)
 
+    n = 10
+    fmt = ["%d", "%.3f", "%.3f", "%.3f", "%.9f"]
+    label_data = np.c_[np.arange(n), np.zeros((n, 4))]
+    label_files = {}
+    for hemi in ["lh", "rh"]:
+        fname = str(label_dir.join("{}.cortex.label".format(hemi)))
+        label_files[hemi] = fname
+        np.savetxt(fname, label_data, fmt=fmt, header=str(n))
+
     lyman_info.update(
         subject=subject,
         norm_file=norm_file,
         orig_file=orig_file,
         wmparc_file=wmparc_file,
+        label_files=label_files,
     )
     return lyman_info
 
@@ -159,6 +171,20 @@ def template(freesurfer):
 
     reg_file = str(template_dir.join("anat2func.mat"))
     np.savetxt(reg_file, np.random.randn(4, 4))
+
+    lut = pd.DataFrame([
+            ["Unknown", 0, 0, 0, 0],
+            ["Cortical-gray-matter", 59, 95, 138, 255],
+            ["Subcortical-gray-matter", 91, 129, 129, 255],
+            ["Brain-stem", 126, 163, 209, 255],
+            ["Cerebellar-gray-matter", 168, 197, 233, 255],
+            ["Superficial-white-matter", 206, 129, 134, 255],
+            ["Deep-white-matter", 184, 103, 109, 255],
+            ["Cerebellar-white-matter", 155, 78, 73, 255],
+            ["CSF", 251, 221, 122, 255]
+        ])
+    lut_file = str(template_dir.join("seg.lut"))
+    lut.to_csv(lut_file, sep="\t", header=False, index=True)
 
     seg_data = rs.randint(0, 7, vol_shape)
     seg_file = str(template_dir.join("seg.nii.gz"))
@@ -192,8 +218,9 @@ def template(freesurfer):
     freesurfer.update(
         vol_shape=vol_shape,
         subject=subject,
-        reg_file=reg_file,
+        lut_file=lut_file,
         seg_file=seg_file,
+        reg_file=reg_file,
         anat_file=anat_file,
         mask_file=mask_file,
         surf_file=surf_file,
