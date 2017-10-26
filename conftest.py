@@ -87,7 +87,9 @@ def lyman_info(tmpdir):
         subject_dir.mkdir("label")
         subject_dir.mkdir("func")
         design_dir = subject_dir.mkdir("design")
-        design.to_csv(design_dir.join("model_a.csv"))
+        design.to_csv(design_dir.join(
+            "{experiment_name}-{model_name}.csv".format(**info.trait_get())
+        ))
 
     vol_shape = 12, 8, 4
     n_tp = 20

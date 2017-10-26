@@ -503,14 +503,14 @@ def iterative_ols_fit(Y, X):
     XtXinv = np.empty((n_vox, n_ev, n_ev), np.float32)
     E = np.empty((n_tp, n_vox), np.float32)
 
-    I = np.eye(n_tp)
+    Imat = np.eye(n_tp)
 
     for i in range(n_vox):
 
         y_i, X_i = Y[..., i], X[..., i]
         XtXinv_i = pinv(dot(X_i.T, X_i))
         b_i = dot(XtXinv_i, dot(X_i.T, y_i))
-        R_i = I - dot(X_i, dot(XtXinv_i, X_i.T))
+        R_i = Imat - dot(X_i, dot(XtXinv_i, X_i.T))
         e_i = dot(R_i, y_i)
         ss_i = dot(e_i, e_i.T) / R_i.trace()
 

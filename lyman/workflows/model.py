@@ -518,8 +518,8 @@ class ModelFit(LymanInterface):
         # --- Design construction
 
         # Get the design information for this run
-        design_file = op.join(data_dir, subject, "design",
-                              info.model_name + ".csv")
+        fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
+        design_file = op.join(data_dir, subject, "design", fname)
         design = pd.read_csv(design_file)
         run_rows = (design.session == session) & (design.run == run)
         design = design.loc[run_rows]
