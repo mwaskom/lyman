@@ -18,7 +18,6 @@ install:
   - conda create -q -n testenv pip python=$TRAVIS_PYTHON_VERSION
   - source activate testenv
   - conda install --yes --file testing/conda_requirements.txt
-  - pip install git+https://github.com/nipy/nipype  # Needed until nipype 0.14
   - pip install .
 
 before_script:
