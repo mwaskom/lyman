@@ -15,8 +15,8 @@ INSTALL_REQUIRES = [
     'matplotlib',
     'pyyaml',
     'traits',
-    'nipype',
     'nibabel',
+    'nipype>=0.14'
 ]
 PACKAGES = [
     'lyman',
