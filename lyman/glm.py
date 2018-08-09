@@ -434,7 +434,7 @@ def estimate_residual_autocorrelation(Y, X, tukey_m=None):
     from numpy.fft import fft, ifft
 
     # Fit initial iteration OLS model in one step
-    B_ols, _, _, _ = np.linalg.lstsq(X, Y)
+    B_ols, _, _, _ = np.linalg.lstsq(X, Y, rcond=None)
     Yhat_ols = X.dot(B_ols)
     resid_ols = Y - Yhat_ols
 

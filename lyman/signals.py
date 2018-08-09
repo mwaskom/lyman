@@ -424,7 +424,7 @@ def _load_float_data_maybe_copy(img, inplace):
 
     """
     dtype = img.get_data_dtype()
-    if np.issubdtype(dtype, np.float):
+    if np.issubdtype(dtype, np.floating):
         to_dtype = dtype
     else:
         to_dtype = np.float
