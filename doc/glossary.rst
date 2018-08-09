@@ -57,9 +57,9 @@ Directory structure
      The location where data that will be input into the lyman workflows are
      stored. Should also correspond to the Freesurfer ``SUBJECTS_DIR``.
 
-    analysis directory
-     The location where lyman will write output files for persistent storage
-     after workflow execution.
+    proc directory
+     The location where lyman will write processed output files for persistent
+     storage after workflow execution.
 
     cache directory
      The location where lyman will write intermediate files for temporary
