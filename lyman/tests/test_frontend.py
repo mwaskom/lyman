@@ -181,15 +181,15 @@ class TestFrontend(object):
         assert res is None
 
         args.execute = True
-        fname = execdir.join("graph").join("workflow.dot")
+        fname = str(execdir.join("graph").join("workflow.dot"))
         args.graph = fname
         res = frontend.execute(wf, args, info)
-        assert res == fname + ".svg"
+        assert res == fname[:-4] + ".svg"
 
         args.graph = True
         args.stage = "preproc"
         res = frontend.execute(wf, args, info)
-        assert res == cache_dir.join("preproc.dot.svg")
+        assert res == cache_dir.join("preproc.svg")
 
     def test_load_info_from_module(self, execdir):
 
