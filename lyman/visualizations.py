@@ -607,7 +607,7 @@ class CarpetPlot(object):
         width, height = 8, 10
         f = plt.figure(figsize=(width, height))
 
-        gs = plt.GridSpec(nrows=2, ncols=2,
+        gs = plt.GridSpec(nrows=2, ncols=2, figure=f,
                           left=.07, right=.98,
                           bottom=.05, top=.96,
                           wspace=0, hspace=.02,

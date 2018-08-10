@@ -374,7 +374,7 @@ class TestLinearModel(object):
 
         # Test against numpy's basic least squares estimation
         for i in range(n_vox):
-            B_i, _, _, _ = np.linalg.lstsq(WX[:, :, i], WY[:, i])
+            B_i, _, _, _ = np.linalg.lstsq(WX[:, :, i], WY[:, i], rcond=None)
             assert B_i == approx(B[i])
 
         # Test XtXinv symmetry

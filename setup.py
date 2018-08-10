@@ -16,7 +16,7 @@ INSTALL_REQUIRES = [
     'pyyaml',
     'traits',
     'nibabel',
-    'nipype>=0.14'
+    'nipype>=1.0',
 ]
 PACKAGES = [
     'lyman',
