@@ -813,8 +813,16 @@ class FinalizeUnwarping(LymanInterface):
             # Initialize the figure and axes
             f = plt.figure(figsize=(width, height))
             gs = dict(
-                orig=plt.GridSpec(1, len(x_slc), 0, .5, 1, .95, 0, 0),
-                corr=plt.GridSpec(1, len(x_slc), 0, 0, 1, .45, 0, 0)
+                orig=plt.GridSpec(
+                    nrows=1, ncols=len(x_slc), figure=f,
+                    left=0, bottom=.5, right=1, top=.95,
+                    wspace=0, hspace=0,
+                ),
+                corr=plt.GridSpec(
+                    nrows=1, ncols=len(x_slc), figure=f,
+                    left=0, bottom=0, right=1, top=.45,
+                    wspace=0, hspace=0,
+                )
             )
 
             # Add a title with the image pair correlation
