@@ -2,7 +2,7 @@ from __future__ import division
 import numpy as np
 import pandas as pd
 import scipy as sp
-from scipy import sparse, stats
+from scipy import sparse, stats, signal, linalg
 from scipy.interpolate import interp1d
 
 from .signals import smooth_volume
@@ -115,6 +115,50 @@ class GammaHRF(HRFModel):
         return y, dy
 
 
+class FIRBasis(HRFModel):
+    """Finite Impulse Response basis model."""
+    def __init__(self, n, offset=0):
+        """Initialize the model with its parameters.
+
+        Parameters
+        ----------
+        n : int
+            Number of delta functions to use in the basis set.
+        offset : int
+            Number of time points to model before the event.
+
+        """
+        self.n = n
+        self.offset = offset
+
+    def transform(self, input):
+        """Generate a prediction basis set for the input as Toeplitz matrix.
+
+        Parameters
+        ----------
+        input : array or series
+            Input data; should be one-dimensional
+
+        Returns
+        -------
+        output : 2D array or DataFrame
+            Output data; has same type of input but will have multiple columns.
+
+        """
+        # TODO implement offset
+        row = signal.unit_impulse(self.n, 0)
+
+        full_input = np.concatenate([input, np.zeros(self.offset)])
+        basis = linalg.toeplitz(full_input, row)[self.offset:]
+
+        if isinstance(input, pd.Series):
+            pad = self.n // 10 + 1
+            cols = [f"{input.name}_{i:0{pad}d}" for i in range(self.n)]
+            basis = pd.DataFrame(basis, index=input.index, columns=cols)
+
+        return basis
+
+
 def condition_to_regressors(name, condition, hrf_model,
                             n_tp, tr, res, shift):
     """Generate design matrix columns from information about event occurrence.
@@ -173,16 +217,21 @@ def condition_to_regressors(name, condition, hrf_model,
     hires_output = hrf_model.transform(hires_input)
 
     # TODO It's annoying that we have to do this!
-    if isinstance(hires_output, (pd.Series, pd.DataFrame)):
+    if isinstance(hires_output, pd.Series):
         hires_output = (hires_output,)
+    elif isinstance(hires_output, pd.DataFrame):
+        hires_output = (col for _, col in hires_output.iteritems())
 
     # Downsample the predicted regressors to native sampling
+    # TODO This crashes when hires_output is an ndarray
+    # TODO this whole approach needs fixing
     output = []
     for hires_col in hires_output:
         # TODO having to do this is a pain!
         if hires_col is None:
             output.append(None)
             continue
+
         col = interp1d(hires_tps, hires_col)(tps + shift)
         output.append(pd.Series(col, index=tps, name=hires_col.name))
 
