@@ -158,9 +158,9 @@ class TestHRFs(object):
         assert isinstance(hrf.transform(delta_input), np.ndarray)
         assert isinstance(hrf.transform(pd.Series(delta_input)), pd.DataFrame)
 
-    def test_fir_basis_output_semantics(self, random, delta_input):
+    def test_fir_basis_output_indices(self, random, delta_input):
 
-        n = 12
+        n = 24
         name = "event"
         idx = pd.Index(random.permutation(np.arange(delta_input.size)))
         cols = pd.Index([f"{name}_{i:02d}" for i in range(n)])

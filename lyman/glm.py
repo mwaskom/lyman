@@ -150,7 +150,7 @@ class FIRBasis(HRFModel):
         basis = linalg.toeplitz(full_input, row)[self.offset:]
 
         if isinstance(input, pd.Series):
-            pad = self.n // 10 + 1
+            pad = int(np.floor(np.log10(self.n))) + 1
             cols = [f"{input.name}_{i:0{pad}d}" for i in range(self.n)]
             basis = pd.DataFrame(basis, index=input.index, columns=cols)
 
