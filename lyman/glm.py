@@ -145,9 +145,7 @@ class FIRBasis(HRFModel):
             Output data; has same type of input but will have multiple columns.
 
         """
-        # TODO implement offset
         row = signal.unit_impulse(self.n, 0)
-
         full_input = np.concatenate([input, np.zeros(self.offset)])
         basis = linalg.toeplitz(full_input, row)[self.offset:]
 

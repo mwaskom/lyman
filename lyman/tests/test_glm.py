@@ -27,19 +27,24 @@ class TestHRFs(object):
         return np.random.RandomState(seed)
 
     @pytest.fixture
-    def input(self, random):
+    def randn_input(self, random):
 
         return random.randn(100)
+
+    @pytest.fixture
+    def delta_input(self, random):
+
+        return random.randn(100) > .05
 
     def test_base(self):
 
         with pytest.raises(NotImplementedError):
             glm.HRFModel().transform(None)
 
-    def test_identity(self, input):
+    def test_identity(self, randn_input):
 
-        output = glm.IdentityHRF().transform(input)
-        assert np.array_equal(output, input)
+        output = glm.IdentityHRF().transform(randn_input)
+        assert np.array_equal(output, randn_input)
 
     @pytest.mark.parametrize(
         "res,duration",
@@ -69,10 +74,10 @@ class TestHRFs(object):
         single = glm.GammaHRF(ratio=0)
         assert single.kernel[0].min() >= 0
 
-    def test_gamma_hrf_output_type(self, random, input):
+    def test_gamma_hrf_output_type(self, random, randn_input):
 
-        a = np.asarray(input)
-        s = pd.Series(input, name="event")
+        a = np.asarray(randn_input)
+        s = pd.Series(randn_input, name="event")
 
         hrf = glm.GammaHRF()
         a_out = hrf.transform(a)
@@ -92,33 +97,80 @@ class TestHRFs(object):
         assert isinstance(s_out[0], pd.Series)
         assert isinstance(s_out[1], pd.Series)
 
-    def test_gamma_hrf_convolution(self, random, input):
+    def test_gamma_hrf_convolution(self, random, randn_input):
 
         hrf = glm.GammaHRF()
         k, _ = hrf.kernel
-        convolution = np.convolve(input, k)[:len(input)]
-        assert hrf.transform(input)[0] == pytest.approx(convolution)
+        convolution = np.convolve(randn_input, k)[:len(randn_input)]
+        assert hrf.transform(randn_input)[0] == pytest.approx(convolution)
 
-    def test_output_names(self, random, input):
+    def test_gamma_basis_output_names(self, random, randn_input):
 
         name = "event"
-        s = pd.Series(input, name=name)
+        s = pd.Series(randn_input, name=name)
         hrf = glm.GammaHRF(derivative=True)
         y, dydt = hrf.transform(s)
         assert y.name == name
         assert dydt.name == name + "-dydt"
 
-    def test_output_index(self, random, input):
+    def test_gamma_basis_output_index(self, random, randn_input):
 
-        n = len(input)
+        n = len(randn_input)
         name = "event"
         idx = pd.Index(random.permutation(np.arange(n)))
-        s = pd.Series(input, idx, name=name)
+        s = pd.Series(randn_input, idx, name=name)
 
         hrf = glm.GammaHRF(derivative=True)
         y, dydt = hrf.transform(s)
         assert y.index.equals(idx)
         assert dydt.index.equals(idx)
+
+    @pytest.mark.parametrize("n", [10, 14])
+    def test_fir_matrix_size(self, delta_input, n):
+
+        n_tp = len(delta_input)
+        hrf = glm.FIRBasis(n)
+        assert hrf.transform(delta_input).shape == (n_tp, n)
+
+    @pytest.mark.parametrize("offset", [0, 2])
+    def test_fir_matrix_values(self, delta_input, random, offset):
+
+        n = 12
+        hrf = glm.FIRBasis(n, offset)
+        onsets, = np.nonzero(delta_input)
+
+        delta_basis = hrf.transform(delta_input)
+
+        for i in onsets:
+            for j, row in zip(np.arange(n), delta_basis[(i - offset):]):
+                assert row[j] == 1
+
+        parametric_input = delta_input * random.randn(delta_input.size)
+        parametric_basis = hrf.transform(parametric_input)
+
+        for i in onsets:
+            for j, row in zip(np.arange(n), parametric_basis[(i - offset):]):
+                assert row[j] == parametric_input[i]
+
+    def test_fir_matrix_output_type(self, delta_input):
+
+        hrf = glm.FIRBasis(12)
+        assert isinstance(hrf.transform(delta_input), np.ndarray)
+        assert isinstance(hrf.transform(pd.Series(delta_input)), pd.DataFrame)
+
+    def test_fir_basis_output_semantics(self, random, delta_input):
+
+        n = 12
+        name = "event"
+        idx = pd.Index(random.permutation(np.arange(delta_input.size)))
+        cols = pd.Index([f"{name}_{i:02d}" for i in range(n)])
+        s = pd.Series(delta_input, idx, name=name)
+
+        hrf = glm.FIRBasis(n)
+        basis = hrf.transform(s)
+
+        assert basis.index.equals(idx)
+        assert basis.columns.equals(cols)
 
 
 class TestDesignMatrix(object):
@@ -211,6 +263,16 @@ class TestDesignMatrix(object):
 
         X = glm.build_design_matrix(conditions, artifacts=artifacts)
         assert X.columns.tolist() == ["a", "b"] + cols
+
+    def test_design_fir(self, conditions):
+
+        n = 12
+        n_tp = 48
+        X = glm.build_design_matrix(conditions, glm.FIRBasis(n), n_tp=n_tp,
+                                    demean=False, res=1, shift=0)
+
+        n_cond = conditions["condition"].unique().size
+        assert X.shape == (n_tp, n * n_cond)
 
     def test_n_tp_errors(self, conditions, regressors, artifacts):
 
