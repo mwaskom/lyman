@@ -4,4 +4,5 @@ doc/_build
 cover
 .coverage
 .cache
+.pytest_cache
 matplotlibrc
