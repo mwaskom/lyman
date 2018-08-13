@@ -195,23 +195,23 @@ def condition_to_regressors(name, condition, hrf_model,
     value = condition["value"]
 
     # Define hires and output resolution timepoints
-    hires_tps = np.arange(0, n_tp * tr, 1 / res)
     # TODO should output timepoints reflect shifting or not?
+    hires_tps = np.arange(0, n_tp * tr, tr / res)
     tps = np.arange(0, n_tp * tr, tr)
 
     # Initialize the array that will be transformed
     hires_input = np.zeros_like(hires_tps, np.float)
 
     # Determine the time points at which each even starts and stops
-    onset_at = np.round(onset * res).astype(int)
-    offset_at = np.round((onset + duration) * res).astype(int)
+    onset_at = np.round(onset / (tr / res)).astype(int)
+    offset_at = np.round((onset + duration) / (tr / res)).astype(int)
 
     # Insert specified amplitudes for each event duration
     for start, end, value in zip(onset_at, offset_at, value):
         hires_input[start:(end + 1)] = value
 
     # Transform into a regressor basis set
-    hires_input = pd.Series(hires_input, name=name)
+    hires_input = pd.Series(hires_input, index=hires_tps, name=name)
     hires_output = hrf_model.transform(hires_input)
 
     # TODO It's annoying that we have to do this!
