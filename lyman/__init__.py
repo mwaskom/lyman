@@ -1,10 +1,10 @@
-from .frontend import *  # flake8: noqa
-from . import glm  # flake8: noqa
-from . import utils # flake8: noqa
-from . import surface  # flake8: noqa
-from . import signals  # flake8: noqa
-from . import workflows  # flake8: noqa
-from . import visualizations  # flake8: noqa
+from .frontend import *  # noqa: F401,F403
+from . import glm  # noqa: F401
+from . import utils  # noqa: F401
+from . import surface  # noqa: F401
+from . import signals  # noqa: F401
+from . import workflows  # noqa: F401
+from . import visualizations  # noqa: F401
 
 version = "2.0.0.dev"
 __version__ = version
