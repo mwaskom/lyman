@@ -290,6 +290,8 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
         # Registration of each frame to SBRef image
 
         (run_input, ts2sb_qc,
+            [("run_tuple", "run_tuple")]),
+        (run_input, ts2sb_qc,
             [("sb_file", "target_file")]),
         (ts2sb, ts2sb_qc,
             [("par_file", "realign_params")]),
@@ -434,9 +436,8 @@ class TimeSeriesGIF(object):
         width = 5
         height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
 
-        if title is None:
-            top = 1
-        else:
+        top = 1
+        if title is not None:
             pad = .25
             top = height / (height + pad)
             height += pad
@@ -446,8 +447,8 @@ class TimeSeriesGIF(object):
             ax.set_axis_off()
 
         if title is not None:
-            f.text(.5, top + (1 - top) / 2,
-                   title, color="w", size=10)
+            f.text(.5, top + (1 - top) / 2, title,
+                   ha="center", va="center", color="w", size=10)
 
         data = img.get_data()
         vmin, vmax = np.percentile(data, [2, 98])
@@ -967,7 +968,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         mc_data.to_csv(mc_file, index=False)
 
         # Define a title to use for QC plots
-        qc_title = "{} {} {}".format(*self.inputs.run_tuple)
+        qc_title = " ".join(self.inputs.run_tuple)
 
         # Make a carpet plot of the final timeseries
         p = CarpetPlot(out_img, seg_img, mc_data, title=qc_title)
@@ -1097,7 +1098,7 @@ class FinalizeTemplate(LymanInterface):
                                     tsnr_data, affine, header)
 
         # Prepare QC metadata
-        qc_title = "{} {}".format(*self.inputs.session_tuple)
+        qc_title = " ".join(self.inputs.session_tuple)
 
         # Write static mosaic image
         m = Mosaic(out_img, title=qc_title)
@@ -1147,6 +1148,7 @@ class RealignmentReport(LymanInterface):
     class input_spec(TraitedSpec):
         target_file = traits.File(exists=True)
         realign_params = traits.File(exists=True)
+        run_tuple = traits.Tuple(tuple(), usedefault=True)
 
     class output_spec(TraitedSpec):
         params_plot = traits.File(exists=True)
@@ -1195,6 +1197,9 @@ class RealignmentReport(LymanInterface):
         for ax in axes:
             ax.legend(ncol=3, loc="best")
 
+        title = " ".join(self.inputs.run_tuple)
+        fig.suptitle(title, size=10)
+
         axes[0].set_ylabel("Rotations (degrees)")
         axes[1].set_ylabel("Translations (mm)")
         fig.tight_layout()
@@ -1202,7 +1207,8 @@ class RealignmentReport(LymanInterface):
 
     def plot_target(self):
         """Plot a mosaic of the motion correction target image."""
-        return Mosaic(self.inputs.target_file, step=2)
+        title = " ".join(self.inputs.run_tuple)
+        return Mosaic(self.inputs.target_file, step=2, title=title)
 
 
 class AnatRegReport(LymanInterface):

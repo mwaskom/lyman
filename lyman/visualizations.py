@@ -172,8 +172,8 @@ class Mosaic(object):
         self.fig.subplots_adjust(0, 0, 1, top, 0, 0)
 
         if self.title is not None:
-            self.fig.text(.5, top + (1 - top) / 2,
-                          self.title, color="w", size=10)
+            self.fig.text(.5, top + (1 - top) / 2, self.title,
+                          ha="center", va="center", color="w", size=10)
 
     def _plot_anat(self, lims=None):
         """Plot the anatomy in grayscale."""
