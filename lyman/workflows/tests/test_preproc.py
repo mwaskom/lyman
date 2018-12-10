@@ -448,7 +448,7 @@ class TestPreprocWorkflow(object):
         n_tp = 10
         affine = np.eye(4)
         affine[:3, :3] *= 2
-        target = 10000
+        target = 100
 
         fov = np.arange(np.product(shape)).reshape(shape) != 11
         in_data = [rs.normal(500, 10, shape) * fov for _ in range(n_tp)]
@@ -559,7 +559,7 @@ class TestPreprocWorkflow(object):
         n_runs = 4
         affine = np.eye(4)
         affine[:3, :3] *= 2
-        target = 10000
+        target = 100
 
         in_data = [rs.normal(500, 10, shape) for _ in range(n_frames)]
         in_files = self.save_image_frames(in_data, affine, "func")

@@ -14,7 +14,7 @@ class Mosaic(object):
 
     def __init__(self, anat, stat=None, mask=None, n_col=9, step=2,
                  tight=True, show_mask=True, slice_dir="axial",
-                 anat_lims=None):
+                 anat_lims=None, title=None):
         """Plot a mosaic of axial slices through an MRI volume.
 
         Parameters
@@ -119,6 +119,7 @@ class Mosaic(object):
         self.n_col = n_col
         self.step = step
         self.slice_dir = slice_dir
+        self.title = title
 
         # Define slice objects to crop to the volume
         slices, = ndimage.find_objects(self.fov)
@@ -155,14 +156,24 @@ class Mosaic(object):
         elif self.slice_dir.startswith("a"):
             slc_i, slc_j = self.x_slice, self.y_slice
         nx, ny, _ = self.anat_data[slc_i, slc_j].shape
-        figsize = self.n_col, (ny / nx) * n_row
+        width, height = self.n_col, (ny / nx) * n_row
+        if self.title is None:
+            top = 1
+        else:
+            pad = .25
+            top = height / (height + pad)
+            height += pad
         plot_kws = dict(nrows=int(n_row), ncols=int(self.n_col),
-                        figsize=figsize, facecolor="0",
+                        figsize=(width, height), facecolor="0",
                         subplot_kw=dict(xticks=[], yticks=[]))
 
         self.fig, self.axes = plt.subplots(**plot_kws)
         [ax.set_axis_off() for ax in self.axes.flat]
-        self.fig.subplots_adjust(0, 0, 1, 1, 0, 0)
+        self.fig.subplots_adjust(0, 0, 1, top, 0, 0)
+
+        if self.title is not None:
+            self.fig.text(.5, top + (1 - top) / 2,
+                          self.title, color="w", size=10)
 
     def _plot_anat(self, lims=None):
         """Plot the anatomy in grayscale."""
@@ -523,7 +534,7 @@ class CarpetPlot(object):
         self.plot_fd(axes["motion"], fd)
         self.plot_data(axes, segdata, vlim)
         if title is not None:
-            fig.suptitle(title)
+            fig.suptitle(title, size=10)
 
         # Store useful attributes
         self.segdata = segdata

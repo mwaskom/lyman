@@ -424,7 +424,7 @@ def generate_iterables(scan_info, experiment, subjects, sessions=None):
 
 class TimeSeriesGIF(object):
 
-    def write_time_series_gif(self, runtime, img, fname):
+    def write_time_series_gif(self, runtime, img, fname, title=None):
 
         os.mkdir("png")
 
@@ -434,9 +434,20 @@ class TimeSeriesGIF(object):
         width = 5
         height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
 
+        if title is None:
+            top = 1
+        else:
+            pad = .25
+            top = height / (height + pad)
+            height += pad
+
         f, axes = plt.subplots(ncols=3, figsize=(width, height))
         for ax in axes:
             ax.set_axis_off()
+
+        if title is not None:
+            f.text(.5, top + (1 - top) / 2,
+                   title, color="w", size=10)
 
         data = img.get_data()
         vmin, vmax = np.percentile(data, [2, 98])
@@ -446,7 +457,7 @@ class TimeSeriesGIF(object):
         im_y = axes[1].imshow(np.zeros((nz, nx)), **kws)
         im_z = axes[2].imshow(np.zeros((ny, nx)), **kws)
 
-        f.subplots_adjust(0, 0, 1, 1, 0, 0)
+        f.subplots_adjust(0, 0, 1, top, 0, 0)
 
         x, y, z = nx // 2, ny // 2, nz // 2
 
@@ -647,8 +658,9 @@ class RunInput(LymanInterface, TimeSeriesGIF):
         self._results["ts_frames"] = ts_frames
 
         # Make a GIF movie of the raw timeseries
+        qc_title = "{} {} {}".format(subject, session, run)
         out_plot = self.define_output("ts_plot", "raw.gif")
-        self.write_time_series_gif(runtime, ts_img, out_plot)
+        self.write_time_series_gif(runtime, ts_img, out_plot, title=qc_title)
 
         # Load files from the template directory
         template_path = op.join(self.inputs.proc_dir, subject, "template")
@@ -954,34 +966,38 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         mc_data = pd.DataFrame(mc_data, columns=cols)
         mc_data.to_csv(mc_file, index=False)
 
+        # Define a title to use for QC plots
+        qc_title = "{} {} {}".format(*self.inputs.run_tuple)
+
         # Make a carpet plot of the final timeseries
-        p = CarpetPlot(out_img, seg_img, mc_data)
+        p = CarpetPlot(out_img, seg_img, mc_data, title=qc_title)
         self.write_visualization("out_png", "func.png", p)
 
         # Make a GIF movie of the final timeseries
         out_gif = self.define_output("out_gif", "func.gif")
-        self.write_time_series_gif(runtime, out_img, out_gif)
+        self.write_time_series_gif(runtime, out_img, out_gif, title=qc_title)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
         norm_mean = mean / mean[seg == 1].mean()
-        mean_m = Mosaic(anat_img, norm_mean)
+        mean_m = Mosaic(anat_img, norm_mean, title=qc_title)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
         self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_m = Mosaic(anat_img, tsnr)
+        tsnr_m = Mosaic(anat_img, tsnr, title=qc_title)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
         self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a mosaic of the run mask
         # TODO is the better QC showing the run mask over the unmasked mean
         # image so that we can see if the brain is getting cut off?
-        mask_m = Mosaic(anat_img, mask_img)
+        mask_m = Mosaic(anat_img, mask_img, title=qc_title)
         mask_m.plot_mask()
         self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a mosaic of the noisy voxels
-        noise_m = Mosaic(anat_img, noise_img, mask_img, show_mask=False)
+        noise_m = Mosaic(anat_img, noise_img, mask_img,
+                         show_mask=False, title=qc_title)
         noise_m.plot_mask(alpha=1)
         self.write_visualization("noise_plot", "noise.png", noise_m)
 
@@ -1049,7 +1065,7 @@ class FinalizeTemplate(LymanInterface):
         data *= jacobian
 
         # Scale each frame to a common mean value
-        target = 10000
+        target = 100
         scale_value = target / data[mask].mean(axis=0, keepdims=True)
         data = data * scale_value
 
@@ -1080,8 +1096,11 @@ class FinalizeTemplate(LymanInterface):
         tsnr_img = self.write_image("tsnr_file", "tsnr.nii.gz",
                                     tsnr_data, affine, header)
 
+        # Prepare QC metadata
+        qc_title = "{} {}".format(*self.inputs.session_tuple)
+
         # Write static mosaic image
-        m = Mosaic(out_img)
+        m = Mosaic(out_img, title=qc_title)
         self.write_visualization("out_plot", "func.png", m)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
@@ -1089,23 +1108,25 @@ class FinalizeTemplate(LymanInterface):
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
         norm_mean = mean / mean[seg == 1].mean()
-        mean_m = Mosaic(anat_img, norm_mean, mask_img, show_mask=False)
+        mean_m = Mosaic(anat_img, norm_mean, mask_img,
+                        show_mask=False, title=qc_title)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
         self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_m = Mosaic(anat_img, tsnr_img, mask_img, show_mask=False)
+        tsnr_m = Mosaic(anat_img, tsnr_img, mask_img,
+                        show_mask=False, title=qc_title)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
         self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a QC plot of the run mask
         # TODO should this emphasize areas where runs don't overlap?
-        mask_m = Mosaic(anat_img, mask_img)
+        mask_m = Mosaic(anat_img, mask_img, title=qc_title)
         mask_m.plot_mask()
         self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a QC plot of the session noise mask
-        noise_m = Mosaic(anat_img, noise_img)
+        noise_m = Mosaic(anat_img, noise_img, title=qc_title)
         noise_m.plot_mask(alpha=1)
         self.write_visualization("noise_plot", "noise.png", noise_m)
 

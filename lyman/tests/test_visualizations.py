@@ -144,6 +144,13 @@ class TestMosaic(VisualizationFixture):
         m = viz.Mosaic(images["anat_img"], images["mask_img"])
         m.plot_mask_edges("red")
 
+    def test_title(self, images, closefig):
+
+        title = "test title"
+        m = viz.Mosaic(images["anat_img"], title=title)
+        title_text = m.fig.texts[0]
+        assert title == title_text.get_text()
+
     def test_savefig(self, images, closefig):
 
         m = viz.Mosaic(images["anat_img"])
