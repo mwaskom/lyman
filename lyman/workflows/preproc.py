@@ -910,7 +910,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         data *= jacobian
 
         # Scale the timeseries for cross-run intensity normalization
-        target = 10000
+        target = 100
         scale_value = target / data[mask].mean()
         data = data * scale_value
 
