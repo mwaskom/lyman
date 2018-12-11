@@ -103,8 +103,8 @@ def image_to_matrix(img, mask_img):
 
     Parameters
     ----------
-    data : n_vox or n_tp, n_vox numpy array
-        Data matrix; if a time series, time should be on the first axis.
+    img : nifti image
+        3D or 4D nifti image with data to extract.
     mask_img : 3D nifti image
         Image defining the voxels where data will be extracted. All nonzero
         voxels will be used; the mask does not have to be binary. Must be 3D.
