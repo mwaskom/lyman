@@ -686,7 +686,7 @@ class CarpetPlot(object):
                 ha="center", va="top", clip_on=False)
 
 
-def plot_design_matrix(X):
+def plot_design_matrix(X, title=None):
     """Show the design matrix as a transposed heatmap.
 
     Parameters
@@ -716,6 +716,9 @@ def plot_design_matrix(X):
     ax.set_yticks(yticks)
     ax.set_yticklabels(X.columns)
     ax.set_xticks([])
+
+    if title is not None:
+        ax.set_title(title)
 
     f.tight_layout()
 

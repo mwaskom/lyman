@@ -308,6 +308,8 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
 
         # Registration of SBRef volume to SE-EPI fieldmap
 
+        (run_input, sb2fm_qc,
+            [("run_tuple", "run_tuple")]),
         (sb2fm, sb2fm_qc,
             [("out_file", "in_file")]),
         (finalize_unwarping, sb2fm_qc,
@@ -1268,6 +1270,7 @@ class AnatRegReport(LymanInterface):
 class CoregGIF(LymanInterface):
 
     class input_spec(TraitedSpec):
+        run_tuple = traits.Tuple()
         in_file = traits.File(exists=True)
         ref_file = traits.File(exists=True)
         out_file = traits.File()
@@ -1285,7 +1288,10 @@ class CoregGIF(LymanInterface):
             ref_data = ref_img.get_data()[..., 0]
             ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
 
-        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname, tight=False)
+        qc_title = " ".join(self.inputs.run_tuple)
+
+        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname,
+                              title=qc_title, tight=False)
 
         return runtime
 

@@ -726,11 +726,13 @@ class TestPreprocWorkflow(object):
         nib.save(nib.Nifti1Image(ref_data, np.eye(4)), ref_file)
 
         out_file = "out.gif"
+        run_tuple = "subj01", "sess01", "run01"
 
         out = preproc.CoregGIF(
             in_file=in_file,
             ref_file=ref_file,
             out_file=out_file,
+            run_tuple=run_tuple,
         ).run().outputs
 
         assert out.out_file == execdir.join(out_file)
