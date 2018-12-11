@@ -366,6 +366,8 @@ class TestPreprocWorkflow(object):
         affine[:3, :3] *= 2
         phase_encoding = ["y+"] * 3 + ["y-"] * 3
 
+        session_tuple = "subj01", "sess01"
+
         raw_data = rs.uniform(0, 1, shape_4d)
         raw_file = "raw_frames.nii.gz"
         nib.save(nib.Nifti1Image(raw_data, affine), raw_file)
@@ -388,7 +390,8 @@ class TestPreprocWorkflow(object):
             corrected_file=corrected_file,
             warp_files=warp_files,
             jacobian_files=jacobian_files,
-            phase_encoding=phase_encoding
+            phase_encoding=phase_encoding,
+            session_tuple=session_tuple,
         ).run().outputs
 
         # --- Test outputs
@@ -661,9 +664,12 @@ class TestPreprocWorkflow(object):
         mc_file = "mc.txt"
         np.savetxt(mc_file, mc_data)
 
+        run_tuple = "subj01", "sess01", "run01"
+
         out = preproc.RealignmentReport(
             target_file=target_file,
-            realign_params=mc_file
+            realign_params=mc_file,
+            run_tuple=run_tuple,
         ).run().outputs
 
         assert out.params_plot == execdir.join("mc_params.png")
@@ -675,6 +681,7 @@ class TestPreprocWorkflow(object):
     def test_anat_reg_report(self, execdir):
 
         subject_id = "subj01"
+        session_tuple = subject_id, "sess01"
         data_dir = execdir.mkdir("data")
         mri_dir = data_dir.mkdir(subject_id).mkdir("mri")
 
@@ -699,6 +706,7 @@ class TestPreprocWorkflow(object):
 
         out = preproc.AnatRegReport(
             subject_id=subject_id,
+            session_tuple=session_tuple,
             data_dir=data_dir,
             in_file=in_file,
             cost_file=cost_file,

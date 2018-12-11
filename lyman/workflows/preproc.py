@@ -166,7 +166,8 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
              ("phase_encoding", "encoding_direction"),
              ("readout_times", "readout_times")]),
         (session_input, finalize_unwarping,
-            [("fm_file", "raw_file"),
+            [("session_tuple", "session_tuple"),
+             ("fm_file", "raw_file"),
              ("phase_encoding", "phase_encoding")]),
         (estimate_distortions, finalize_unwarping,
             [("out_corrected", "corrected_file"),
@@ -299,7 +300,8 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
         # Registration of corrected SE-EPI to anatomy
 
         (session_input, fm2anat_qc,
-            [("subject", "subject_id")]),
+            [("subject", "subject_id"),
+             ("session_tuple", "session_tuple")]),
         (fm2anat, fm2anat_qc,
             [("registered_file", "in_file"),
              ("min_cost_file", "cost_file")]),
@@ -718,6 +720,7 @@ class FinalizeUnwarping(LymanInterface):
         warp_files = traits.List(traits.File(exists=True))
         jacobian_files = traits.List(traits.File(Exists=True))
         phase_encoding = traits.List(traits.Str)
+        session_tuple = traits.Tuple()
 
     class output_spec(TraitedSpec):
         raw_file = traits.File(exists=True)
@@ -779,8 +782,11 @@ class FinalizeUnwarping(LymanInterface):
         self.write_image("mask_file", "warp_mask.nii.gz",
                          mask_data, affine, header)
 
+        # Get the metadata
+        qc_title = " ".join(self.inputs.session_tuple)
+
         # Generate a QC image of the warpfield
-        m = Mosaic(raw_img, warp_data_y)
+        m = Mosaic(raw_img, warp_data_y, title=qc_title)
         m.plot_overlay("coolwarm", vmin=-6, vmax=6, alpha=.75)
         self.write_visualization("warp_plot", "warp.png", m)
 
@@ -815,7 +821,9 @@ class FinalizeUnwarping(LymanInterface):
         vmin, vmax = np.percentile(vol_data["orig"].flat, [2, 98])
         kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
         text_kws = dict(size=7, color="w", backgroundcolor="0",
-                        ha="center", va="bottom")
+                        ha="left", va="bottom")
+
+        qc_title = " ".join(self.inputs.session_tuple)
 
         width = len(x_slc)
         height = (nz / ny) * 2.75
@@ -828,23 +836,26 @@ class FinalizeUnwarping(LymanInterface):
             gs = dict(
                 orig=plt.GridSpec(
                     nrows=1, ncols=len(x_slc), figure=f,
-                    left=0, bottom=.5, right=1, top=.95,
+                    left=0, bottom=.5, right=1, top=.94,
                     wspace=0, hspace=0,
                 ),
                 corr=plt.GridSpec(
                     nrows=1, ncols=len(x_slc), figure=f,
-                    left=0, bottom=0, right=1, top=.45,
+                    left=0, bottom=0, right=1, top=.44,
                     wspace=0, hspace=0,
                 )
             )
 
-            # Add a title with the image pair correlation
-            f.text(.5, .93,
+            # Add text with the image pair correlation
+            f.text(.05, .93,
                    "Original similarity: {:.2f}".format(r_vals["orig"]),
                    **text_kws)
-            f.text(.5, .43,
+            f.text(.05, .43,
                    "Corrected similarity: {:.2f}".format(r_vals["corr"]),
                    **text_kws)
+
+            # Add a title with the metadata
+            f.suptitle(qc_title, y=.99, size=10, color="w")
 
             # Plot the image data and save the static figure
             for scan in ["orig", "corr"]:
@@ -1148,7 +1159,7 @@ class RealignmentReport(LymanInterface):
     class input_spec(TraitedSpec):
         target_file = traits.File(exists=True)
         realign_params = traits.File(exists=True)
-        run_tuple = traits.Tuple(tuple(), usedefault=True)
+        run_tuple = traits.Tuple()
 
     class output_spec(TraitedSpec):
         params_plot = traits.File(exists=True)
@@ -1198,7 +1209,7 @@ class RealignmentReport(LymanInterface):
             ax.legend(ncol=3, loc="best")
 
         title = " ".join(self.inputs.run_tuple)
-        fig.suptitle(title, size=10)
+        axes[0].set_title(title, size=10)
 
         axes[0].set_ylabel("Rotations (degrees)")
         axes[1].set_ylabel("Translations (mm)")
@@ -1215,6 +1226,7 @@ class AnatRegReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
+        session_tuple = traits.Tuple()
         data_dir = traits.Directory(exists=True)
         in_file = traits.File(exists=True)
         cost_file = traits.File(exists=True)
@@ -1239,11 +1251,15 @@ class AnatRegReport(LymanInterface):
 
         # Make a mosaic of the registration from func to wm seg
         # TODO this should be an OrthoMosaic when that is implemented
-        m = Mosaic(self.inputs.in_file, wm_data, mask, step=3, show_mask=False)
+        qc_title = " ".join(self.inputs.session_tuple)
+        m = Mosaic(self.inputs.in_file, wm_data, mask,
+                   step=3, show_mask=False, title=qc_title)
         m.plot_mask_edges()
         if cost is not None:
-            m.fig.suptitle("Final cost: {:.2f}".format(cost),
-                           size=10, color="white")
+            cost_text = "Final cost: {:.2f}".format(cost)
+            nrow = len(m.axes)
+            m.fig.text(.95, .5 * 1 / nrow, cost_text,
+                       ha="right", va="center", size=10, color="white")
         self.write_visualization("out_file", "reg.png", m)
 
         return runtime
