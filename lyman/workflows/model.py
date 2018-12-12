@@ -202,6 +202,8 @@ def define_model_results_workflow(info, subjects, qc=True):
              ("ols_file", "ols_file"),
              ("design_file", "design_file")]),
 
+        (subject_source, model_results,
+            [("subject", "subject")]),
         (data_input, model_results,
             [("anat_file", "anat_file")]),
         (estimate_contrasts, model_results,
@@ -440,6 +442,22 @@ class ModelFit(LymanInterface):
         run = self.inputs.run
         info = Bunch(self.inputs.info)
         data_dir = self.inputs.data_dir
+        qc_title = "{} {} {}".format(subject, session, run)
+
+        # --- Design loading
+
+        # Do this first because problems with the design are more
+        # common than problems with the preprocessed image data
+
+        # Get the design information for this run
+        fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
+        design_file = op.join(data_dir, subject, "design", fname)
+        design = pd.read_csv(design_file)
+        run_rows = (design.session == session) & (design.run == run)
+        design = design.loc[run_rows]
+
+        # TODO Let's have a more robust check and better error here
+        assert len(design) > 0
 
         # --- Data loading
 
@@ -515,17 +533,6 @@ class ModelFit(LymanInterface):
         # Detect artifact frames
         # TODO
 
-        # --- Design construction
-
-        # Get the design information for this run
-        fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
-        design_file = op.join(data_dir, subject, "design", fname)
-        design = pd.read_csv(design_file)
-        run_rows = (design.session == session) & (design.run == run)
-        design = design.loc[run_rows]
-        # TODO better error when this fails (maybe check earlier too)
-        assert len(design) > 0
-
         # Build the design matrix
         hrf_model = glm.GammaHRF(derivative=info.hrf_derivative)
         X = glm.build_design_matrix(design, hrf_model,
@@ -580,15 +587,15 @@ class ModelFit(LymanInterface):
         resid_data[mask] += E.T
         resid_img = nib.Nifti1Image(resid_data, affine, header)
 
-        p = CarpetPlot(resid_img, seg_img, mc_data)
+        p = CarpetPlot(resid_img, seg_img, mc_data, title=qc_title)
         self.write_visualization("resid_plot", "resid.png", p)
 
-        # Plot the deisgn matrix
-        f = plot_design_matrix(X)
+        # Plot the design matrix
+        f = plot_design_matrix(X, title=qc_title)
         self.write_visualization("design_plot", "design.png", f)
 
         # Plot the sigma squares image for QC
-        error_m = Mosaic(mean_img, error_img, mask_img)
+        error_m = Mosaic(mean_img, error_img, mask_img, title=qc_title)
         error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
         self.write_visualization("error_plot", "error.png", error_m)
 
@@ -662,6 +669,7 @@ class ModelResults(LymanInterface):
 
     class input_spec(TraitedSpec):
         info = traits.Dict()
+        subject = traits.Str()
         anat_file = traits.File(exists=True)
         contrast_files = traits.List(traits.File(exists=True))
         variance_files = traits.List(traits.File(exists=True))
@@ -682,6 +690,7 @@ class ModelResults(LymanInterface):
         for i, contrast_tuple in enumerate(info.contrasts):
 
             name, _, _ = contrast_tuple
+            qc_title = "{} {}".format(self.inputs.subject, name)
 
             result_directories.append(op.abspath(name))
             os.makedirs(op.join(name, "qc"))
@@ -730,12 +739,13 @@ class ModelResults(LymanInterface):
             mask_img.to_filename(op.join(name, "mask.nii.gz"))
 
             # Contrast t statistic overlay
-            stat_m = Mosaic(anat_img, t_img, mask_img, show_mask=True)
+            stat_m = Mosaic(anat_img, t_img, mask_img,
+                            show_mask=True, title=qc_title)
             stat_m.plot_overlay("coolwarm", -10, 10)
             stat_m.savefig(op.join(name, "qc", "tstat.png"), close=True)
 
             # Analysis mask
-            mask_m = Mosaic(anat_img, mask_img)
+            mask_m = Mosaic(anat_img, mask_img, title=qc_title)
             mask_m.plot_mask()
             mask_m.savefig(op.join(name, "qc", "mask.png"), close=True)
 

@@ -166,7 +166,8 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
              ("phase_encoding", "encoding_direction"),
              ("readout_times", "readout_times")]),
         (session_input, finalize_unwarping,
-            [("fm_file", "raw_file"),
+            [("session_tuple", "session_tuple"),
+             ("fm_file", "raw_file"),
              ("phase_encoding", "phase_encoding")]),
         (estimate_distortions, finalize_unwarping,
             [("out_corrected", "corrected_file"),
@@ -290,6 +291,8 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
         # Registration of each frame to SBRef image
 
         (run_input, ts2sb_qc,
+            [("run_tuple", "run_tuple")]),
+        (run_input, ts2sb_qc,
             [("sb_file", "target_file")]),
         (ts2sb, ts2sb_qc,
             [("par_file", "realign_params")]),
@@ -297,13 +300,16 @@ def define_preproc_workflow(info, subjects, sessions, qc=True):
         # Registration of corrected SE-EPI to anatomy
 
         (session_input, fm2anat_qc,
-            [("subject", "subject_id")]),
+            [("subject", "subject_id"),
+             ("session_tuple", "session_tuple")]),
         (fm2anat, fm2anat_qc,
             [("registered_file", "in_file"),
              ("min_cost_file", "cost_file")]),
 
         # Registration of SBRef volume to SE-EPI fieldmap
 
+        (run_input, sb2fm_qc,
+            [("run_tuple", "run_tuple")]),
         (sb2fm, sb2fm_qc,
             [("out_file", "in_file")]),
         (finalize_unwarping, sb2fm_qc,
@@ -424,7 +430,7 @@ def generate_iterables(scan_info, experiment, subjects, sessions=None):
 
 class TimeSeriesGIF(object):
 
-    def write_time_series_gif(self, runtime, img, fname):
+    def write_time_series_gif(self, runtime, img, fname, title=None):
 
         os.mkdir("png")
 
@@ -434,9 +440,19 @@ class TimeSeriesGIF(object):
         width = 5
         height = width * max([nx, ny, nz]) / sum([nz, ny, nz])
 
+        top = 1
+        if title is not None:
+            pad = .25
+            top = height / (height + pad)
+            height += pad
+
         f, axes = plt.subplots(ncols=3, figsize=(width, height))
         for ax in axes:
             ax.set_axis_off()
+
+        if title is not None:
+            f.text(.5, top + (1 - top) / 2, title,
+                   ha="center", va="center", color="w", size=10)
 
         data = img.get_data()
         vmin, vmax = np.percentile(data, [2, 98])
@@ -446,7 +462,7 @@ class TimeSeriesGIF(object):
         im_y = axes[1].imshow(np.zeros((nz, nx)), **kws)
         im_z = axes[2].imshow(np.zeros((ny, nx)), **kws)
 
-        f.subplots_adjust(0, 0, 1, 1, 0, 0)
+        f.subplots_adjust(0, 0, 1, top, 0, 0)
 
         x, y, z = nx // 2, ny // 2, nz // 2
 
@@ -647,8 +663,9 @@ class RunInput(LymanInterface, TimeSeriesGIF):
         self._results["ts_frames"] = ts_frames
 
         # Make a GIF movie of the raw timeseries
+        qc_title = "{} {} {}".format(subject, session, run)
         out_plot = self.define_output("ts_plot", "raw.gif")
-        self.write_time_series_gif(runtime, ts_img, out_plot)
+        self.write_time_series_gif(runtime, ts_img, out_plot, title=qc_title)
 
         # Load files from the template directory
         template_path = op.join(self.inputs.proc_dir, subject, "template")
@@ -705,6 +722,7 @@ class FinalizeUnwarping(LymanInterface):
         warp_files = traits.List(traits.File(exists=True))
         jacobian_files = traits.List(traits.File(Exists=True))
         phase_encoding = traits.List(traits.Str)
+        session_tuple = traits.Tuple()
 
     class output_spec(TraitedSpec):
         raw_file = traits.File(exists=True)
@@ -766,8 +784,11 @@ class FinalizeUnwarping(LymanInterface):
         self.write_image("mask_file", "warp_mask.nii.gz",
                          mask_data, affine, header)
 
+        # Get the metadata
+        qc_title = " ".join(self.inputs.session_tuple)
+
         # Generate a QC image of the warpfield
-        m = Mosaic(raw_img, warp_data_y)
+        m = Mosaic(raw_img, warp_data_y, title=qc_title)
         m.plot_overlay("coolwarm", vmin=-6, vmax=6, alpha=.75)
         self.write_visualization("warp_plot", "warp.png", m)
 
@@ -802,7 +823,9 @@ class FinalizeUnwarping(LymanInterface):
         vmin, vmax = np.percentile(vol_data["orig"].flat, [2, 98])
         kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
         text_kws = dict(size=7, color="w", backgroundcolor="0",
-                        ha="center", va="bottom")
+                        ha="left", va="bottom")
+
+        qc_title = " ".join(self.inputs.session_tuple)
 
         width = len(x_slc)
         height = (nz / ny) * 2.75
@@ -815,23 +838,26 @@ class FinalizeUnwarping(LymanInterface):
             gs = dict(
                 orig=plt.GridSpec(
                     nrows=1, ncols=len(x_slc), figure=f,
-                    left=0, bottom=.5, right=1, top=.95,
+                    left=0, bottom=.5, right=1, top=.94,
                     wspace=0, hspace=0,
                 ),
                 corr=plt.GridSpec(
                     nrows=1, ncols=len(x_slc), figure=f,
-                    left=0, bottom=0, right=1, top=.45,
+                    left=0, bottom=0, right=1, top=.44,
                     wspace=0, hspace=0,
                 )
             )
 
-            # Add a title with the image pair correlation
-            f.text(.5, .93,
+            # Add text with the image pair correlation
+            f.text(.05, .93,
                    "Original similarity: {:.2f}".format(r_vals["orig"]),
                    **text_kws)
-            f.text(.5, .43,
+            f.text(.05, .43,
                    "Corrected similarity: {:.2f}".format(r_vals["corr"]),
                    **text_kws)
+
+            # Add a title with the metadata
+            f.suptitle(qc_title, y=.99, size=10, color="w")
 
             # Plot the image data and save the static figure
             for scan in ["orig", "corr"]:
@@ -910,7 +936,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         data *= jacobian
 
         # Scale the timeseries for cross-run intensity normalization
-        target = 10000
+        target = 100
         scale_value = target / data[mask].mean()
         data = data * scale_value
 
@@ -954,34 +980,38 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         mc_data = pd.DataFrame(mc_data, columns=cols)
         mc_data.to_csv(mc_file, index=False)
 
+        # Define a title to use for QC plots
+        qc_title = " ".join(self.inputs.run_tuple)
+
         # Make a carpet plot of the final timeseries
-        p = CarpetPlot(out_img, seg_img, mc_data)
+        p = CarpetPlot(out_img, seg_img, mc_data, title=qc_title)
         self.write_visualization("out_png", "func.png", p)
 
         # Make a GIF movie of the final timeseries
         out_gif = self.define_output("out_gif", "func.gif")
-        self.write_time_series_gif(runtime, out_img, out_gif)
+        self.write_time_series_gif(runtime, out_img, out_gif, title=qc_title)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
         norm_mean = mean / mean[seg == 1].mean()
-        mean_m = Mosaic(anat_img, norm_mean)
+        mean_m = Mosaic(anat_img, norm_mean, title=qc_title)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
         self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_m = Mosaic(anat_img, tsnr)
+        tsnr_m = Mosaic(anat_img, tsnr, title=qc_title)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
         self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a mosaic of the run mask
         # TODO is the better QC showing the run mask over the unmasked mean
         # image so that we can see if the brain is getting cut off?
-        mask_m = Mosaic(anat_img, mask_img)
+        mask_m = Mosaic(anat_img, mask_img, title=qc_title)
         mask_m.plot_mask()
         self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a mosaic of the noisy voxels
-        noise_m = Mosaic(anat_img, noise_img, mask_img, show_mask=False)
+        noise_m = Mosaic(anat_img, noise_img, mask_img,
+                         show_mask=False, title=qc_title)
         noise_m.plot_mask(alpha=1)
         self.write_visualization("noise_plot", "noise.png", noise_m)
 
@@ -1049,7 +1079,7 @@ class FinalizeTemplate(LymanInterface):
         data *= jacobian
 
         # Scale each frame to a common mean value
-        target = 10000
+        target = 100
         scale_value = target / data[mask].mean(axis=0, keepdims=True)
         data = data * scale_value
 
@@ -1080,8 +1110,11 @@ class FinalizeTemplate(LymanInterface):
         tsnr_img = self.write_image("tsnr_file", "tsnr.nii.gz",
                                     tsnr_data, affine, header)
 
+        # Prepare QC metadata
+        qc_title = " ".join(self.inputs.session_tuple)
+
         # Write static mosaic image
-        m = Mosaic(out_img)
+        m = Mosaic(out_img, title=qc_title)
         self.write_visualization("out_plot", "func.png", m)
 
         # Make a mosaic of the temporal mean normalized to mean cortical signal
@@ -1089,23 +1122,25 @@ class FinalizeTemplate(LymanInterface):
         seg_img = nib.load(self.inputs.seg_file)
         seg = seg_img.get_data()
         norm_mean = mean / mean[seg == 1].mean()
-        mean_m = Mosaic(anat_img, norm_mean, mask_img, show_mask=False)
+        mean_m = Mosaic(anat_img, norm_mean, mask_img,
+                        show_mask=False, title=qc_title)
         mean_m.plot_overlay("cube:-.15:.5", vmin=0, vmax=2, fmt="d")
         self.write_visualization("mean_plot", "mean.png", mean_m)
 
         # Make a mosaic of the tSNR
-        tsnr_m = Mosaic(anat_img, tsnr_img, mask_img, show_mask=False)
+        tsnr_m = Mosaic(anat_img, tsnr_img, mask_img,
+                        show_mask=False, title=qc_title)
         tsnr_m.plot_overlay("cube:.25:-.5", vmin=0, vmax=100, fmt="d")
         self.write_visualization("tsnr_plot", "tsnr.png", tsnr_m)
 
         # Make a QC plot of the run mask
         # TODO should this emphasize areas where runs don't overlap?
-        mask_m = Mosaic(anat_img, mask_img)
+        mask_m = Mosaic(anat_img, mask_img, title=qc_title)
         mask_m.plot_mask()
         self.write_visualization("mask_plot", "mask.png", mask_m)
 
         # Make a QC plot of the session noise mask
-        noise_m = Mosaic(anat_img, noise_img)
+        noise_m = Mosaic(anat_img, noise_img, title=qc_title)
         noise_m.plot_mask(alpha=1)
         self.write_visualization("noise_plot", "noise.png", noise_m)
 
@@ -1126,6 +1161,7 @@ class RealignmentReport(LymanInterface):
     class input_spec(TraitedSpec):
         target_file = traits.File(exists=True)
         realign_params = traits.File(exists=True)
+        run_tuple = traits.Tuple()
 
     class output_spec(TraitedSpec):
         params_plot = traits.File(exists=True)
@@ -1174,6 +1210,9 @@ class RealignmentReport(LymanInterface):
         for ax in axes:
             ax.legend(ncol=3, loc="best")
 
+        title = " ".join(self.inputs.run_tuple)
+        axes[0].set_title(title, size=10)
+
         axes[0].set_ylabel("Rotations (degrees)")
         axes[1].set_ylabel("Translations (mm)")
         fig.tight_layout()
@@ -1181,13 +1220,15 @@ class RealignmentReport(LymanInterface):
 
     def plot_target(self):
         """Plot a mosaic of the motion correction target image."""
-        return Mosaic(self.inputs.target_file, step=2)
+        title = " ".join(self.inputs.run_tuple)
+        return Mosaic(self.inputs.target_file, step=2, title=title)
 
 
 class AnatRegReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
+        session_tuple = traits.Tuple()
         data_dir = traits.Directory(exists=True)
         in_file = traits.File(exists=True)
         cost_file = traits.File(exists=True)
@@ -1212,11 +1253,15 @@ class AnatRegReport(LymanInterface):
 
         # Make a mosaic of the registration from func to wm seg
         # TODO this should be an OrthoMosaic when that is implemented
-        m = Mosaic(self.inputs.in_file, wm_data, mask, step=3, show_mask=False)
+        qc_title = " ".join(self.inputs.session_tuple)
+        m = Mosaic(self.inputs.in_file, wm_data, mask,
+                   step=3, show_mask=False, title=qc_title)
         m.plot_mask_edges()
         if cost is not None:
-            m.fig.suptitle("Final cost: {:.2f}".format(cost),
-                           size=10, color="white")
+            cost_text = "Final cost: {:.2f}".format(cost)
+            nrow = len(m.axes)
+            m.fig.text(.95, .5 * 1 / nrow, cost_text,
+                       ha="right", va="center", size=10, color="white")
         self.write_visualization("out_file", "reg.png", m)
 
         return runtime
@@ -1225,6 +1270,7 @@ class AnatRegReport(LymanInterface):
 class CoregGIF(LymanInterface):
 
     class input_spec(TraitedSpec):
+        run_tuple = traits.Tuple()
         in_file = traits.File(exists=True)
         ref_file = traits.File(exists=True)
         out_file = traits.File()
@@ -1242,7 +1288,10 @@ class CoregGIF(LymanInterface):
             ref_data = ref_img.get_data()[..., 0]
             ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
 
-        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname, tight=False)
+        qc_title = " ".join(self.inputs.run_tuple)
+
+        self.write_mosaic_gif(runtime, in_img, ref_img, out_fname,
+                              title=qc_title, tight=False)
 
         return runtime
 
