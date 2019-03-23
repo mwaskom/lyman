@@ -176,8 +176,8 @@ class TestPreprocWorkflow(object):
 
         out = preproc.RunInput(
             run=run_tuple,
-            data_dir=template["data_dir"],
-            proc_dir=template["proc_dir"],
+            data_dir=str(template["data_dir"]),
+            proc_dir=str(template["proc_dir"]),
             experiment=exp_name,
             sb_template=sb_template,
             ts_template=template["info"].ts_template,
@@ -264,8 +264,8 @@ class TestPreprocWorkflow(object):
 
         out = preproc.SessionInput(
             session=session_tuple,
-            data_dir=template["data_dir"],
-            proc_dir=template["proc_dir"],
+            data_dir=str(template["data_dir"]),
+            proc_dir=str(template["proc_dir"]),
             fm_template=fm_template,
             phase_encoding=phase_encoding,
         ).run().outputs
@@ -316,8 +316,8 @@ class TestPreprocWorkflow(object):
         phase_encoding = phase_encoding[::-1]
         out = preproc.SessionInput(
             session=session_tuple,
-            data_dir=template["data_dir"],
-            proc_dir=template["proc_dir"],
+            data_dir=str(template["data_dir"]),
+            proc_dir=str(template["proc_dir"]),
             fm_template=fm_template,
             phase_encoding=phase_encoding,
         ).run().outputs
@@ -707,7 +707,7 @@ class TestPreprocWorkflow(object):
         out = preproc.AnatRegReport(
             subject_id=subject_id,
             session_tuple=session_tuple,
-            data_dir=data_dir,
+            data_dir=str(data_dir),
             in_file=in_file,
             cost_file=cost_file,
         ).run().outputs

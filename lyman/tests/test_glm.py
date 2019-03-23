@@ -303,6 +303,25 @@ class TestDesignMatrix(object):
         X2 = glm.build_design_matrix(conditions[min_cols].copy(), n_tp=48)
         assert np.array_equal(X1.values, X2.values)
 
+    @pytest.mark.parametrize(
+        "tr,res",
+        product((.1, .5, 1, 1.5, 2), (60, 30, 1)))
+    def test_tr_and_sampling(self, tr, res):
+
+        condition = pd.DataFrame(dict(
+            onset=[2],
+            value=[1],
+            duration=[0],
+        ))
+
+        hrf = glm.GammaHRF(res=res)
+
+        out, *_ = glm.condition_to_regressors(
+            "test", condition, hrf, 30 / tr, tr, res, 0
+        )
+
+        assert 7 <= out.idxmax() <= 8
+
 
 class TestContrastMatrix(object):
 
