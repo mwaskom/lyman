@@ -46,7 +46,7 @@ class TestTemplateWorkflow(object):
     def test_template_input(self, freesurfer):
 
         out = TemplateInput(
-            data_dir=freesurfer["data_dir"],
+            data_dir=str(freesurfer["data_dir"]),
             subject=freesurfer["subject"]
         ).run().outputs
 

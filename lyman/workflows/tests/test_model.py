@@ -147,7 +147,7 @@ class TestModelWorkflows(object):
         model_name = "model_alpha"
 
         ifc = model.ModelResultsPath(
-            proc_dir=proc_dir,
+            proc_dir=str(proc_dir),
             subject=subject,
             experiment=experiment,
             model=model_name,
@@ -218,7 +218,7 @@ class TestModelWorkflows(object):
             subject=timeseries["subject"],
             session=timeseries["session"],
             run=timeseries["run"],
-            data_dir=timeseries["data_dir"],
+            data_dir=str(timeseries["data_dir"]),
             info=timeseries["info"].trait_get(),
             seg_file=timeseries["seg_file"],
             surf_file=timeseries["surf_file"],
