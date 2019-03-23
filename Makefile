@@ -1,4 +1,5 @@
 export SHELL := /bin/bash
+export MPLBACKEND := Agg
 
 test:
 
