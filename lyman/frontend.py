@@ -84,7 +84,7 @@ class ProjectInfo(HasTraits):
         Str, Dict(Str, Dict(Str, List(Str))),
         desc=dedent("""
         Information about scanning sessions. (Automatically populated by
-        reading the ``scan_info.yaml`` file).
+        reading the ``scans.yaml`` file).
         """),
     )
 
