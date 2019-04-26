@@ -7,6 +7,7 @@ from ..template import (define_template_workflow,
                         TemplateInput,
                         AnatomicalSegmentation,
                         MaskWithLabel,
+                        MakeRibbon,
                         TemplateReport)
 
 
@@ -34,7 +35,7 @@ class TestTemplateWorkflow(object):
                           "generate_reg", "invert_reg",
                           "transform_wmparc", "anat_segment",
                           "hemi_source", "combine_hemis",
-                          "tag_surf", "mask_cortex",
+                          "tag_surf", "mask_cortex", "make_ribbon",
                           "save_info", "template_qc", "template_output"]
         expected_nodes.sort()
         assert wf.list_node_names() == expected_nodes
@@ -91,6 +92,14 @@ class TestTemplateWorkflow(object):
         ).run().outputs
 
         assert out.out_file == execdir.join("masked.nii.gz")
+
+    def test_make_ribbon(self, execdir, template):
+
+        out = MakeRibbon(
+            in_file=template["surf_file"],
+        ).run().outputs
+
+        assert out.out_file == execdir.join("ribbon.nii.gz")
 
     def test_template_report(self, execdir, template):
 
