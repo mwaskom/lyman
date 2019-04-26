@@ -122,7 +122,7 @@ class Mosaic(object):
         self.title = title
 
         # Define slice objects to crop to the volume
-        slices, = ndimage.find_objects(self.fov)
+        slices, = ndimage.find_objects(self.fov.astype(np.int))
         self.x_slice, self.y_slice, self.z_slice = slices
 
         # Update the slice on the mosiac axis with steps
