@@ -100,9 +100,9 @@ class GammaHRF(HRFModel):
             dy = np.convolve(input, dydt)[:n_tp]
 
         if isinstance(input, pd.Series):
-            y = pd.Series(y, input.index, name=input.name)
+            y = pd.Series(y, input.index, name=str(input.name))
             if dy is not None:
-                dy = pd.Series(dy, input.index, name=input.name + "-dydt")
+                dy = pd.Series(dy, input.index, name=str(input.name) + "-dydt")
 
         # TODO Is always returning a pair helpful or a nuisance?
         # Upside: when building the design matrix, a flat column list can be

@@ -122,7 +122,7 @@ class Mosaic(object):
         self.title = title
 
         # Define slice objects to crop to the volume
-        slices, = ndimage.find_objects(self.fov)
+        slices, = ndimage.find_objects(self.fov.astype(np.int))
         self.x_slice, self.y_slice, self.z_slice = slices
 
         # Update the slice on the mosiac axis with steps
@@ -643,7 +643,7 @@ class CarpetPlot(object):
         if fd is None:
             fd = []
 
-        ax.set(ylim=(0, .5))
+        ax.set_ylim(0, .5, auto=None)
         ax.plot(np.arange(1, len(fd) + 1), fd, lw=1.5, color=".15")
         ax.set(ylabel="FD (mm)", ylim=(0, None))
         for label in ax.get_xticklabels():

@@ -113,6 +113,12 @@ class TestHRFs(object):
         assert y.name == name
         assert dydt.name == name + "-dydt"
 
+        name = 180
+        s = pd.Series(randn_input, name=name)
+        hrf = glm.GammaHRF(derivative=True)
+        y, dydt = hrf.transform(s)
+        assert dydt.name == str(name) + "-dydt"
+
     def test_gamma_basis_output_index(self, random, randn_input):
 
         n = len(randn_input)
