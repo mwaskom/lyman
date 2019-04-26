@@ -208,6 +208,10 @@ def template(freesurfer):
     surf_file = str(template_dir.join("surf.nii.gz"))
     nib.save(nib.Nifti1Image(surf_data, affine), surf_file)
 
+    ribbon_data = (surf_data > -1).any(axis=-1).astype(np.int8)
+    ribbon_file = str(template_dir.join("ribbon.nii.gz"))
+    nib.save(nib.Nifti1Image(ribbon_data, affine), ribbon_file)
+
     mesh_name = "graymid"
     verts = rs.uniform(-1, 1, (n_verts, 3))
     faces = np.array([(i, i + 1, i + 2) for i in range(n_verts - 2)])
@@ -226,6 +230,7 @@ def template(freesurfer):
         anat_file=anat_file,
         mask_file=mask_file,
         surf_file=surf_file,
+        ribbon_file=ribbon_file,
         mesh_name=mesh_name,
         mesh_files=mesh_files,
     )

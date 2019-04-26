@@ -67,6 +67,8 @@ def define_template_workflow(info, subjects, qc=True):
                              joinsource="hemi_source",
                              joinfield="in_files")
 
+    make_ribbon = Node(MakeRibbon(), "make_ribbon")
+
     # --- Segementation of anatomical tissue in functional space
 
     transform_wmparc = Node(fs.ApplyVolTransform(inverse=True,
@@ -132,6 +134,8 @@ def define_template_workflow(info, subjects, qc=True):
             [("vertexvol_file", "in_file")]),
         (mask_cortex, combine_hemis,
             [("out_file", "in_files")]),
+        (combine_hemis, make_ribbon,
+            [("merged_file", "in_file")]),
 
         (reorient_image, transform_wmparc,
             [("out_file", "source_file")]),
@@ -158,6 +162,8 @@ def define_template_workflow(info, subjects, qc=True):
              ("mask_file", "@mask")]),
         (combine_hemis, template_output,
             [("merged_file", "@surf")]),
+        (make_ribbon, template_output,
+            [("out_file", "@ribon")]),
 
     ]
     workflow.connect(processing_edges)
@@ -307,6 +313,26 @@ class AnatomicalSegmentation(LymanInterface):
         brainmask = ndimage.binary_fill_holes(brainmask)
         brainmask = brainmask.astype(np.uint8)
         self.write_image("mask_file", "mask.nii.gz", brainmask, affine, header)
+
+        return runtime
+
+
+class MakeRibbon(LymanInterface):
+
+    class input_spec(TraitedSpec):
+        in_file = traits.File(exists=True)
+
+    class output_spec(TraitedSpec):
+        out_file = traits.File(exists=True)
+
+    def _run_interface(self, runtime):
+
+        img = nib.load(self.inputs.in_file)
+        affine, header = img.affine, img.header
+        vertices = img.get_data()
+        ribbon = (vertices > -1).any(axis=-1).astype(np.int8)
+
+        self.write_image("out_file", "ribbon.nii.gz", ribbon, affine, header)
 
         return runtime
 
