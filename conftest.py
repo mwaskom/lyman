@@ -200,6 +200,10 @@ def template(freesurfer):
     mask_file = str(template_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data, affine), mask_file)
 
+    edge_data = (anat_data > 60).astype(np.uint8)
+    edge_file = str(template_dir.join("edge.nii.gz"))
+    nib.save(nib.Nifti1Image(edge_data, affine), edge_file)
+
     n_verts = (seg_data == 1).sum()
     surf_ids = np.arange(n_verts)
     surf_data = np.full(vol_shape + (2,), -1, np.int)
@@ -228,6 +232,7 @@ def template(freesurfer):
         seg_file=seg_file,
         reg_file=reg_file,
         anat_file=anat_file,
+        edge_file=edge_file,
         mask_file=mask_file,
         surf_file=surf_file,
         ribbon_file=ribbon_file,

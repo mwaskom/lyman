@@ -68,6 +68,7 @@ class TestTemplateWorkflow(object):
 
         assert out.lut_file == execdir.join("seg.lut")
         assert out.seg_file == execdir.join("seg.nii.gz")
+        assert out.edge_file == execdir.join("edge.nii.gz")
         assert out.mask_file == execdir.join("mask.nii.gz")
 
         # Test size of the lookup table
@@ -107,6 +108,7 @@ class TestTemplateWorkflow(object):
             lut_file=template["lut_file"],
             seg_file=template["seg_file"],
             mask_file=template["mask_file"],
+            edge_file=template["edge_file"],
             surf_file=template["surf_file"],
             anat_file=template["anat_file"],
         ).run().outputs
@@ -114,4 +116,5 @@ class TestTemplateWorkflow(object):
         assert out.seg_plot == execdir.join("seg.png")
         assert out.mask_plot == execdir.join("mask.png")
         assert out.surf_plot == execdir.join("surf.png")
+        assert out.edge_plot == execdir.join("edge.png")
         assert out.anat_plot == execdir.join("anat.png")
