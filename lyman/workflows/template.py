@@ -159,6 +159,7 @@ def define_template_workflow(info, subjects, qc=True):
         (anat_segment, template_output,
             [("seg_file", "@seg"),
              ("lut_file", "@lut"),
+             ("edge_file", "@edge"),
              ("mask_file", "@mask")]),
         (combine_hemis, template_output,
             [("merged_file", "@surf")]),
@@ -179,6 +180,7 @@ def define_template_workflow(info, subjects, qc=True):
         (anat_segment, template_qc,
             [("lut_file", "lut_file"),
              ("seg_file", "seg_file"),
+             ("edge_file", "edge_file"),
              ("mask_file", "mask_file")]),
 
         (subject_source, save_info,
@@ -189,6 +191,7 @@ def define_template_workflow(info, subjects, qc=True):
         (template_qc, template_output,
             [("seg_plot", "qc.@seg_plot"),
              ("mask_plot", "qc.@mask_plot"),
+             ("edge_plot", "qc.@edge_plot"),
              ("surf_plot", "qc.@surf_plot"),
              ("anat_plot", "qc.@anat_plot")]),
 
@@ -249,6 +252,7 @@ class AnatomicalSegmentation(LymanInterface):
         lut_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
+        edge_file = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -266,7 +270,7 @@ class AnatomicalSegmentation(LymanInterface):
         seg_ids = [
             np.arange(1000, 3000),  # Cortical gray matter
             [10, 11, 12, 13, 17, 18, 49, 50, 51, 52, 53, 54],  # Subcortical
-            [16, 28, 60],  # Brain stem and ventral diencephalon
+            [16, 28, 60],  # Brain stem and ventral diencepedgen
             [8, 47],  # Cerebellar gray matter
             np.arange(3000, 5000),  # Superficial ("cortical") white matter
             [5001, 5002],  # Deep white matter
@@ -308,11 +312,16 @@ class AnatomicalSegmentation(LymanInterface):
         # Binarize the segmentation and dilate to generate a brain mask
 
         brainmask = seg_data > 0
-        brainmask = ndimage.binary_dilation(brainmask, iterations=2)
-        brainmask = ndimage.binary_erosion(brainmask)
+        brainmask = ndimage.binary_dilation(brainmask, iterations=3)
+        brainmask = ndimage.binary_erosion(brainmask, iterations=2)
         brainmask = ndimage.binary_fill_holes(brainmask)
         brainmask = brainmask.astype(np.uint8)
         self.write_image("mask_file", "mask.nii.gz", brainmask, affine, header)
+
+        # --- Edge of brain mask
+        brainmask_dil = ndimage.binary_dilation(brainmask, iterations=2)
+        edge = brainmask_dil - brainmask
+        self.write_image("edge_file", "edge.nii.gz", edge, affine, header)
 
         return runtime
 
@@ -368,6 +377,7 @@ class TemplateReport(LymanInterface):
     class input_spec(TraitedSpec):
         lut_file = traits.File(exists=True)
         seg_file = traits.File(exists=True)
+        edge_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
         anat_file = traits.File(exists=True)
@@ -375,6 +385,7 @@ class TemplateReport(LymanInterface):
     class output_spec(TraitedSpec):
         seg_plot = traits.File(exists=True)
         mask_plot = traits.File(exists=True)
+        edge_plot = traits.File(exists=True)
         surf_plot = traits.File(exists=True)
         anat_plot = traits.File(exists=True)
 
@@ -402,6 +413,13 @@ class TemplateReport(LymanInterface):
                         step=2, tight=True, show_mask=False)
         m_mask.plot_mask()
         self.write_visualization("mask_plot", "mask.png", m_mask)
+
+        # Brain edge
+        edge_img = nib.load(self.inputs.edge_file)
+        m_edge = Mosaic(anat_img, edge_img, mask_img,
+                        step=2, tight=True, show_mask=False)
+        m_edge.plot_mask()
+        self.write_visualization("edge_plot", "edge.png", m_edge)
 
         # Surface ribbon
         surf_img = nib.load(self.inputs.surf_file)
