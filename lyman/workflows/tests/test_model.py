@@ -181,6 +181,7 @@ class TestModelWorkflows(object):
         assert out.seg_file == timeseries["seg_file"]
         assert out.surf_file == timeseries["surf_file"]
         assert out.mask_file == timeseries["mask_file"]
+        assert out.edge_file == timeseries["edge_file"]
         assert out.ts_file == timeseries["ts_file"]
         assert out.noise_file == timeseries["noise_file"]
         assert out.mc_file == timeseries["mc_file"]
@@ -222,6 +223,7 @@ class TestModelWorkflows(object):
             info=timeseries["info"].trait_get(),
             seg_file=timeseries["seg_file"],
             surf_file=timeseries["surf_file"],
+            edge_file=timeseries["edge_file"],
             ts_file=timeseries["ts_file"],
             mask_file=timeseries["mask_file"],
             noise_file=timeseries["noise_file"],

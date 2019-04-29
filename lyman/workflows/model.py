@@ -5,6 +5,7 @@ import os.path as op
 import numpy as np
 import pandas as pd
 import nibabel as nib
+from scipy import ndimage
 
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec, Bunch
@@ -79,6 +80,7 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
              ("run", "run"),
              ("seg_file", "seg_file"),
              ("surf_file", "surf_file"),
+             ("edge_file", "edge_file"),
              ("mask_file", "mask_file"),
              ("ts_file", "ts_file"),
              ("noise_file", "noise_file"),
@@ -310,6 +312,7 @@ class ModelFitInput(LymanInterface):
         run = traits.Str()
         seg_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
+        edge_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         ts_file = traits.File(exists=True)
         noise_file = traits.File(Exists=True)
@@ -338,6 +341,7 @@ class ModelFitInput(LymanInterface):
 
             seg_file=op.join(template_path, "seg.nii.gz"),
             surf_file=op.join(template_path, "surf.nii.gz"),
+            edge_file=op.join(template_path, "edge.nii.gz"),
 
             mask_file=op.join(timeseries_path, "mask.nii.gz"),
             ts_file=op.join(timeseries_path, "func.nii.gz"),
@@ -421,8 +425,11 @@ class ModelFit(LymanInterface):
         surf_file = traits.File(exists=True)
         ts_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
+        edge_file = traits.File(exists=True)
         noise_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
+        wm_erode = traits.Int(default=2)
+        csf_erode = traits.Int(default=1)
 
     class output_spec(TraitedSpec):
         mask_file = traits.File(exists=True)
@@ -450,6 +457,7 @@ class ModelFit(LymanInterface):
         # common than problems with the preprocessed image data
 
         # Get the design information for this run
+        # TODO make it possible to not have a design (e.g. for denoising)
         fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
         design_file = op.join(data_dir, subject, "design", fname)
         design = pd.read_csv(design_file)
@@ -466,28 +474,74 @@ class ModelFit(LymanInterface):
         affine, header = ts_img.affine, ts_img.header
         n_tp = ts_img.shape[-1]
 
-        # Load the anatomical segmentation and fine analysis mask
+        # Load the anatomical segmentation and find analysis mask
         seg_img = nib.load(self.inputs.seg_file)
         mask_img = nib.load(self.inputs.mask_file)
 
         seg = seg_img.get_data()
         mask = mask_img.get_data()
         mask = (mask > 0) & (seg > 0) & (seg < 5)
-        mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
+        mask_img = nib.Nifti1Image(mask.astype(np.uint8), affine, header)
         n_vox = mask.sum()
+
+        # Load the map of locally-noisy voxels
+        noise_img = nib.load(self.inputs.noise_file)
+
+        # --- Nuisance variable extraction
+
+        # Erode the WM mask and extract data
+        wm_pca = None
+        wm_mask = np.isin(seg, [5, 6, 7])
+        erode = self.inputs.wm_erode
+        wm_mask = (wm_mask if not erode
+                   else ndimage.binary_erosion(wm_mask, iterations=erode))
+        wm_comp = info.nuisance_components.get("wm", 0)
+        if wm_mask.any() and wm_comp:
+            wm_img = nib.Nifti1Image(wm_mask.astype(np.uint8), affine)
+            wm_data = image_to_matrix(ts_img, wm_img)
+            wm_pca = signals.pca_transform(wm_data, wm_comp)
+
+        # Erode the CSF mask and extract data
+        csf_pca = None
+        csf_mask = seg == 8
+        erode = self.inputs.csf_erode
+        csf_mask = (csf_mask if not erode
+                    else ndimage.binary_erosion(csf_mask, iterations=erode))
+        csf_comp = info.nuisance_components.get("csf", 0)
+        if csf_mask.any() and csf_comp:
+            csf_img = nib.Nifti1Image(csf_mask.astype(np.uint8), affine)
+            csf_data = image_to_matrix(ts_img, csf_img)
+            csf_pca = signals.pca_transform(csf_data, csf_comp)
+
+        # Extract data from the "edge" of the brain
+        edge_pca = None
+        edge_img = nib.load(self.inputs.edge_file)
+        edge_data = image_to_matrix(ts_img, edge_img)
+        edge_comp = info.nuisance_components.get("edge", 0)
+        if edge_comp:
+            edge_pca = signals.pca_transform(edge_data, edge_comp)
+
+        # Extract data from "noisy" voxels
+        noise_pca = None
+        noise_data = image_to_matrix(ts_img, noise_img)
+        noise_comp = info.nuisance_components.get("noise", 0)
+        if noise_comp:
+            noise_pca = signals.pca_transform(noise_data, noise_comp)
+
+        # TODO motion correction (do we still want this?)
+        mc_data = pd.read_csv(self.inputs.mc_file)
+
+        # TODO Detect frames for censoring
 
         # --- Spatial filtering
 
         fwhm = info.smooth_fwhm
 
-        # Load the noise segmentation
-        noise_img = None
-        if info.interpolate_noise:
-            noise_img = nib.load(self.inputs.noise_file)
+        smooth_noise = noise_img if info.interpolate_noise else None
 
         # Volumetric smoothing
         filt_img = signals.smooth_segmentation(ts_img, seg_img,
-                                               fwhm, noise_img)
+                                               fwhm, smooth_noise)
 
         # Cortical manifold smoothing
         if info.surface_smoothing:
@@ -495,7 +549,7 @@ class ModelFit(LymanInterface):
             vert_img = nib.load(self.inputs.surf_file)
             signals.smooth_surface(
                 ts_img, vert_img, fwhm, subject,
-                noise_img=noise_img, inplace=True,
+                noise_img=smooth_noise, inplace=True,
             )
 
             ribbon = vert_img.get_data().max(axis=-1) > -1
@@ -520,22 +574,32 @@ class ModelFit(LymanInterface):
         data[mask] = np.dot(hpf_matrix, data[mask].T).T
         data[mask] -= data[mask].mean(axis=-1, keepdims=True)
 
-        # TODO remove the mean from the data
-        # data[gray_mask] += mean[gray_mask, np.newaxis]
-        data[~mask] = 0
+        # Temporally filter the nuisance regressors
+        wm_pca = None if wm_pca is None else hpf_matrix.dot(wm_pca)
+        csf_pca = None if csf_pca is None else hpf_matrix.dot(csf_pca)
+        edge_pca = None if edge_pca is None else hpf_matrix.dot(edge_pca)
+        noise_pca = None if noise_pca is None else hpf_matrix.dot(noise_pca)
 
-        # --- Confound extraction
+        # --- Design matrix construction
 
-        # Define confound regressons from various sources
-        # TODO
-        mc_data = pd.read_csv(self.inputs.mc_file)
+        # Build the regressor sub-matrix
+        tps = np.arange(0, n_tp * info.tr, info.tr)
+        wm_cols = [f"wm{i+1}" for i in range(wm_comp)]
+        csf_cols = [f"csf{i+1}" for i in range(csf_comp)]
+        edge_cols = [f"edge{i+1}" for i in range(edge_comp)]
+        noise_cols = [f"noise{i+1}" for i in range(noise_comp)]
 
-        # Detect artifact frames
-        # TODO
+        regressors = pd.concat([
+            pd.DataFrame(wm_pca, tps, wm_cols),
+            pd.DataFrame(csf_pca, tps, csf_cols),
+            pd.DataFrame(edge_pca, tps, edge_cols),
+            pd.DataFrame(noise_pca, tps, noise_cols),
+        ], axis=1).dropna()
 
-        # Build the design matrix
+        # Build the full design matrix
         hrf_model = glm.GammaHRF(derivative=info.hrf_derivative)
         X = glm.build_design_matrix(design, hrf_model,
+                                    regressors=regressors,
                                     n_tp=n_tp, tr=info.tr,
                                     hpf_matrix=hpf_matrix)
 
@@ -544,6 +608,8 @@ class ModelFit(LymanInterface):
         X.to_csv(design_file, index=False)
 
         # --- Model estimation
+
+        data[~mask] = 0  # TODO why is this needed?
 
         # Convert to percent signal change?
         # TODO
@@ -598,6 +664,8 @@ class ModelFit(LymanInterface):
         error_m = Mosaic(mean_img, error_img, mask_img, title=qc_title)
         error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
         self.write_visualization("error_plot", "error.png", error_m)
+
+        # TODO plot the nuisance variables
 
         return runtime
 

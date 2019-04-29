@@ -96,6 +96,13 @@ class ModelInfo(HasTraits):
         The name of the model. (Automatically populated from module name).
         """)
     )
+    nuisance_components = Dict(
+        Enum("wm", "csf", "edge", "noise"), Int,
+        usedefault=True,
+        desc=dedent("""
+        Anatomical sources and number of components per source to include.
+        """)
+    )
     smooth_fwhm = Either(
         Float(2), None,
         desc=dedent("""
