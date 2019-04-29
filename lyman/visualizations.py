@@ -643,9 +643,9 @@ class CarpetPlot(object):
         if fd is None:
             fd = []
 
-        ax.set_ylim(0, .5, auto=None)
         ax.plot(np.arange(1, len(fd) + 1), fd, lw=1.5, color=".15")
-        ax.set(ylabel="FD (mm)", ylim=(0, None))
+        _, ymax = ax.get_ylim()
+        ax.set(ylabel="FD (mm)", ylim=(0, max(.5, ymax)))
         for label in ax.get_xticklabels():
             label.set_visible(False)
 
