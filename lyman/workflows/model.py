@@ -456,16 +456,15 @@ class ModelFit(LymanInterface):
         # Do this first because problems with the design are more
         # common than problems with the preprocessed image data
 
-        # Get the design information for this run
-        # TODO make it possible to not have a design (e.g. for denoising)
-        fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
-        design_file = op.join(data_dir, subject, "design", fname)
-        design = pd.read_csv(design_file)
-        run_rows = (design.session == session) & (design.run == run)
-        design = design.loc[run_rows]
-
-        # TODO Let's have a more robust check and better error here
-        assert len(design) > 0
+        design = None
+        if info.task_model:
+            # Get the design information for this run
+            fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
+            design_file = op.join(data_dir, subject, "design", fname)
+            design = pd.read_csv(design_file)
+            run_rows = (design.session == session) & (design.run == run)
+            design = design.loc[run_rows]
+            assert len(design), "Design file has no rows"
 
         # --- Data loading
 
@@ -528,7 +527,7 @@ class ModelFit(LymanInterface):
         if noise_comp:
             noise_pca = signals.pca_transform(noise_data, noise_comp)
 
-        # TODO motion correction (do we still want this?)
+        # TODO motion correction parameters (do we still want this?)
         mc_data = pd.read_csv(self.inputs.mc_file)
 
         # TODO Detect frames for censoring
