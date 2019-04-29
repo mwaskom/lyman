@@ -96,6 +96,12 @@ class ModelInfo(HasTraits):
         The name of the model. (Automatically populated from module name).
         """)
     )
+    task_model = Bool(
+        True,
+        desc=dedent("""
+        If True, model the task using a design file matching the model name.
+        """)
+    )
     nuisance_components = Dict(
         Enum("wm", "csf", "edge", "noise"), Int,
         usedefault=True,

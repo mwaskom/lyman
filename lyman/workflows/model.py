@@ -94,7 +94,7 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
              ("error_file", "@error"),
              ("ols_file", "@ols"),
              ("resid_file", "@resid"),
-             ("design_file", "@design")]),
+             ("model_file", "@model")]),
 
     ]
     workflow.connect(processing_edges)
@@ -107,7 +107,7 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
             [("info_file", "qc.@info_json")]),
 
         (fit_model, data_output,
-            [("design_plot", "qc.@design_plot"),
+            [("model_plot", "qc.@model_plot"),
              ("resid_plot", "qc.@resid_plot"),
              ("error_plot", "qc.@error_plot")]),
 
@@ -202,7 +202,7 @@ def define_model_results_workflow(info, subjects, qc=True):
              ("beta_file", "beta_file"),
              ("error_file", "error_file"),
              ("ols_file", "ols_file"),
-             ("design_file", "design_file")]),
+             ("model_file", "model_file")]),
 
         (subject_source, model_results,
             [("subject", "subject")]),
@@ -373,7 +373,7 @@ class ModelResultsInput(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
-        design_file = traits.File(exists=True)
+        model_file = traits.File(exists=True)
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -401,7 +401,7 @@ class ModelResultsInput(LymanInterface):
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
             error_file=op.join(model_path, "error.nii.gz"),
-            design_file=op.join(model_path, "design.csv"),
+            model_file=op.join(model_path, "model.csv"),
 
             output_path=model_path,
         )
@@ -437,9 +437,9 @@ class ModelFit(LymanInterface):
         error_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         resid_file = traits.File()
-        design_file = traits.File(exists=True)
+        model_file = traits.File(exists=True)
         resid_plot = traits.File(exists=True)
-        design_plot = traits.File(exists=True)
+        model_plot = traits.File(exists=True)
         error_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
@@ -604,8 +604,8 @@ class ModelFit(LymanInterface):
                                     hpf_matrix=hpf_matrix)
 
         # Save out the design matrix
-        design_file = self.define_output("design_file", "design.csv")
-        X.to_csv(design_file, index=False)
+        model_file = self.define_output("model_file", "model.csv")
+        X.to_csv(model_file, index=False)
 
         # --- Model estimation
 
@@ -658,7 +658,7 @@ class ModelFit(LymanInterface):
 
         # Plot the design matrix
         f = plot_design_matrix(X, title=qc_title)
-        self.write_visualization("design_plot", "design.png", f)
+        self.write_visualization("model_plot", "model.png", f)
 
         # Plot the sigma squares image for QC
         error_m = Mosaic(mean_img, error_img, mask_img, title=qc_title)
@@ -678,7 +678,7 @@ class EstimateContrasts(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
-        design_file = traits.File(exists=True)
+        model_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         contrast_file = traits.File(exists=True)
@@ -698,7 +698,7 @@ class EstimateContrasts(LymanInterface):
         SS = image_to_matrix(error_img, mask_img)
         XtXinv = image_to_matrix(ols_img, mask_img)
 
-        X = pd.read_csv(self.inputs.design_file)
+        X = pd.read_csv(self.inputs.model_file)
         param_names = X.columns
 
         # Reshape the matrix form data to what the glm functions expect

@@ -236,9 +236,9 @@ class TestModelWorkflows(object):
         assert out.error_file == execdir.join("error.nii.gz")
         assert out.ols_file == execdir.join("ols.nii.gz")
         assert out.resid_file == execdir.join("resid.nii.gz")
-        assert out.design_file == execdir.join("design.csv")
+        assert out.model_file == execdir.join("model.csv")
         assert out.resid_plot == execdir.join("resid.png")
-        assert out.design_plot == execdir.join("design.png")
+        assert out.model_plot == execdir.join("model.png")
         assert out.error_plot == execdir.join("error.png")
 
         n_x, n_y, n_z = timeseries["vol_shape"]
@@ -261,8 +261,8 @@ class TestModelWorkflows(object):
         resid_img = nib.load(out.resid_file)
         assert resid_img.shape == (n_x, n_y, n_z, n_tp)
 
-        design = pd.read_csv(out.design_file)
-        assert design.shape == (n_tp, n_params)
+        model_matrix = pd.read_csv(out.model_file)
+        assert model_matrix.shape == (n_tp, n_params)
 
     def test_estimate_contrasts(self, execdir, modelfit):
 
@@ -272,7 +272,7 @@ class TestModelWorkflows(object):
             beta_file=modelfit["beta_file"],
             ols_file=modelfit["ols_file"],
             error_file=modelfit["error_file"],
-            design_file=modelfit["design_file"],
+            model_file=modelfit["model_file"],
         ).run().outputs
 
         # Test output file names
@@ -300,7 +300,7 @@ class TestModelWorkflows(object):
             beta_file=modelfit["beta_file"],
             ols_file=modelfit["ols_file"],
             error_file=modelfit["error_file"],
-            design_file=modelfit["design_file"],
+            model_file=modelfit["model_file"],
         ).run().outputs
 
         # Test output image shapes

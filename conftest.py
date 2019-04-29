@@ -348,8 +348,8 @@ def modelfit(timeseries):
     columns = list(np.sort(timeseries["design"]["condition"].unique()))
     for source, comp in timeseries["info"].nuisance_components.items():
         columns.extend([f"{source}{i+1}" for i in range(comp)])
-    design_file = str(model_dir.join("design.csv"))
-    pd.DataFrame(design_data, columns=columns).to_csv(design_file, index=False)
+    model_file = str(model_dir.join("model.csv"))
+    pd.DataFrame(design_data, columns=columns).to_csv(model_file, index=False)
 
     timeseries.update(
         n_params=n_params,
@@ -357,7 +357,7 @@ def modelfit(timeseries):
         beta_file=beta_file,
         ols_file=ols_file,
         error_file=error_file,
-        design_file=design_file,
+        model_file=model_file,
     )
     return timeseries
 
