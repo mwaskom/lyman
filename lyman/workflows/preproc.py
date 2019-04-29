@@ -487,7 +487,10 @@ class TimeSeriesGIF(object):
             f.savefig(frame_png, facecolor="0", edgecolor="0")
             pngs.append(frame_png)
 
-        cmdline = ["convert", "-loop", "0", "-delay", str(delay)]
+        cmdline = ["convert",
+                   "-loop", "0",
+                   "-delay", str(delay),
+                   "-limit", "thread", "1"]
         cmdline.extend(pngs)
         cmdline.append(fname)
 
@@ -876,7 +879,10 @@ class FinalizeUnwarping(LymanInterface):
 
         # Combine frames into an animated gif
         out_file = self.define_output("unwarp_gif", "unwarp.gif")
-        cmdline = ["convert", "-loop", "0", "-delay", "100"]
+        cmdline = ["convert",
+                   "-loop", "0",
+                   "-delay", "100",
+                   "-limit", "thread", "1"]
         cmdline.extend(png_fnames)
         cmdline.append(out_file)
 
@@ -1300,7 +1306,10 @@ class CoregGIF(LymanInterface):
         Mosaic(img1, **kws).savefig("img1.png", close=True)
         Mosaic(img2, **kws).savefig("img2.png", close=True)
 
-        cmdline = ["convert", "-loop", "0", "-delay", "100",
+        cmdline = ["convert",
+                   "-loop", "0",
+                   "-delay", "100",
+                   "-limit", "thread", "1",
                    "img1.png", "img2.png", fname]
 
         self.submit_cmdline(runtime, cmdline)
