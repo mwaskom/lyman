@@ -98,33 +98,37 @@ class SaveInfo(LymanInterface):
         return runtime
 
 
-def image_to_matrix(img, mask_img):
-    """Extract image data from voxels where mask is nonzero.
+def image_to_matrix(img, mask_img, use=None):
+    """Extract image data from voxels using segmentation mask.
 
     Parameters
     ----------
     img : nifti image
         3D or 4D nifti image with data to extract.
     mask_img : 3D nifti image
-        Image defining the voxels where data will be extracted. All nonzero
-        voxels will be used; the mask does not have to be binary. Must be 3D.
+        Image defining the voxels where data will be extracted. Must be 3D.
+    use : int, list of ints, or None, optional
+        Value(s) within ``mask_img`` to use. If ``None``, use all nonzero.
 
     Returns
     -------
     data : n_vox or n_tp, n_vox numpy array
-        Array with voxel data from ``img`` where the mask is nonzero. Note that
-        when the input image is a time series, the time dimension is the first
-        axis of the matrix (corresponding to the structure of a GLM).
+        Array with voxel data from ``img`` matching the mask. Note that when
+        the input image is a time series, the time dimension is the first axis
+        of the matrix (corresponding to the structure of a GLM).
 
     """
     vol_data = img.get_data()
-    mask = mask_img.get_data() > 0
+    if use is None:
+        mask = mask_img.get_data() > 0
+    else:
+        mask = np.isin(mask_img.get_data(), use)
     check_mask(mask, vol_data)
     data = vol_data[mask].T
     return data
 
 
-def matrix_to_image(data, mask_img, template_img=None):
+def matrix_to_image(data, mask_img, template_img=None, use=None):
     """Convert a vector or matrix of data into a nibabel image.
 
     Parameters
@@ -133,11 +137,12 @@ def matrix_to_image(data, mask_img, template_img=None):
         Data matrix; if a time series, time should be on the first axis.
     mask_img : 3D nifti image
         Image defining which voxels in the output should be filled with
-        ``data``. All nonzero voxels will be used; the mask does not have to be
-        binary. Must be 3D.
+        ``data``. Must be 3D.
     template_img : nifti image
         If present, the affine matrix and Nifti header will be assigned to the
         output image; otherwise, these are taken from ``mask_img`.
+    use : int, list of ints, or None, optional
+        Value(s) within ``mask_img`` to use. If ``None``, use all nonzero.
 
     Returns
     -------
@@ -161,7 +166,10 @@ def matrix_to_image(data, mask_img, template_img=None):
         template_img = mask_img
 
     # Put the data matrix into the volume where the mask is nonzero
-    mask = mask_img.get_data() > 0
+    if use is None:
+        mask = mask_img.get_data() > 0
+    else:
+        mask = np.isin(mask_img.get_data(), use)
     vol_data = np.zeros(vol_shape, data.dtype)
     vol_data[mask] = data.T
     img = nib.Nifti1Image(vol_data, template_img.affine, template_img.header)
