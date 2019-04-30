@@ -456,7 +456,7 @@ class CarpetPlot(object):
     ]
 
     def __init__(self, data, seg, mc_params=None, smooth_fwhm=5,
-                 vlim=None, title=None):
+                 percent_change=True, vlim=None, title=None):
         """Heatmap rendering of an fMRI timeseries for quality control.
 
         The Freesurfer segmentation is used to organize data by different
@@ -479,8 +479,10 @@ class CarpetPlot(object):
             restricted within the mask for each component (cortex, cerebellum,
             etc.). Smoothing reduces white noise and makes global image
             artifacts much more apparent. Set to None to skip smoothing.
+        percent_change : bool, optional
+            If True, convert data to percent signal change over time.
         vlim : None or int, optional
-            Colormap limits (will be symmetric) in percent signal change units.
+            Colormap limits (will be symmetric around 0).
         title : string
             Title to show at the top of the plot.
 
@@ -506,6 +508,7 @@ class CarpetPlot(object):
             seg = nib.load(seg).get_data()
         else:
             seg = seg.get_data()
+        masks, brain = self.define_masks(seg)
 
         # Use header geometry to convert smoothing sigma from mm to voxels
         sx, sy, sz, _ = img.header.get_zooms()
@@ -516,8 +519,8 @@ class CarpetPlot(object):
             smooth_sigma = None
 
         # Preprocess and segment the data
-        masks, brain = self.define_masks(seg)
-        data[brain] = self.percent_change(data[brain])
+        if percent_change:
+            data[brain] = self.percent_change(data[brain])
         data[brain] = signal.detrend(data[brain])
         data = self.smooth_data(data, masks, smooth_sigma)
         segdata = self.segment_data(data, masks)

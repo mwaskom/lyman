@@ -611,7 +611,10 @@ class ModelFit(LymanInterface):
         data[~mask] = 0  # TODO why is this needed?
 
         # Convert to percent signal change?
-        # TODO
+        if info.percent_change:
+            # TODO standarize the representation of mean in this method
+            remeaned_data = data + mean[..., np.newaxis]
+            data[mask] = signals.percent_change(remeaned_data[mask])
 
         # Prewhiten the data
         ts_img = nib.Nifti1Image(data, affine)
@@ -648,11 +651,13 @@ class ModelFit(LymanInterface):
         # internally)?
         # TODO standarize the representation of mean in this method
         resid_data = np.zeros(ts_img.shape, np.float32)
-        resid_data += np.expand_dims(mean * mask, axis=-1)
+        if not info.percent_change:
+            resid_data += np.expand_dims(mean * mask, axis=-1)
         resid_data[mask] += E.T
         resid_img = nib.Nifti1Image(resid_data, affine, header)
 
-        p = CarpetPlot(resid_img, seg_img, mc_data, title=qc_title)
+        p = CarpetPlot(resid_img, seg_img, mc_data, title=qc_title,
+                       percent_change=not info.percent_change)
         self.write_visualization("resid_plot", "resid.png", p)
 
         # Plot the design matrix

@@ -65,6 +65,7 @@ def lyman_info(tmpdir):
         surface_smoothing=True,
         interpolate_noise=True,
         hpf_cutoff=10,
+        percent_change=True,
         hrf_derivative=False,
         save_residuals=True,
         contrasts=contrasts,
