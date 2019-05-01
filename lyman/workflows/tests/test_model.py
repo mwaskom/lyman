@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import nibabel as nib
 import nipype
+import pytest
 
 from .. import model
 
@@ -213,14 +214,24 @@ class TestModelWorkflows(object):
         assert out.error_file == modelfit["error_file"]
         assert out.output_path == modelfit["model_dir"]
 
-    def test_model_fit(self, execdir, timeseries):
+    @pytest.mark.parametrize(
+        "percent_change,nuisance_regression",
+        [(True, True), (False, False)],
+    )
+    def test_model_fit(self, execdir, timeseries,
+                       percent_change, nuisance_regression):
+
+        info = timeseries["info"]
+        info.percent_change = percent_change
+        if not nuisance_regression:
+            info.nuisance_components = {}
 
         out = model.ModelFit(
             subject=timeseries["subject"],
             session=timeseries["session"],
             run=timeseries["run"],
             data_dir=str(timeseries["data_dir"]),
-            info=timeseries["info"].trait_get(),
+            info=info.trait_get(),
             seg_file=timeseries["seg_file"],
             surf_file=timeseries["surf_file"],
             edge_file=timeseries["edge_file"],
@@ -243,7 +254,9 @@ class TestModelWorkflows(object):
 
         n_x, n_y, n_z = timeseries["vol_shape"]
         n_tp = timeseries["n_tp"]
-        n_params = timeseries["n_params"]
+
+        X = pd.read_csv(out.model_file)
+        n_params = X.shape[1]
 
         # Test output image shapes
         mask_img = nib.load(out.mask_file)

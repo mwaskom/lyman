@@ -489,7 +489,6 @@ class ModelFit(LymanInterface):
         # --- Nuisance variable extraction
 
         # Erode the WM mask and extract data
-        wm_pca = None
         wm_mask = np.isin(seg, [5, 6, 7])
         erode = self.inputs.wm_erode
         wm_mask = (wm_mask if not erode
@@ -499,9 +498,10 @@ class ModelFit(LymanInterface):
             wm_img = nib.Nifti1Image(wm_mask.astype(np.uint8), affine)
             wm_data = image_to_matrix(ts_img, wm_img)
             wm_pca = signals.pca_transform(wm_data, wm_comp)
+        else:
+            wm_pca = None
 
         # Erode the CSF mask and extract data
-        csf_pca = None
         csf_mask = seg == 8
         erode = self.inputs.csf_erode
         csf_mask = (csf_mask if not erode
@@ -511,21 +511,25 @@ class ModelFit(LymanInterface):
             csf_img = nib.Nifti1Image(csf_mask.astype(np.uint8), affine)
             csf_data = image_to_matrix(ts_img, csf_img)
             csf_pca = signals.pca_transform(csf_data, csf_comp)
+        else:
+            csf_pca = None
 
         # Extract data from the "edge" of the brain
-        edge_pca = None
         edge_img = nib.load(self.inputs.edge_file)
         edge_data = image_to_matrix(ts_img, edge_img)
         edge_comp = info.nuisance_components.get("edge", 0)
         if edge_comp:
             edge_pca = signals.pca_transform(edge_data, edge_comp)
+        else:
+            edge_pca = None
 
         # Extract data from "noisy" voxels
-        noise_pca = None
         noise_data = image_to_matrix(ts_img, noise_img)
         noise_comp = info.nuisance_components.get("noise", 0)
         if noise_comp:
             noise_pca = signals.pca_transform(noise_data, noise_comp)
+        else:
+            noise_pca = None
 
         # TODO motion correction parameters (do we still want this?)
         mc_data = pd.read_csv(self.inputs.mc_file)
