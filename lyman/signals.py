@@ -1,5 +1,5 @@
 import numpy as np
-from scipy import signal, sparse, stats
+from scipy import signal, sparse, stats, linalg
 from scipy.ndimage import gaussian_filter
 import nibabel as nib
 
@@ -431,3 +431,44 @@ def _load_float_data_maybe_copy(img, inplace):
         if inplace:
             raise ValueError("Cannot operate on non-float data in place")
     return img.get_data().astype(to_dtype, copy=not inplace)
+
+
+def pca_transform(data, keep=None, whiten=True):
+    """Transform data matrix using PCA.
+
+    Parameters
+    ----------
+    data : n_tp x n_vox array
+        Data to be transformed.
+    keep : int, optional
+        Number of components to return.
+    whiten : bool, optional
+        If True, components will have unit variance.
+
+    Returns
+    -------
+    out : n_tp x keep array
+        Data projected onto principle components, and maybe whitened.
+
+    """
+    if keep is None:
+        keep = data.shape[1]
+
+    # Perform singular value decomposition
+    data = data - data.mean(axis=0)
+    u, s, v = linalg.svd(data, full_matrices=False)
+
+    # Flip eigenvector signs to enforce deterministic output
+    # Code taken from sckit-learn PCA implementaiton
+    max_abs_cols = np.argmax(np.abs(u), axis=0)
+    signs = np.sign(u[max_abs_cols, range(u.shape[1])])
+    u *= signs
+    v *= signs[:, np.newaxis]
+
+    # Tranform the data
+    if whiten:
+        out = u * np.sqrt(data.shape[0] - 1)
+    else:
+        out = u * s
+
+    return out[:, :keep]

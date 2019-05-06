@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import nibabel as nib
 import nipype
+import pytest
 
 from .. import model
 
@@ -181,6 +182,7 @@ class TestModelWorkflows(object):
         assert out.seg_file == timeseries["seg_file"]
         assert out.surf_file == timeseries["surf_file"]
         assert out.mask_file == timeseries["mask_file"]
+        assert out.edge_file == timeseries["edge_file"]
         assert out.ts_file == timeseries["ts_file"]
         assert out.noise_file == timeseries["noise_file"]
         assert out.mc_file == timeseries["mc_file"]
@@ -212,16 +214,27 @@ class TestModelWorkflows(object):
         assert out.error_file == modelfit["error_file"]
         assert out.output_path == modelfit["model_dir"]
 
-    def test_model_fit(self, execdir, timeseries):
+    @pytest.mark.parametrize(
+        "percent_change,nuisance_regression",
+        [(True, True), (False, False)],
+    )
+    def test_model_fit(self, execdir, timeseries,
+                       percent_change, nuisance_regression):
+
+        info = timeseries["info"]
+        info.percent_change = percent_change
+        if not nuisance_regression:
+            info.nuisance_components = {}
 
         out = model.ModelFit(
             subject=timeseries["subject"],
             session=timeseries["session"],
             run=timeseries["run"],
             data_dir=str(timeseries["data_dir"]),
-            info=timeseries["info"].trait_get(),
+            info=info.trait_get(),
             seg_file=timeseries["seg_file"],
             surf_file=timeseries["surf_file"],
+            edge_file=timeseries["edge_file"],
             ts_file=timeseries["ts_file"],
             mask_file=timeseries["mask_file"],
             noise_file=timeseries["noise_file"],
@@ -234,14 +247,16 @@ class TestModelWorkflows(object):
         assert out.error_file == execdir.join("error.nii.gz")
         assert out.ols_file == execdir.join("ols.nii.gz")
         assert out.resid_file == execdir.join("resid.nii.gz")
-        assert out.design_file == execdir.join("design.csv")
+        assert out.model_file == execdir.join("model.csv")
         assert out.resid_plot == execdir.join("resid.png")
-        assert out.design_plot == execdir.join("design.png")
+        assert out.model_plot == execdir.join("model.png")
         assert out.error_plot == execdir.join("error.png")
 
         n_x, n_y, n_z = timeseries["vol_shape"]
         n_tp = timeseries["n_tp"]
-        n_params = timeseries["n_params"]
+
+        X = pd.read_csv(out.model_file)
+        n_params = X.shape[1]
 
         # Test output image shapes
         mask_img = nib.load(out.mask_file)
@@ -259,8 +274,8 @@ class TestModelWorkflows(object):
         resid_img = nib.load(out.resid_file)
         assert resid_img.shape == (n_x, n_y, n_z, n_tp)
 
-        design = pd.read_csv(out.design_file)
-        assert design.shape == (n_tp, n_params)
+        model_matrix = pd.read_csv(out.model_file)
+        assert model_matrix.shape == (n_tp, n_params)
 
     def test_estimate_contrasts(self, execdir, modelfit):
 
@@ -270,7 +285,7 @@ class TestModelWorkflows(object):
             beta_file=modelfit["beta_file"],
             ols_file=modelfit["ols_file"],
             error_file=modelfit["error_file"],
-            design_file=modelfit["design_file"],
+            model_file=modelfit["model_file"],
         ).run().outputs
 
         # Test output file names
@@ -298,7 +313,7 @@ class TestModelWorkflows(object):
             beta_file=modelfit["beta_file"],
             ols_file=modelfit["ols_file"],
             error_file=modelfit["error_file"],
-            design_file=modelfit["design_file"],
+            model_file=modelfit["model_file"],
         ).run().outputs
 
         # Test output image shapes

@@ -61,9 +61,11 @@ def lyman_info(tmpdir):
         tr=1.5,
         model_name="model_a",
         smooth_fwhm=4,
+        nuisance_components=dict(wm=2, csf=2, edge=2, noise=2),
         surface_smoothing=True,
         interpolate_noise=True,
         hpf_cutoff=10,
+        percent_change=True,
         hrf_derivative=False,
         save_residuals=True,
         contrasts=contrasts,
@@ -93,7 +95,9 @@ def lyman_info(tmpdir):
 
     vol_shape = 12, 8, 4
     n_tp = 20
-    n_params = len(design["condition"].unique())
+    n_conditions = len(design["condition"].unique())
+    n_regressors = sum(info.nuisance_components.values())
+    n_params = n_conditions + n_regressors
 
     return dict(
         info=info,
@@ -188,7 +192,7 @@ def template(freesurfer):
     lut_file = str(template_dir.join("seg.lut"))
     lut.to_csv(lut_file, sep="\t", header=False, index=True)
 
-    seg_data = rs.randint(0, 7, vol_shape)
+    seg_data = rs.randint(0, 9, vol_shape)
     seg_file = str(template_dir.join("seg.nii.gz"))
     nib.save(nib.Nifti1Image(seg_data, affine), seg_file)
 
@@ -342,9 +346,11 @@ def modelfit(timeseries):
     nib.save(nib.Nifti1Image(error_data, affine), error_file)
 
     design_data = rs.normal(0, 1, (n_tp, n_params))
-    columns = np.sort(timeseries["design"]["condition"].unique())
-    design_file = str(model_dir.join("design.csv"))
-    pd.DataFrame(design_data, columns=columns).to_csv(design_file, index=False)
+    columns = list(np.sort(timeseries["design"]["condition"].unique()))
+    for source, comp in timeseries["info"].nuisance_components.items():
+        columns.extend([f"{source}{i+1}" for i in range(comp)])
+    model_file = str(model_dir.join("model.csv"))
+    pd.DataFrame(design_data, columns=columns).to_csv(model_file, index=False)
 
     timeseries.update(
         n_params=n_params,
@@ -352,7 +358,7 @@ def modelfit(timeseries):
         beta_file=beta_file,
         ols_file=ols_file,
         error_file=error_file,
-        design_file=design_file,
+        model_file=model_file,
     )
     return timeseries
 

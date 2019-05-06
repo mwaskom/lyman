@@ -5,13 +5,15 @@ import os.path as op
 import numpy as np
 import pandas as pd
 import nibabel as nib
+from scipy import ndimage
 
 from nipype import Workflow, Node, JoinNode, IdentityInterface, DataSink
 from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
 from .. import glm, signals
 from ..utils import LymanInterface, SaveInfo, image_to_matrix, matrix_to_image
-from ..visualizations import Mosaic, CarpetPlot, plot_design_matrix
+from ..visualizations import (Mosaic, CarpetPlot,
+                              plot_design_matrix, plot_nuisance_variables)
 
 
 def define_model_fit_workflow(info, subjects, sessions, qc=True):
@@ -79,6 +81,7 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
              ("run", "run"),
              ("seg_file", "seg_file"),
              ("surf_file", "surf_file"),
+             ("edge_file", "edge_file"),
              ("mask_file", "mask_file"),
              ("ts_file", "ts_file"),
              ("noise_file", "noise_file"),
@@ -92,7 +95,7 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
              ("error_file", "@error"),
              ("ols_file", "@ols"),
              ("resid_file", "@resid"),
-             ("design_file", "@design")]),
+             ("model_file", "@model")]),
 
     ]
     workflow.connect(processing_edges)
@@ -105,7 +108,8 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
             [("info_file", "qc.@info_json")]),
 
         (fit_model, data_output,
-            [("design_plot", "qc.@design_plot"),
+            [("model_plot", "qc.@model_plot"),
+             ("nuisance_plot", "qc.@nuisance_plot"),
              ("resid_plot", "qc.@resid_plot"),
              ("error_plot", "qc.@error_plot")]),
 
@@ -200,7 +204,7 @@ def define_model_results_workflow(info, subjects, qc=True):
              ("beta_file", "beta_file"),
              ("error_file", "error_file"),
              ("ols_file", "ols_file"),
-             ("design_file", "design_file")]),
+             ("model_file", "model_file")]),
 
         (subject_source, model_results,
             [("subject", "subject")]),
@@ -310,6 +314,7 @@ class ModelFitInput(LymanInterface):
         run = traits.Str()
         seg_file = traits.File(exists=True)
         surf_file = traits.File(exists=True)
+        edge_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
         ts_file = traits.File(exists=True)
         noise_file = traits.File(Exists=True)
@@ -338,6 +343,7 @@ class ModelFitInput(LymanInterface):
 
             seg_file=op.join(template_path, "seg.nii.gz"),
             surf_file=op.join(template_path, "surf.nii.gz"),
+            edge_file=op.join(template_path, "edge.nii.gz"),
 
             mask_file=op.join(timeseries_path, "mask.nii.gz"),
             ts_file=op.join(timeseries_path, "func.nii.gz"),
@@ -369,7 +375,7 @@ class ModelResultsInput(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
-        design_file = traits.File(exists=True)
+        model_file = traits.File(exists=True)
         output_path = traits.Directory()
 
     def _run_interface(self, runtime):
@@ -397,7 +403,7 @@ class ModelResultsInput(LymanInterface):
             beta_file=op.join(model_path, "beta.nii.gz"),
             ols_file=op.join(model_path, "ols.nii.gz"),
             error_file=op.join(model_path, "error.nii.gz"),
-            design_file=op.join(model_path, "design.csv"),
+            model_file=op.join(model_path, "model.csv"),
 
             output_path=model_path,
         )
@@ -421,8 +427,11 @@ class ModelFit(LymanInterface):
         surf_file = traits.File(exists=True)
         ts_file = traits.File(exists=True)
         mask_file = traits.File(exists=True)
+        edge_file = traits.File(exists=True)
         noise_file = traits.File(exists=True)
         mc_file = traits.File(exists=True)
+        wm_erode = traits.Int(default=2)
+        csf_erode = traits.Int(default=1)
 
     class output_spec(TraitedSpec):
         mask_file = traits.File(exists=True)
@@ -430,10 +439,11 @@ class ModelFit(LymanInterface):
         error_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         resid_file = traits.File()
-        design_file = traits.File(exists=True)
+        model_file = traits.File(exists=True)
         resid_plot = traits.File(exists=True)
-        design_plot = traits.File(exists=True)
+        model_plot = traits.File(exists=True)
         error_plot = traits.File(exists=True)
+        nuisance_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -449,15 +459,15 @@ class ModelFit(LymanInterface):
         # Do this first because problems with the design are more
         # common than problems with the preprocessed image data
 
-        # Get the design information for this run
-        fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
-        design_file = op.join(data_dir, subject, "design", fname)
-        design = pd.read_csv(design_file)
-        run_rows = (design.session == session) & (design.run == run)
-        design = design.loc[run_rows]
-
-        # TODO Let's have a more robust check and better error here
-        assert len(design) > 0
+        design = None
+        if info.task_model:
+            # Get the design information for this run
+            fname = "{}-{}.csv".format(info.experiment_name, info.model_name)
+            design_file = op.join(data_dir, subject, "design", fname)
+            design = pd.read_csv(design_file)
+            run_rows = (design.session == session) & (design.run == run)
+            design = design.loc[run_rows]
+            assert len(design), "Design file has no rows"
 
         # --- Data loading
 
@@ -466,28 +476,78 @@ class ModelFit(LymanInterface):
         affine, header = ts_img.affine, ts_img.header
         n_tp = ts_img.shape[-1]
 
-        # Load the anatomical segmentation and fine analysis mask
+        # Load the anatomical segmentation and find analysis mask
         seg_img = nib.load(self.inputs.seg_file)
         mask_img = nib.load(self.inputs.mask_file)
 
         seg = seg_img.get_data()
         mask = mask_img.get_data()
         mask = (mask > 0) & (seg > 0) & (seg < 5)
-        mask_img = nib.Nifti1Image(mask.astype(np.int8), affine, header)
+        mask_img = nib.Nifti1Image(mask.astype(np.uint8), affine, header)
         n_vox = mask.sum()
+
+        # Load the map of locally-noisy voxels
+        noise_img = nib.load(self.inputs.noise_file)
+
+        # --- Nuisance variable extraction
+
+        # Erode the WM mask and extract data
+        wm_mask = np.isin(seg, [5, 6, 7])
+        erode = self.inputs.wm_erode
+        wm_mask = (wm_mask if not erode
+                   else ndimage.binary_erosion(wm_mask, iterations=erode))
+        wm_comp = info.nuisance_components.get("wm", 0)
+        if wm_mask.any() and wm_comp:
+            wm_img = nib.Nifti1Image(wm_mask.astype(np.uint8), affine)
+            wm_data = image_to_matrix(ts_img, wm_img)
+            wm_pca = signals.pca_transform(wm_data, wm_comp)
+        else:
+            wm_pca = None
+
+        # Erode the CSF mask and extract data
+        csf_mask = seg == 8
+        erode = self.inputs.csf_erode
+        csf_mask = (csf_mask if not erode
+                    else ndimage.binary_erosion(csf_mask, iterations=erode))
+        csf_comp = info.nuisance_components.get("csf", 0)
+        if csf_mask.any() and csf_comp:
+            csf_img = nib.Nifti1Image(csf_mask.astype(np.uint8), affine)
+            csf_data = image_to_matrix(ts_img, csf_img)
+            csf_pca = signals.pca_transform(csf_data, csf_comp)
+        else:
+            csf_pca = None
+
+        # Extract data from the "edge" of the brain
+        edge_img = nib.load(self.inputs.edge_file)
+        edge_data = image_to_matrix(ts_img, edge_img)
+        edge_comp = info.nuisance_components.get("edge", 0)
+        if edge_comp:
+            edge_pca = signals.pca_transform(edge_data, edge_comp)
+        else:
+            edge_pca = None
+
+        # Extract data from "noisy" voxels
+        noise_data = image_to_matrix(ts_img, noise_img)
+        noise_comp = info.nuisance_components.get("noise", 0)
+        if noise_comp:
+            noise_pca = signals.pca_transform(noise_data, noise_comp)
+        else:
+            noise_pca = None
+
+        # TODO motion correction parameters (do we still want this?)
+        mc_data = pd.read_csv(self.inputs.mc_file)
+
+        # TODO Detect frames for censoring
 
         # --- Spatial filtering
 
         fwhm = info.smooth_fwhm
 
-        # Load the noise segmentation
-        noise_img = None
-        if info.interpolate_noise:
-            noise_img = nib.load(self.inputs.noise_file)
+        smooth_noise = noise_img if info.interpolate_noise else None
 
         # Volumetric smoothing
         filt_img = signals.smooth_segmentation(ts_img, seg_img,
-                                               fwhm, noise_img)
+                                               fwhm, smooth_noise)
 
         # Cortical manifold smoothing
         if info.surface_smoothing:
@@ -495,7 +555,7 @@ class ModelFit(LymanInterface):
             vert_img = nib.load(self.inputs.surf_file)
             signals.smooth_surface(
                 ts_img, vert_img, fwhm, subject,
-                noise_img=noise_img, inplace=True,
+                noise_img=smooth_noise, inplace=True,
             )
 
             ribbon = vert_img.get_data().max(axis=-1) > -1
@@ -520,33 +580,48 @@ class ModelFit(LymanInterface):
         data[mask] = np.dot(hpf_matrix, data[mask].T).T
         data[mask] -= data[mask].mean(axis=-1, keepdims=True)
 
-        # TODO remove the mean from the data
-        # data[gray_mask] += mean[gray_mask, np.newaxis]
-        data[~mask] = 0
+        # Temporally filter the nuisance regressors
+        wm_pca = None if wm_pca is None else hpf_matrix.dot(wm_pca)
+        csf_pca = None if csf_pca is None else hpf_matrix.dot(csf_pca)
+        edge_pca = None if edge_pca is None else hpf_matrix.dot(edge_pca)
+        noise_pca = None if noise_pca is None else hpf_matrix.dot(noise_pca)
 
-        # --- Confound extraction
+        # --- Design matrix construction
 
-        # Define confound regressons from various sources
-        # TODO
-        mc_data = pd.read_csv(self.inputs.mc_file)
+        # Build the regressor sub-matrix
+        tps = np.arange(0, n_tp * info.tr, info.tr)
+        wm_cols = [f"wm{i+1}" for i in range(wm_comp)]
+        csf_cols = [f"csf{i+1}" for i in range(csf_comp)]
+        edge_cols = [f"edge{i+1}" for i in range(edge_comp)]
+        noise_cols = [f"noise{i+1}" for i in range(noise_comp)]
 
-        # Detect artifact frames
-        # TODO
+        regressors = pd.concat([
+            pd.DataFrame(wm_pca, tps, wm_cols),
+            pd.DataFrame(csf_pca, tps, csf_cols),
+            pd.DataFrame(edge_pca, tps, edge_cols),
+            pd.DataFrame(noise_pca, tps, noise_cols),
+        ], axis=1).dropna()
 
-        # Build the design matrix
+        # Build the full design matrix
         hrf_model = glm.GammaHRF(derivative=info.hrf_derivative)
         X = glm.build_design_matrix(design, hrf_model,
+                                    regressors=regressors,
                                     n_tp=n_tp, tr=info.tr,
                                     hpf_matrix=hpf_matrix)
 
         # Save out the design matrix
-        design_file = self.define_output("design_file", "design.csv")
-        X.to_csv(design_file, index=False)
+        model_file = self.define_output("model_file", "model.csv")
+        X.to_csv(model_file, index=False)
 
         # --- Model estimation
 
+        data[~mask] = 0  # TODO why is this needed?
+
         # Convert to percent signal change?
-        # TODO
+        if info.percent_change:
+            # TODO standarize the representation of mean in this method
+            remeaned_data = data + mean[..., np.newaxis]
+            data[mask] = signals.percent_change(remeaned_data[mask])
 
         # Prewhiten the data
         ts_img = nib.Nifti1Image(data, affine)
@@ -583,21 +658,27 @@ class ModelFit(LymanInterface):
         # internally)?
         # TODO standarize the representation of mean in this method
         resid_data = np.zeros(ts_img.shape, np.float32)
-        resid_data += np.expand_dims(mean * mask, axis=-1)
+        if not info.percent_change:
+            resid_data += np.expand_dims(mean * mask, axis=-1)
         resid_data[mask] += E.T
         resid_img = nib.Nifti1Image(resid_data, affine, header)
 
-        p = CarpetPlot(resid_img, seg_img, mc_data, title=qc_title)
+        p = CarpetPlot(resid_img, seg_img, mc_data, title=qc_title,
+                       percent_change=not info.percent_change)
         self.write_visualization("resid_plot", "resid.png", p)
 
         # Plot the design matrix
         f = plot_design_matrix(X, title=qc_title)
-        self.write_visualization("design_plot", "design.png", f)
+        self.write_visualization("model_plot", "model.png", f)
 
         # Plot the sigma squares image for QC
         error_m = Mosaic(mean_img, error_img, mask_img, title=qc_title)
         error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
         self.write_visualization("error_plot", "error.png", error_m)
+
+        # Plot the nuisance variables
+        f = plot_nuisance_variables(X, title=qc_title)
+        self.write_visualization("nuisance_plot", "nuisance.png", f)
 
         return runtime
 
@@ -610,7 +691,7 @@ class EstimateContrasts(LymanInterface):
         beta_file = traits.File(exists=True)
         ols_file = traits.File(exists=True)
         error_file = traits.File(exists=True)
-        design_file = traits.File(exists=True)
+        model_file = traits.File(exists=True)
 
     class output_spec(TraitedSpec):
         contrast_file = traits.File(exists=True)
@@ -630,7 +711,7 @@ class EstimateContrasts(LymanInterface):
         SS = image_to_matrix(error_img, mask_img)
         XtXinv = image_to_matrix(ols_img, mask_img)
 
-        X = pd.read_csv(self.inputs.design_file)
+        X = pd.read_csv(self.inputs.model_file)
         param_names = X.columns
 
         # Reshape the matrix form data to what the glm functions expect

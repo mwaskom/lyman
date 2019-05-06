@@ -111,6 +111,12 @@ class TestLymanInterface(object):
         assert op.exists(out_path)
         assert ifc._results == {out_field: op.join(execdir, out_path)}
 
+        viz = None
+        ifc.write_visualization(out_field, out_path, viz)
+
+        with pytest.raises(RuntimeError):
+            ifc.write_visualization(out_field, out_path, "bad type")
+
     def test_submit_cmdline(self, execdir):
 
         msg = "test"
@@ -184,6 +190,8 @@ class TestImageMatrixConversion(object):
         mask = np.arange(n_x * n_y * n_z).reshape(vol_shape) % 4
         n_vox = mask.astype(bool).sum()
 
+        seg = rs.randint(0, 4, vol_shape)
+
         data_4d = rs.normal(0, 1, (n_x, n_y, n_z, n_tp))
         data_3d = data_4d[..., 0]
         data_2d = data_4d[mask.astype(bool)].T
@@ -205,10 +213,13 @@ class TestImageMatrixConversion(object):
 
         img_3d = nib.Nifti1Image(data_3d, affine)
         mask_img = nib.Nifti1Image(mask, affine)
+        seg_img = nib.Nifti1Image(seg, affine)
 
         test_data = dict(
             mask=mask,
             mask_img=mask_img,
+            seg=seg,
+            seg_img=seg_img,
             affine=affine,
             img_4d=img_4d,
             img_3d=img_3d,
@@ -231,6 +242,7 @@ class TestImageMatrixConversion(object):
         img_4d = test_data["img_4d"]
         img_3d = test_data["img_3d"]
         mask_img = test_data["mask_img"]
+        seg_img = test_data["seg_img"]
 
         # Test 4D image > 2D matrix with a mask
         data_2d = utils.image_to_matrix(img_4d, mask_img)
@@ -242,11 +254,18 @@ class TestImageMatrixConversion(object):
         assert np.array_equal(data_1d, test_data["data_1d"])
         assert data_1d.shape == (test_data["n_vox"],)
 
+        # Test segmentation value(s)
+        for use in [1, [1, 2]]:
+            data_seg = utils.image_to_matrix(img_4d, seg_img, use=use)
+            within_seg = np.isin(test_data["seg"], use).sum()
+            assert data_seg.shape == (test_data["n_tp"], within_seg)
+
     def test_matrix_to_image(self, test_data):
 
         data_2d = test_data["data_2d"]
         data_1d = test_data["data_1d"]
         mask_img = test_data["mask_img"]
+        seg_img = test_data["seg_img"]
         n_x, n_y, n_z = test_data["vol_shape"]
         n_tp = test_data["n_tp"]
 
@@ -261,6 +280,16 @@ class TestImageMatrixConversion(object):
         assert np.array_equal(img_3d.get_data(), test_data["data_3d_masked"])
         assert np.array_equal(img_3d.affine, mask_img.affine)
         assert img_3d.shape == (n_x, n_y, n_z)
+
+        # Test segmentation value(s)
+        for use in [1, [1, 2]]:
+            within_seg = np.isin(test_data["seg"], use)
+            seg_mask_img = nib.Nifti1Image(within_seg.astype(np.uint8),
+                                           test_data["affine"])
+            data_seg = test_data["data_3d"][within_seg]
+            img_mask = utils.matrix_to_image(data_seg, seg_mask_img)
+            img_seg = utils.matrix_to_image(data_seg, seg_img, use=use)
+            assert np.array_equal(img_mask.get_data(), img_seg.get_data())
 
         # Test affine and header from template image are used
         img_template = test_data["img_4d"]

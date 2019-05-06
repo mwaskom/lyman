@@ -292,7 +292,7 @@ def build_design_matrix(conditions=None, hrf_model=None,
             err = "Size of regressors does not correspond with `n_tp`"
             raise ValueError(err)
 
-    if artifacts is not None:
+    if artifacts is not None:  # TODO rename to censors?
         n_art_tp = len(artifacts)
         n_tp = n_art_tp if n_tp is None else n_tp
         if n_tp != n_art_tp:

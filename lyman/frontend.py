@@ -96,6 +96,12 @@ class ModelInfo(HasTraits):
         The name of the model. (Automatically populated from module name).
         """)
     )
+    task_model = Bool(
+        True,
+        desc=dedent("""
+        If True, model the task using a design file matching the model name.
+        """)
+    )
     smooth_fwhm = Either(
         Float(2), None,
         desc=dedent("""
@@ -124,6 +130,19 @@ class ModelInfo(HasTraits):
         The cutoff value (in seconds) for the temporal high-pass filter.
         """),
     )
+    percent_change = Bool(
+        False,
+        desc=dedent("""
+        If True, convert data to percent signal change units before model fit.
+        """),
+    )
+    nuisance_components = Dict(
+        Enum("wm", "csf", "edge", "noise"), Int,
+        usedefault=True,
+        desc=dedent("""
+        Anatomical sources and number of components per source to include.
+        """)
+    )
     save_residuals = Bool(
         False,
         desc=dedent("""
@@ -137,7 +156,6 @@ class ModelInfo(HasTraits):
         If True, include the temporal derivative of the HRF model.
         """),
     )
-    # TODO model confounds and artifact-related params
     # TODO parameter names to filter the design and generate default contrasts?
     contrasts = List(
         Tuple(Str, List(Str), List(Float)),

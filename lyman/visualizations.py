@@ -456,7 +456,7 @@ class CarpetPlot(object):
     ]
 
     def __init__(self, data, seg, mc_params=None, smooth_fwhm=5,
-                 vlim=None, title=None):
+                 percent_change=True, vlim=None, title=None):
         """Heatmap rendering of an fMRI timeseries for quality control.
 
         The Freesurfer segmentation is used to organize data by different
@@ -479,8 +479,10 @@ class CarpetPlot(object):
             restricted within the mask for each component (cortex, cerebellum,
             etc.). Smoothing reduces white noise and makes global image
             artifacts much more apparent. Set to None to skip smoothing.
+        percent_change : bool, optional
+            If True, convert data to percent signal change over time.
         vlim : None or int, optional
-            Colormap limits (will be symmetric) in percent signal change units.
+            Colormap limits (will be symmetric around 0).
         title : string
             Title to show at the top of the plot.
 
@@ -506,6 +508,7 @@ class CarpetPlot(object):
             seg = nib.load(seg).get_data()
         else:
             seg = seg.get_data()
+        masks, brain = self.define_masks(seg)
 
         # Use header geometry to convert smoothing sigma from mm to voxels
         sx, sy, sz, _ = img.header.get_zooms()
@@ -516,8 +519,8 @@ class CarpetPlot(object):
             smooth_sigma = None
 
         # Preprocess and segment the data
-        masks, brain = self.define_masks(seg)
-        data[brain] = self.percent_change(data[brain])
+        if percent_change:
+            data[brain] = self.percent_change(data[brain])
         data[brain] = signal.detrend(data[brain])
         data = self.smooth_data(data, masks, smooth_sigma)
         segdata = self.segment_data(data, masks)
@@ -643,9 +646,9 @@ class CarpetPlot(object):
         if fd is None:
             fd = []
 
-        ax.set_ylim(0, .5, auto=None)
         ax.plot(np.arange(1, len(fd) + 1), fd, lw=1.5, color=".15")
-        ax.set(ylabel="FD (mm)", ylim=(0, None))
+        _, ymax = ax.get_ylim()
+        ax.set(ylabel="FD (mm)", ylim=(0, max(.5, ymax)))
         for label in ax.get_xticklabels():
             label.set_visible(False)
 
@@ -699,6 +702,7 @@ def plot_design_matrix(X, title=None):
     f : figure
         The matplotlib figure with the heatmap drawn on the only axes.
     """
+    # TODO add option to filter out nuisance components?
     X = X - X.min()
     X = X / X.max()
 
@@ -723,3 +727,96 @@ def plot_design_matrix(X, title=None):
     f.tight_layout()
 
     return f
+
+
+def plot_nuisance_variables(X, title=None):
+    """Show the timeseries of each nuisance variable, by source.
+
+    Parameters
+    ----------
+    X : dataframe
+        The design matrix (can include design components that will be ignored).
+    title : str, optional
+        If present, will be used to title the figure.
+
+    Returns
+    -------
+    f : figure
+        The matplotlib figure with multiple axes for each source.
+
+    """
+    possible_sources = ["wm", "csf", "edge", "noise"]
+    sources = []
+    for source in possible_sources:
+        if X.columns.str.startswith(source).any():
+            sources.append(source)
+
+    if not sources:
+        return None
+
+    # Make the figure
+    n_row = len(sources)
+    f, axes = plt.subplots(n_row, figsize=(8, 2 * n_row),
+                           sharex=True, sharey=True)
+
+    # Drop the index so x units are TRs
+    X = X.reset_index(drop=True)
+
+    hues = dict(wm=.9, csf=1.25, edge=2.4, noise=2.9)
+
+    # Plot each source on an axes
+    for ax, source in zip(axes, sources):
+
+        X_sub = X.loc[:, X.columns.str.startswith(source)]
+
+        n = X_sub.shape[1]
+        colors = cubehelix_palette(n, start=hues.get(source, 0),
+                                   rot=0, low=.5, high=.2, hue=1)
+
+        X_sub.plot(ax=ax, color=colors, legend=False, linewidth=1)
+        ax.set(ylabel=source)
+        ax.yaxis.set_major_locator(mpl.ticker.MaxNLocator(integer=True))
+
+    axes[-1].set(xlabel="Time (TR)", xlim=(-1, len(X)))
+
+    if title is not None:
+        axes[0].set_title(title)
+
+    f.tight_layout()
+
+
+def cubehelix_palette(n_colors=6, start=0, rot=.4, gamma=1.0, hue=0.8,
+                      low=.15, high=.85):
+    """Generate colors from the cubehelix system.
+
+    Lightly adapted from seaborn. See parameter documentation there.
+
+    """
+    def get_color_function(p0, p1):
+        # Copied from matplotlib because it lives in private module
+        def color(x):
+            # Apply gamma factor to emphasise low or high intensity values
+            xg = x ** gamma
+
+            # Calculate amplitude and angle of deviation from the black
+            # to white diagonal in the plane of constant
+            # perceived intensity.
+            a = hue * xg * (1 - xg) / 2
+
+            phi = 2 * np.pi * (start / 3 + rot * x)
+
+            return xg + a * (p0 * np.cos(phi) + p1 * np.sin(phi))
+        return color
+
+    cdict = {
+            "red": get_color_function(-0.14861, 1.78277),
+            "green": get_color_function(-0.29227, -0.90649),
+            "blue": get_color_function(1.97294, 0.0),
+    }
+
+    cmap = mpl.colors.LinearSegmentedColormap("cubehelix", cdict)
+
+    x = np.linspace(low, high, n_colors)
+    pal = cmap(x)[:, :3].tolist()
+
+    return pal
