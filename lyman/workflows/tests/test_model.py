@@ -252,6 +252,9 @@ class TestModelWorkflows(object):
         assert out.model_plot == execdir.join("model.png")
         assert out.error_plot == execdir.join("error.png")
 
+        if nuisance_regression:
+            assert out.nuisance_plot == execdir.join("nuisance.png")
+
         n_x, n_y, n_z = timeseries["vol_shape"]
         n_tp = timeseries["n_tp"]
 

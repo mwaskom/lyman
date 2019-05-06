@@ -784,6 +784,8 @@ def plot_nuisance_variables(X, title=None):
 
     f.tight_layout()
 
+    return f
+
 
 def cubehelix_palette(n_colors=6, start=0, rot=.4, gamma=1.0, hue=0.8,
                       low=.15, high=.85):
