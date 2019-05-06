@@ -225,9 +225,15 @@ class TestCarpetPlot(VisualizationFixture):
         p.savefig("carpetplot.png", close=True)
 
 
-class TestDesignMatrixPlot(VisualizationFixture):
+class TestDesignMatrixPlots(VisualizationFixture):
 
     def test_plot_design_matrix(self, closefig):
 
         X = pd.DataFrame(np.random.randn(20, 3), columns=list("abc"))
         viz.plot_design_matrix(X)
+
+    def test_plot_nuisance_variables(self, closefig):
+
+        X = pd.DataFrame(np.random.randn(20, 5),
+                         columns=["wm1", "wm2", "edge1", "edge2", "edge3"])
+        viz.plot_nuisance_variables(X)

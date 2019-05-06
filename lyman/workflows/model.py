@@ -12,7 +12,8 @@ from nipype.interfaces.base import traits, TraitedSpec, Bunch
 
 from .. import glm, signals
 from ..utils import LymanInterface, SaveInfo, image_to_matrix, matrix_to_image
-from ..visualizations import Mosaic, CarpetPlot, plot_design_matrix
+from ..visualizations import (Mosaic, CarpetPlot,
+                              plot_design_matrix, plot_nuisance_variables)
 
 
 def define_model_fit_workflow(info, subjects, sessions, qc=True):
@@ -108,6 +109,7 @@ def define_model_fit_workflow(info, subjects, sessions, qc=True):
 
         (fit_model, data_output,
             [("model_plot", "qc.@model_plot"),
+             ("nuisance_plot", "qc.@nuisance_plot"),
              ("resid_plot", "qc.@resid_plot"),
              ("error_plot", "qc.@error_plot")]),
 
@@ -441,6 +443,7 @@ class ModelFit(LymanInterface):
         resid_plot = traits.File(exists=True)
         model_plot = traits.File(exists=True)
         error_plot = traits.File(exists=True)
+        nuisance_plot = traits.File(exists=True)
 
     def _run_interface(self, runtime):
 
@@ -673,7 +676,9 @@ class ModelFit(LymanInterface):
         error_m.plot_overlay("cube:.8:.2", 0, fmt=".0f")
         self.write_visualization("error_plot", "error.png", error_m)
 
-        # TODO plot the nuisance variables
+        # Plot the nuisance variables
+        f = plot_nuisance_variables(X, title=qc_title)
+        self.write_visualization("nuisance_plot", "nuisance.png", f)
 
         return runtime
 

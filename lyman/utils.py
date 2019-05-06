@@ -37,12 +37,18 @@ class LymanInterface(BaseInterface):
 
     def write_visualization(self, field, fname, viz):
         """Write a visualization to disk and assign path to output field."""
+        if viz is None:
+            return
+
         fname = self.define_output(field, fname)
+
         if isinstance(viz, plt.Figure):
             viz.savefig(fname, dpi=100)
             plt.close(viz)
-        else:
+        elif hasattr(viz, "savefig"):
             viz.savefig(fname, close=True)
+        else:
+            raise RuntimeError(f"It is unknown how to plot {type(viz)} object")
 
     def submit_cmdline(self, runtime, cmdline):
         """Submit a command-line job and capture the output."""

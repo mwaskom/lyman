@@ -111,6 +111,12 @@ class TestLymanInterface(object):
         assert op.exists(out_path)
         assert ifc._results == {out_field: op.join(execdir, out_path)}
 
+        viz = None
+        ifc.write_visualization(out_field, out_path, viz)
+
+        with pytest.raises(RuntimeError):
+            ifc.write_visualization(out_field, out_path, "bad type")
+
     def test_submit_cmdline(self, execdir):
 
         msg = "test"
