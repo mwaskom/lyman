@@ -34,6 +34,7 @@ Neuroimaging analysis in Python
    analysis_params
    commandline
    workflows
+   api
 
 .. raw:: html
 

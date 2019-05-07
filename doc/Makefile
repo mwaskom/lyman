@@ -42,6 +42,7 @@ help:
 
 clean:
 	rm -rf $(BUILDDIR)/*
+	rm -rf api/*.rst
 	rm -rf commandline
 	rm -rf graphs
 	rm -rf traits
