@@ -178,6 +178,20 @@ class TestHRFs(object):
         assert basis.index.equals(idx)
         assert basis.columns.equals(cols)
 
+    def test_fir_basis_suffix(self, delta_input):
+
+        n = 12
+        name = "event"
+        idx = np.arange(delta_input.size)
+
+        suffix = ":"
+        hrf = glm.FIRBasis(n, suffix=suffix)
+        s = pd.Series(delta_input, idx, name=name)
+        basis = hrf.transform(s)
+
+        cols = pd.Index([f"{name}{suffix}{i:02d}" for i in range(n)])
+        assert basis.columns.equals(cols)
+
 
 class TestDesignMatrix(object):
 

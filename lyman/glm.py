@@ -117,7 +117,7 @@ class GammaHRF(HRFModel):
 
 class FIRBasis(HRFModel):
     """Finite Impulse Response basis model."""
-    def __init__(self, n, offset=0):
+    def __init__(self, n, offset=0, suffix="_"):
         """Initialize the model with its parameters.
 
         Parameters
@@ -130,6 +130,7 @@ class FIRBasis(HRFModel):
         """
         self.n = n
         self.offset = offset
+        self.suffix = suffix
 
     def transform(self, input):
         """Generate a prediction basis set for the input as Toeplitz matrix.
@@ -151,7 +152,9 @@ class FIRBasis(HRFModel):
 
         if isinstance(input, pd.Series):
             pad = int(np.floor(np.log10(self.n))) + 1
-            cols = [f"{input.name}_{i:0{pad}d}" for i in range(self.n)]
+            cols = [
+                f"{input.name}{self.suffix}{i:0{pad}d}" for i in range(self.n)
+            ]
             basis = pd.DataFrame(basis, index=input.index, columns=cols)
 
         return basis
