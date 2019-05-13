@@ -1,6 +1,11 @@
 Lyman: an fMRI Analysis Ecosystem
 =================================
 
+.. note::
+
+    These are the docs for version 1.0 of lyman. Documentation for the 2+ series, a nearly complete rewrite of the library, are available `here <http://www.cns.nyu.edu/~mwaskom/software/lyman>`_.
+
+
 Lyman is a high-level ecosystem for analyzing neuroimaging data using
 open-source software. It aims to support an analysis workflow that is
 powerful, flexible, and reproducible, while automating as much of the
