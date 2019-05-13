@@ -118,6 +118,9 @@ html_theme_options = {
     'bootstrap_version': "3",
     'navbar_links': [
         ("Github", "https://github.com/mwaskom/lyman", True),
+        ("Command line", "commandline"),
+        ("Parameters", "analysis_params"),
+        ("Workflows", "workflows"),
         ("API", "api"),
     ],
 
