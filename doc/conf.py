@@ -26,7 +26,20 @@ import sphinx_bootstrap_theme
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.doctest', 'sphinx.ext.coverage', 'sphinx.ext.mathjax', 'sphinx.ext.viewcode']
+extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.doctest',
+    'sphinx.ext.coverage',
+    'sphinx.ext.mathjax',
+    'sphinx.ext.viewcode',
+    'sphinx.ext.autosummary',
+    'numpydoc',
+]
+
+# Generate the API documentation when building
+autosummary_generate = True
+numpydoc_show_class_members = False
+numpydoc_class_members_toctree = False
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -104,7 +117,11 @@ html_theme_options = {
     'navbar_sidebarrel': False,
     'bootstrap_version': "3",
     'navbar_links': [
-        ("Github", "https://github.com/mwaskom/lyman", True)
+        ("Github", "https://github.com/mwaskom/lyman", True),
+        ("Command line", "commandline"),
+        ("Parameters", "analysis_params"),
+        ("Workflows", "workflows"),
+        ("API", "api"),
     ],
 
     }

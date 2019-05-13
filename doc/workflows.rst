@@ -6,11 +6,11 @@ Nipype workflow graphs
 Template generation
 -------------------
 
-.. image:: graphs/template.dot.svg
+.. image:: graphs/template.svg
    :width: 800px
 
 Functional preprocessing
 ------------------------
 
-.. image:: graphs/preproc.dot.svg
+.. image:: graphs/preproc.svg
    :width: 800px
