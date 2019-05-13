@@ -670,8 +670,8 @@ def highpass_filter_matrix(n_tp, cutoff, tr=1):
     tr : float
         Temporal resolution of data, in seconds.
 
-    Return
-    ------
+    Returns
+    -------
     F : n_ntp x n_tp array
         Filter matrix.
 

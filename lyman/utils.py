@@ -146,7 +146,7 @@ def matrix_to_image(data, mask_img, template_img=None, use=None):
         ``data``. Must be 3D.
     template_img : nifti image
         If present, the affine matrix and Nifti header will be assigned to the
-        output image; otherwise, these are taken from ``mask_img`.
+        output image; otherwise, these are taken from ``mask_img``.
     use : int, list of ints, or None, optional
         Value(s) within ``mask_img`` to use. If ``None``, use all nonzero.
 

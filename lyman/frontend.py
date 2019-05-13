@@ -19,7 +19,7 @@ __all__ = ["info", "subjects", "execute"]
 
 
 class ProjectInfo(HasTraits):
-
+    """General information common to a project."""
     data_dir = Str(
         "../data",
         desc=dedent("""
@@ -90,7 +90,7 @@ class ProjectInfo(HasTraits):
 
 
 class ModelInfo(HasTraits):
-
+    """Model-specific level of information about a specific model."""
     model_name = Str(
         desc=dedent("""
         The name of the model. (Automatically populated from module name).
@@ -169,7 +169,7 @@ class ModelInfo(HasTraits):
 
 
 class ExperimentInfo(ModelInfo):
-
+    """More specific experiment-level information."""
     experiment_name = Str(
         desc=dedent("""
         The name of the experiment. (Automatically populated from module name).
@@ -190,7 +190,7 @@ class ExperimentInfo(ModelInfo):
 
 
 class LymanInfo(ProjectInfo, ExperimentInfo):
-
+    """Combination of all information classes."""
     pass
 
 
