@@ -3,6 +3,14 @@
 Installation and dependencies
 =============================
 
+Caveats
+-------
+
+Lyman is distributed with some hope that it might be useful but no promise of
+support or stability. The platform supports a specific approach to analyzing
+data and may not work for every study. The code is documented, but not every
+aspect of how the tools should be used will be obvious. Finally, the code is likely to change between releases without backwards compatibility.
+
 Installing
 ----------
 

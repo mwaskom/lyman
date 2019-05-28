@@ -19,6 +19,11 @@ def detrend(data, axis=-1, replace_mean=False):
     replace_mean : bool
         If True, compute the mean before detrending then add it back after.
 
+    Returns
+    -------
+    data : array_like
+        Detrended data.
+
     """
     # TODO enhance to preserve pandas index information
     # TODO enhance to remove higher-order polynomials?
