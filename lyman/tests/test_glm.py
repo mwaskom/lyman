@@ -52,27 +52,20 @@ class TestHRFs(object):
     def test_gamma_hrf_kernel_size(self, res, duration):
 
         hrf = glm.GammaHRF(res=res, duration=duration)
-        k, _ = hrf.kernel
-        assert len(k) == res * duration
-
-        hrf = glm.GammaHRF(derivative=True, res=res, duration=duration)
-        k, dkdt = hrf.kernel
-        assert len(k) == res * duration
-        assert len(dkdt) == res * duration
+        assert len(hrf.kernel) == res * duration
 
     def test_kernel_normalization(self):
 
         hrf = glm.GammaHRF()
-        k, _ = hrf.kernel
-        assert k.sum() == pytest.approx(1)
+        assert hrf.kernel.sum() == pytest.approx(1)
 
     def test_undershoot(self, random):
 
         double = glm.GammaHRF()
-        assert double.kernel[0].min() < 0
+        assert double.kernel.min() < 0
 
         single = glm.GammaHRF(ratio=0)
-        assert single.kernel[0].min() >= 0
+        assert single.kernel.min() >= 0
 
     def test_gamma_hrf_output_type(self, random, randn_input):
 
@@ -83,41 +76,49 @@ class TestHRFs(object):
         a_out = hrf.transform(a)
         s_out = hrf.transform(s)
 
-        assert isinstance(a_out[0], np.ndarray)
-        assert a_out[1] is None
-        assert isinstance(s_out[0], pd.Series)
-        assert s_out[1] is None
-
-        hrf = glm.GammaHRF(derivative=True)
-        a_out = hrf.transform(a)
-        s_out = hrf.transform(s)
-
-        assert isinstance(a_out[0], np.ndarray)
-        assert isinstance(a_out[1], np.ndarray)
-        assert isinstance(s_out[0], pd.Series)
-        assert isinstance(s_out[1], pd.Series)
+        assert isinstance(a_out, np.ndarray)
+        assert isinstance(s_out, pd.Series)
 
     def test_gamma_hrf_convolution(self, random, randn_input):
 
         hrf = glm.GammaHRF()
-        k, _ = hrf.kernel
-        convolution = np.convolve(randn_input, k)[:len(randn_input)]
-        assert hrf.transform(randn_input)[0] == pytest.approx(convolution)
+        convolution = np.convolve(randn_input, hrf.kernel)[:len(randn_input)]
+        assert hrf.transform(randn_input) == pytest.approx(convolution)
 
-    def test_gamma_basis_output_names(self, random, randn_input):
+    @pytest.mark.parametrize("name", ["event", 180])
+    def test_gamma_hrf_output_name(self, random, randn_input, name):
 
+        s = pd.Series(randn_input, name=name)
+        hrf = glm.GammaHRF()
+        y = hrf.transform(s)
+        assert y.name == str(name)
+
+    def test_gamma_hrf_output_index(self, random, randn_input):
+
+        n = len(randn_input)
         name = "event"
-        s = pd.Series(randn_input, name=name)
-        hrf = glm.GammaHRF(derivative=True)
-        y, dydt = hrf.transform(s)
-        assert y.name == name
-        assert dydt.name == name + "-dydt"
+        idx = pd.Index(random.permutation(np.arange(n)))
+        s = pd.Series(randn_input, idx, name=name)
 
-        name = 180
+        hrf = glm.GammaHRF()
+        y = hrf.transform(s)
+        assert y.index.equals(idx)
+
+    @pytest.mark.parametrize("name", ["event", 180])
+    def test_gamma_basis_output_names(self, random, randn_input, name):
+
         s = pd.Series(randn_input, name=name)
-        hrf = glm.GammaHRF(derivative=True)
-        y, dydt = hrf.transform(s)
-        assert dydt.name == str(name) + "-dydt"
+        hrf = glm.GammaBasis()
+        y = hrf.transform(s)
+        assert list(y.columns) == [f"{name}", f"{name}-dydt", f"{name}-dydw"]
+
+        hrf = glm.GammaBasis(time_derivative=False)
+        y = hrf.transform(s)
+        assert list(y.columns) == [f"{name}", f"{name}-dydw"]
+
+        hrf = glm.GammaBasis(disp_derivative=False)
+        y = hrf.transform(s)
+        assert list(y.columns) == [f"{name}", f"{name}-dydt"]
 
     def test_gamma_basis_output_index(self, random, randn_input):
 
@@ -126,10 +127,24 @@ class TestHRFs(object):
         idx = pd.Index(random.permutation(np.arange(n)))
         s = pd.Series(randn_input, idx, name=name)
 
-        hrf = glm.GammaHRF(derivative=True)
-        y, dydt = hrf.transform(s)
+        hrf = glm.GammaBasis()
+        y = hrf.transform(s)
         assert y.index.equals(idx)
-        assert dydt.index.equals(idx)
+
+    def test_gamma_basis_sum_squares(self):
+
+        hrf = glm.GammaBasis()
+        ss = np.sum(hrf.kernel ** 2, axis=0)
+        assert np.allclose(np.diff(ss), 0)
+
+    def test_gamma_basis_convolution_orthogonality(self, randn_input):
+
+        hrf = glm.GammaBasis()
+        y = hrf.transform(randn_input)
+        yty = y.T @ y
+
+        np.allclose(np.triu(yty, 1), 0)
+        np.allclose(np.tril(yty, 1), 0)
 
     @pytest.mark.parametrize("n", [10, 14])
     def test_fir_matrix_size(self, delta_input, n):
@@ -226,15 +241,18 @@ class TestDesignMatrix(object):
         return pd.Series(random.rand(48) < .1)
 
     @pytest.mark.parametrize(
-        "n_tp,tr,deriv",
-        product((24, 28), (1, 2), (False, True)))
-    def test_design_shape_and_index(self, conditions, tr, n_tp, deriv):
+        "n_tp,tr,time_deriv,disp_deriv",
+        product((24, 28), (1, 2), (False, True), (False, True)))
+    def test_design_shape_and_index(self, conditions, tr, n_tp,
+                                    time_deriv, disp_deriv):
 
-        X = glm.build_design_matrix(conditions, glm.GammaHRF(deriv),
+        X = glm.build_design_matrix(conditions,
+                                    glm.GammaBasis(time_deriv, disp_deriv),
                                     n_tp=n_tp, tr=tr)
 
+        n_cond = len(np.unique(conditions["condition"]))
         assert isinstance(X, pd.DataFrame)
-        assert X.shape == (n_tp, 2 * (2 if deriv else 1))
+        assert X.shape == (n_tp, n_cond * sum([1, time_deriv, disp_deriv]))
 
         tps = np.arange(0, n_tp * tr, tr)
         assert np.array_equal(X.index.values, tps)

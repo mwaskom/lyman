@@ -23,22 +23,20 @@ class HRFModel(object):
 
 class IdentityHRF(HRFModel):
     """Model that does not alter input during transform; useful for testing."""
-    def transform(self, input):
+    def transform(self, x):
         """Return input witout altering."""
-        return input
+        y = x
+        return y
 
 
 class GammaHRF(HRFModel):
-    """Gamma PDF model of HRF with undershoot and temporal derivative."""
-    def __init__(self, derivative=False, res=60, duration=32,
-                 pos_shape=6, pos_scale=1, neg_shape=16, neg_scale=1,
-                 ratio=1/6):
+    """Double gamma variate model of cannonical HRF."""
+    def __init__(self, res=60, duration=32, pos_shape=6, pos_scale=1,
+                 neg_shape=16, neg_scale=1, ratio=1/6):
         """Initialize the object with parameters that define response shape.
 
         Parameters
         ----------
-        derivative : bool
-            If True, include a temporal derivative basis function.
         res : float
             Sampling frequency at which to generate the convolution kernel.
         duration : float
@@ -58,29 +56,16 @@ class GammaHRF(HRFModel):
         neg = stats.gamma(neg_shape, scale=neg_scale).pdf
         tps = np.arange(0, duration, 1 / res, np.float)
 
-        y = pos(tps) - ratio * neg(tps)
-        y /= y.sum()
+        k = pos(tps) - ratio * neg(tps)
+        k /= k.sum()
+        self.kernel = k
 
-        if derivative:
-            dydt = self._temporal_derivative(y)
-            self.kernel = y, dydt
-        else:
-            self.kernel = y, None
-
-    def _temporal_derivative(self, y):
-        """Compute the scaled temporal derivative of the input."""
-        from numpy import diff, sum, square, sqrt
-        dydt = np.zeros_like(y)
-        dydt[1:] = diff(y)
-        dydt *= sqrt(sum(square(y)) / sum(square(dydt)))
-        return dydt
-
-    def transform(self, input):
+    def transform(self, x):
         """Generate a prediction basis set for the input through convolution.
 
         Parameters
         ----------
-        input : array or series
+        x : array or series
             Input data; should be one-dimensional
 
         Returns
@@ -90,29 +75,108 @@ class GammaHRF(HRFModel):
             is always included but may be None if the model has no derivative.
 
         """
-        n_tp = len(input)
-        y, dydt = self.kernel
+        n_tp = len(x)
 
-        y = np.convolve(input, y)[:n_tp]
-        if dydt is None:
-            dy = None
-        else:
-            dy = np.convolve(input, dydt)[:n_tp]
+        y = np.convolve(x, self.kernel)[:n_tp]
 
-        if isinstance(input, pd.Series):
-            y = pd.Series(y, input.index, name=str(input.name))
-            if dy is not None:
-                dy = pd.Series(dy, input.index, name=str(input.name) + "-dydt")
+        if isinstance(x, pd.Series):
+            y = pd.Series(y, x.index, name=str(x.name))
 
-        # TODO Is always returning a pair helpful or a nuisance?
-        # Upside: when building the design matrix, a flat column list can be
-        # extended, and then pd.concat will drop the Nones.
-        # Downside: when just interested in the canonical prediction, it's
-        # a minor pain to have to index into the return value.
-        # in any case, transform() should probably have the same behavior
-        # as kernel in terms of what it returns
+        return y
 
-        return y, dy
+
+class GammaBasis(HRFModel):
+    """Basis set for HRF based on Gamma variate model."""
+    def __init__(self, time_derivative=True, disp_derivative=True,
+                 res=60, duration=32, pos_shape=6, pos_scale=1,
+                 neg_shape=16, neg_scale=1, ratio=1/6):
+        """Initialize the object with parameters that define response shape.
+
+        Parameters
+        ----------
+        time_derivative : bool
+            Add temporal derivative of the response.
+        disp_derivative : bool
+            Add dispersion derivative of the response.
+        res : float
+            Sampling frequency at which to generate the convolution kernel.
+        duration : float
+            Duration of the convolution kernel.
+        pos_{shape, scale} : floats
+            Parameters for scipy.stats.gamma defining the initial positive
+            component of the response.
+        neg_{shape, scale} : floats
+            Parameters for scipy.stats.gamma defining the later negative
+            component of the response.
+        ratio : float
+            Ratio between the amplitude of the positive component to the
+            amplitude of the negative component.
+
+        """
+        # Build the main Gamma variate
+        main = GammaHRF(res=res, duration=duration,
+                        pos_shape=pos_shape, pos_scale=pos_scale,
+                        neg_shape=neg_shape, neg_scale=neg_scale,
+                        ratio=ratio).kernel
+        parts = [main]
+
+        # Build the time derivative
+        time_dx = np.zeros_like(main)
+        time_dx[1:] = np.diff(main)
+        time_dx *= np.sqrt(np.sum(main ** 2) / np.sum(time_dx ** 2))
+        self._time_derivative = time_derivative
+        if time_derivative:
+            parts.append(time_dx)
+
+        # Build the dispersion derivative
+        alt = GammaHRF(res=res, duration=duration,
+                       pos_shape=pos_shape / 1.01, pos_scale=pos_scale * 1.01,
+                       neg_shape=neg_shape, neg_scale=neg_scale,
+                       ratio=ratio).kernel
+        disp_dx = (main - alt) / .01
+        disp_dx *= np.sqrt(np.sum(main ** 2) / np.sum(disp_dx ** 2))
+        self._disp_derivative = disp_derivative
+        if disp_derivative:
+            parts.append(disp_dx)
+
+        self.kernel = np.column_stack(parts)
+
+    def transform(self, x):
+        """Generate a prediction basis set for the input through convolution.
+
+        Parameters
+        ----------
+        x : array or series
+            Input data; should be one-dimensional
+
+        Returns
+        -------
+        output : pair of arrays or series or None
+            Output data; has same type of input, and the derivative output
+            is always included but may be None if the model has no derivative.
+
+        """
+        n_tp = len(x)
+
+        # Convolve the input with each element of the basis set
+        ys = []
+        for col in self.kernel.T:
+            ys.append(np.convolve(x, col)[:n_tp])
+        y_orig = np.column_stack(ys)
+
+        # Orthogonalize derivative regressors
+        y, r = np.linalg.qr(y_orig)
+        y *= np.linalg.norm(y_orig, axis=0) * np.sign(np.diag(r))
+
+        if isinstance(x, pd.Series):
+            cols = [str(x.name)]
+            if self._time_derivative:
+                cols.append(f"{x.name}-dydt")
+            if self._disp_derivative:
+                cols.append(f"{x.name}-dydw")
+            y = pd.DataFrame(y, x.index, cols)
+
+        return y
 
 
 class FIRBasis(HRFModel):
@@ -132,7 +196,7 @@ class FIRBasis(HRFModel):
         self.offset = offset
         self.suffix = suffix
 
-    def transform(self, input):
+    def transform(self, x):
         """Generate a prediction basis set for the input as Toeplitz matrix.
 
         Parameters
@@ -147,15 +211,15 @@ class FIRBasis(HRFModel):
 
         """
         row = signal.unit_impulse(self.n, 0)
-        full_input = np.concatenate([input, np.zeros(self.offset)])
-        basis = linalg.toeplitz(full_input, row)[self.offset:]
+        x_full = np.concatenate([x, np.zeros(self.offset)])
+        basis = linalg.toeplitz(x_full, row)[self.offset:]
 
-        if isinstance(input, pd.Series):
+        if isinstance(x, pd.Series):
             pad = int(np.floor(np.log10(self.n))) + 1
             cols = [
-                f"{input.name}{self.suffix}{i:0{pad}d}" for i in range(self.n)
+                f"{x.name}{self.suffix}{i:0{pad}d}" for i in range(self.n)
             ]
-            basis = pd.DataFrame(basis, index=input.index, columns=cols)
+            basis = pd.DataFrame(basis, index=x.index, columns=cols)
 
         return basis
 
@@ -225,14 +289,8 @@ def condition_to_regressors(name, condition, hrf_model,
 
     # Downsample the predicted regressors to native sampling
     # TODO This crashes when hires_output is an ndarray
-    # TODO this whole approach needs fixing
     output = []
     for hires_col in hires_output:
-        # TODO having to do this is a pain!
-        if hires_col is None:
-            output.append(None)
-            continue
-
         col = interp1d(hires_tps, hires_col)(tps + shift)
         output.append(pd.Series(col, index=tps, name=hires_col.name))
 
