@@ -603,7 +603,8 @@ class ModelFit(LymanInterface):
         ], axis=1).dropna()
 
         # Build the full design matrix
-        hrf_model = glm.GammaHRF(derivative=info.hrf_derivative)
+        hrf_model = glm.GammaBasis(time_derivative=info.hrf_derivative,
+                                   disp_derivative=False)  # TODO?
         X = glm.build_design_matrix(design, hrf_model,
                                     regressors=regressors,
                                     n_tp=n_tp, tr=info.tr,

@@ -54,6 +54,7 @@ HRF models
 
     glm.HRFModel
     glm.GammaHRF
+    glm.GammaBasis
     glm.FIRBasis
     glm.IdentityHRF
 
