@@ -269,7 +269,7 @@ def condition_to_regressors(name, condition, hrf_model,
     # Initialize the array that will be transformed
     hires_input = np.zeros_like(hires_tps, np.float)
 
-    # Determine the time points at which each even starts and stops
+    # Determine the time points at which each event starts and stops
     onset_at = np.round(onset * res).astype(int)
     offset_at = np.round((onset + duration) * res).astype(int)
 
@@ -297,6 +297,8 @@ def condition_to_regressors(name, condition, hrf_model,
     return tuple(output)
 
 
+# TODO should this function get `res` from the `hrf_model`? They need to
+# match and so they would always need to be double-specified...
 def build_design_matrix(conditions=None, hrf_model=None,
                         regressors=None, artifacts=None,
                         n_tp=None, tr=1, res=60, shift=.5,
@@ -306,10 +308,10 @@ def build_design_matrix(conditions=None, hrf_model=None,
     Parameters
     ----------
     conditions : dataframe
-        Must have `condition` (a string) and `onset` (in seconds) columns.  Can
-        also have `duration` (in seconds, defaulting to 0), and `value` (in
-        arbitrary units, defaulting to 1) columns; rows should correspond to
-        event occurrences.
+        Must have an `onset` (in seconds) columns.  Can also have `duration`
+        (in seconds, defaulting to 0), and `value` (in arbitrary units,
+        defaulting to 1), and `condition` (strings, defaulting to "event")
+        columns; rows should correspond to event occurrences.
     hrf_model : HRFModel object
         Object that implements `.transform()` to return a basis set for the
         predicted response. Defaults to GammaHRF with default parameters.
@@ -371,6 +373,8 @@ def build_design_matrix(conditions=None, hrf_model=None,
             conditions.loc[:, "duration"] = 0
         if "value" not in conditions:
             conditions.loc[:, "value"] = 1
+        if "condition" not in conditions:
+            conditions.loc[:, "condition"] = "event"
 
         # Build regressors for each condition
         condition_columns = []
