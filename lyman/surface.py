@@ -113,7 +113,7 @@ class SurfaceMeasure(object):
 
 
 def vol_to_surf(data_img, subject, hemi, surf="graymid",
-                null_value=0, subjects_dir=None):
+                null_value=0, cortex_only=True, subjects_dir=None):
     """Sample data from a volume image onto a surface mesh.
 
     This function assumes that ``data_img`` is in register with the anatomy
@@ -132,6 +132,9 @@ def vol_to_surf(data_img, subject, hemi, surf="graymid",
     null_value : float
         Value to use for surface vertices that are outside the volume field
         of view.
+    cortex_only : bool
+        If True, vertices outside the Freesurfer-defined cortex label are
+        assigned ``null_value``.
     subjects_dir : string
         Path to the Freesurfer data directory root; if absent, get from the
         SUBJECTS_DIR environment variable.
@@ -186,5 +189,14 @@ def vol_to_surf(data_img, subject, hemi, surf="graymid",
 
     # Sample from the volume array into the surface array
     surf_data[fov] = data[i[fov], j[fov], k[fov]]
+
+    # Restrict vertices that are not part of the cortical surface
+    if cortex_only:
+        label_file = op.join(subjects_dir, subject, "label",
+                             "{}.cortex.label".format(hemi))
+        cortex_verts = nib.freesurfer.read_label(label_file)
+        noncortical = np.ones(n_v, np.bool)
+        noncortical[cortex_verts] = False
+        surf_data[noncortical] = null_value
 
     return surf_data
