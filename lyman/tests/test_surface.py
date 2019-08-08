@@ -76,6 +76,17 @@ class TestVolToSurf(object):
 
         assert surf_data.shape == (n_verts,)
 
+        null_value = -1
+        surf_data = surface.vol_to_surf(
+            anat_img, template["subject"], "lh", template["mesh_name"],
+            null_value=null_value,
+        )
+
+        cortex = nib.freesurfer.read_label(template["label_files"]["lh"])
+        for i, val in enumerate(surf_data):
+            if i not in cortex.flat:
+                assert val == null_value
+
         surf_data = surface.vol_to_surf(
             vert_img, template["subject"], "lh", template["mesh_name"],
         )
