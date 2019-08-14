@@ -241,9 +241,9 @@ class Mosaic(object):
             Format of the colormap annotation.
 
         """
-        stat_data = self.stat_img.get_data()[self.x_slice,
-                                             self.y_slice,
-                                             self.z_slice].copy()
+        stat_data = self.stat_img.get_fdata()[self.x_slice,
+                                              self.y_slice,
+                                              self.z_slice].copy()
         pos_data = stat_data.copy()
         pos_data[pos_data < thresh] = np.nan
         if vmin is None:
@@ -305,9 +305,9 @@ class Mosaic(object):
             If true, add a colorbar.
 
         """
-        stat_data = self.stat_img.get_data()[self.x_slice,
-                                             self.y_slice,
-                                             self.z_slice].copy()
+        stat_data = self.stat_img.get_fdata()[self.x_slice,
+                                              self.y_slice,
+                                              self.z_slice].copy()
         if hasattr(self, "mask_img"):
             fov = self.mask_img.get_data()[self.x_slice,
                                            self.y_slice,

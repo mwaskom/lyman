@@ -130,6 +130,11 @@ class TestMosaic(VisualizationFixture):
                        images["mask_img"])
         m.plot_overlay("Reds_r")
 
+        m = viz.Mosaic(images["anat_img"],
+                       images["stat_data"].astype(np.int32),
+                       images["mask_img"])
+        m.plot_overlay("Reds_r")
+
         m = viz.Mosaic(images["anat_img"], images["stat_img"])
         with pytest.raises(ValueError):
             m.plot_overlay("not_a_colormap")
