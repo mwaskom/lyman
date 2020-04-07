@@ -8,6 +8,7 @@ LICENSE = 'BSD (3-clause)'
 URL = 'http://www.cns.nyu.edu/~mwaskom/software/lyman/'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
 VERSION = '2.0.0.dev'
+PYTHON_REQUIRES = ">=3.7"
 INSTALL_REQUIRES = [
     'numpy',
     'scipy',
@@ -29,7 +30,8 @@ SCRIPTS = [
 ]
 CLASSIFIERS = [
     'Intended Audience :: Science/Research',
-    'Programming Language :: Python :: 3.6',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
     'License :: OSI Approved :: BSD License',
     'Operating System :: POSIX',
     'Operating System :: Unix',
@@ -50,6 +52,7 @@ if __name__ == '__main__':
         version=VERSION,
         url=URL,
         download_url=DOWNLOAD_URL,
+        python_requires=PYTHON_REQUIRES,
         install_requires=INSTALL_REQUIRES,
         packages=PACKAGES,
         scripts=SCRIPTS,

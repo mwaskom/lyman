@@ -18,7 +18,7 @@ Online documentation can be found
 Dependencies
 ------------
 
-Lyman supports Python 3.6 and does not support Python 2.
+Lyman supports Python 3.7+ and does not support Python 2.
 
 Lyman preprocessing requires [FSL](http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/) and [Freesurfer](https://surfer.nmr.mgh.harvard.edu/). Information about Python library dependency information is available in the [online documentation](http://www.cns.nyu.edu/~mwaskom/software/lyman/installing.html#dependencies).
 
