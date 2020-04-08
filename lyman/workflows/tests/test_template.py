@@ -75,12 +75,12 @@ class TestTemplateWorkflow(object):
         lut = pd.read_csv(out.lut_file, sep="\t", header=None)
         assert lut.shape == (9, 6)
 
-        # Test that segmentation is integer typed
-        seg = nib.load(out.seg_file).get_data()
+        # Test that segmentation has integral values
+        seg = nib.load(out.seg_file).get_fdata()
         assert np.array_equal(seg, seg.astype("uint8"))
 
         # Test that the segmentation cortical gray matches surface vertices
-        surf = (nib.load(template["surf_file"]).get_data() > -1).any(axis=-1)
+        surf = (nib.load(template["surf_file"]).get_fdata() > -1).any(axis=-1)
         assert np.all(seg[surf] == 1)
 
     def test_mask_label(self, execdir, template):

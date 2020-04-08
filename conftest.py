@@ -275,7 +275,7 @@ def timeseries(template):
                  .mkdir(model_name)
                  .mkdir("{}_{}".format(session, run)))
 
-    mask_data = nib.load(template["seg_file"]).get_data() > 0
+    mask_data = nib.load(template["seg_file"]).get_fdata() > 0
     mask_data &= rs.uniform(0, 1, vol_shape) > .05
     mask_file = str(timeseries_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data.astype(np.int), affine), mask_file)
@@ -323,8 +323,8 @@ def modelfit(timeseries):
 
     model_dir = timeseries["model_dir"]
 
-    seg_data = nib.load(timeseries["seg_file"]).get_data()
-    mask_data = nib.load(timeseries["mask_file"]).get_data()
+    seg_data = nib.load(timeseries["seg_file"]).get_fdata()
+    mask_data = nib.load(timeseries["mask_file"]).get_fdata()
     mask_data = ((seg_data == 1) & (mask_data == 1)).astype(np.int)
     mask_file = str(model_dir.join("mask.nii.gz"))
     nib.save(nib.Nifti1Image(mask_data, affine), mask_file)

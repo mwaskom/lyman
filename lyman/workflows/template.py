@@ -262,7 +262,7 @@ class AnatomicalSegmentation(LymanInterface):
 
         # Load the template-space wmparc files
         fs_img = nib.load(self.inputs.wmparc_file)
-        fs_data = fs_img.get_data()
+        fs_data = fs_img.get_fdata()
 
         # Remap the wmparc ids to more general classifications
         seg_data = np.zeros_like(fs_data, np.int8)
@@ -284,7 +284,7 @@ class AnatomicalSegmentation(LymanInterface):
 
         # Reclassify any surface voxel as cortical gray matter
         surf_img = nib.load(self.inputs.surf_file)
-        surf_data = (surf_img.get_data() > -1).any(axis=-1)
+        surf_data = (surf_img.get_fdata() > -1).any(axis=-1)
         seg_data[surf_data] = 1
 
         # Generate a lookup table for the new segmentation
@@ -338,7 +338,7 @@ class MakeRibbon(LymanInterface):
 
         img = nib.load(self.inputs.in_file)
         affine, header = img.affine, img.header
-        vertices = img.get_data()
+        vertices = img.get_fdata()
         ribbon = (vertices > -1).any(axis=-1).astype(np.int8)
 
         self.write_image("out_file", "ribbon.nii.gz", ribbon, affine, header)
@@ -361,7 +361,7 @@ class MaskWithLabel(LymanInterface):
 
         img = nib.load(self.inputs.in_file)
         affine, header = img.affine, img.header
-        data = img.get_data()
+        data = img.get_fdata()
 
         label_file = self.inputs.label_files[self.inputs.hemi]
         label_vertices = nib.freesurfer.read_label(label_file)
@@ -399,7 +399,7 @@ class TemplateReport(LymanInterface):
 
         # Anatomical segmentation
         seg_img = nib.load(self.inputs.seg_file)
-        seg_data = seg_img.get_data().astype(np.float)
+        seg_data = seg_img.get_fdata().astype(np.float)
         seg_lut = pd.read_csv(self.inputs.lut_file, sep="\t", header=None)
         seg_rgb = seg_lut.loc[1:, [2, 3, 4]].values / 255
         seg_cmap = mpl.colors.ListedColormap(seg_rgb)
@@ -423,7 +423,7 @@ class TemplateReport(LymanInterface):
 
         # Surface ribbon
         surf_img = nib.load(self.inputs.surf_file)
-        surf = surf_img.get_data()
+        surf = surf_img.get_fdata()
         ribbon = np.zeros(anat_img.shape)
         ribbon[surf[..., 0] > 0] = 1
         ribbon[surf[..., 1] > 0] = 2

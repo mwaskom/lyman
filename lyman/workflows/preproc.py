@@ -454,7 +454,7 @@ class TimeSeriesGIF(object):
             f.text(.5, top + (1 - top) / 2, title,
                    ha="center", va="center", color="w", size=10)
 
-        data = img.get_data()
+        data = img.get_fdata()
         vmin, vmax = np.percentile(data, [2, 98])
 
         kws = dict(vmin=vmin, vmax=vmax, cmap="gray")
@@ -552,8 +552,8 @@ class SessionInput(LymanInterface):
         affine, header = pos_img.affine, pos_img.header
 
         # Concatenate the images into a single volume
-        pos_data = pos_img.get_data()
-        neg_data = neg_img.get_data()
+        pos_data = pos_img.get_fdata()
+        neg_data = neg_img.get_fdata()
         data = np.concatenate([pos_data, neg_data], axis=-1)
         assert len(data.shape) == 4
 
@@ -647,7 +647,7 @@ class RunInput(LymanInterface, TimeSeriesGIF):
 
         # Optionally crop the first n frames of the timeseries
         if self.inputs.crop_frames > 0:
-            ts_data = ts_img.get_data()
+            ts_data = ts_img.get_fdata()
             ts_data = ts_data[..., self.inputs.crop_frames:]
             ts_img = nib.Nifti1Image(ts_data, ts_img.affine, ts_img.header)
 
@@ -748,11 +748,11 @@ class FinalizeUnwarping(LymanInterface):
 
         # Load the 4D jacobian image
         jac_img_frames = nib.concat_images(self.inputs.jacobian_files)
-        jac_data = jac_img_frames.get_data()
+        jac_data = jac_img_frames.get_fdata()
 
         # Load the 4D corrected fieldmap image
         corr_img_frames = nib.load(self.inputs.corrected_file)
-        corr_data = corr_img_frames.get_data()
+        corr_data = corr_img_frames.get_fdata()
 
         # Average the corrected image over the final dimension and write
         corr_data = corr_data.mean(axis=-1)
@@ -772,7 +772,7 @@ class FinalizeUnwarping(LymanInterface):
 
         # Load in the the warp file and save out with the correct affine
         # (topup doesn't save the header geometry correctly for some reason)
-        warp_data = nib.load(warp_file).get_data()
+        warp_data = nib.load(warp_file).get_fdata()
         self.write_image("warp_file", "warp.nii.gz", warp_data, affine, header)
 
         # Select the warp along the phase encode direction
@@ -803,7 +803,10 @@ class FinalizeUnwarping(LymanInterface):
     def generate_unwarp_gif(self, runtime, raw_img, corrected_img):
 
         # Load the input and output files
-        vol_data = dict(orig=raw_img.get_data(), corr=corrected_img.get_data())
+        vol_data = dict(
+            orig=raw_img.get_fdata(),
+            corr=corrected_img.get_fdata(),
+        )
 
         # Average over the frames that correspond to unique encoding directions
         pe_data = dict(orig=[], corr=[])
@@ -922,11 +925,11 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
         # TODO Note that the TR information is not propogated into the header
         img = nib.concat_images(self.inputs.in_files)
         affine, header = img.affine, img.header
-        data = img.get_data()
+        data = img.get_fdata()
 
         # Load the template brain mask image
         mask_img = nib.load(self.inputs.mask_file)
-        mask = mask_img.get_data().astype(np.bool)
+        mask = mask_img.get_fdata().astype(np.bool)
 
         # Compute a run-specfic mask that excludes voxels outside the FOV
         mask &= data.var(axis=-1) > 0
@@ -938,7 +941,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
 
         # Jacobian modulate each frame of the timeseries image
         jacobian_img = nib.load(self.inputs.jacobian_file)
-        jacobian = jacobian_img.get_data()[..., [0]]
+        jacobian = jacobian_img.get_fdata()[..., [0]]
         data *= jacobian
 
         # Scale the timeseries for cross-run intensity normalization
@@ -969,7 +972,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
 
         # Load the template segmentation image
         seg_img = nib.load(self.inputs.seg_file)
-        seg = seg_img.get_data()
+        seg = seg_img.get_fdata()
 
         # Identify unusually noisy voxels
         gray_mask = (0 < seg) & (seg < 5)
@@ -1063,14 +1066,14 @@ class FinalizeTemplate(LymanInterface):
         # Concatenate timeseries frames into 4D image
         img = nib.concat_images(self.inputs.in_files)
         affine, header = img.affine, img.header
-        data = img.get_data()
+        data = img.get_fdata()
 
         # Load the anatomical template
         anat_img = nib.load(self.inputs.anat_file)
 
         # Load each run's brain mask and find the intersection
         mask_img_frames = nib.concat_images(self.inputs.mask_files)
-        mask_data = mask_img_frames.get_data()
+        mask_data = mask_img_frames.get_fdata()
         mask = mask_data.all(axis=-1)
 
         mask_img = self.write_image("mask_file", "mask.nii.gz",
@@ -1081,7 +1084,7 @@ class FinalizeTemplate(LymanInterface):
 
         # Jacobian modulate each frame of the template image
         jacobian_img = nib.load(self.inputs.jacobian_file)
-        jacobian = jacobian_img.get_data()
+        jacobian = jacobian_img.get_fdata()
         data *= jacobian
 
         # Scale each frame to a common mean value
@@ -1098,20 +1101,20 @@ class FinalizeTemplate(LymanInterface):
 
         # Load each run's noise mask and find the union
         noise_img_frames = nib.concat_images(self.inputs.noise_files)
-        noise_mask = noise_img_frames.get_data().any(axis=-1)
+        noise_mask = noise_img_frames.get_fdata().any(axis=-1)
         noise_img = self.write_image("noise_file", "noise.nii.gz",
                                      noise_mask, affine, header)
 
         # Load each run's mean image and take the grand mean
         mean_img = nib.concat_images(self.inputs.mean_files)
-        mean = mean_img.get_data().mean(axis=-1)
+        mean = mean_img.get_fdata().mean(axis=-1)
         mean[~mask] = 0
         mean_img = self.write_image("mean_file", "mean.nii.gz",
                                     mean, affine, header)
 
         # Load each run's tsnr image and take its mean
         tsnr_img = nib.concat_images(self.inputs.tsnr_files)
-        tsnr_data = tsnr_img.get_data().mean(axis=-1)
+        tsnr_data = tsnr_img.get_fdata().mean(axis=-1)
         tsnr_data[~mask] = 0
         tsnr_img = self.write_image("tsnr_file", "tsnr.nii.gz",
                                     tsnr_data, affine, header)
@@ -1126,7 +1129,7 @@ class FinalizeTemplate(LymanInterface):
         # Make a mosaic of the temporal mean normalized to mean cortical signal
         # TODO copied from timeseries interface!
         seg_img = nib.load(self.inputs.seg_file)
-        seg = seg_img.get_data()
+        seg = seg_img.get_fdata().astype(np.int)
         norm_mean = mean / mean[seg == 1].mean()
         mean_m = Mosaic(anat_img, norm_mean, mask_img,
                         show_mask=False, title=qc_title)
@@ -1249,10 +1252,10 @@ class AnatRegReport(LymanInterface):
                           self.inputs.subject_id, "mri")
 
         wm_file = op.join(mri_dir, "wm.mgz")
-        wm_data = (nib.load(wm_file).get_data() > 0).astype(int)
+        wm_data = (nib.load(wm_file).get_fdata() > 0).astype(int)
 
         aseg_file = op.join(mri_dir, "aseg.mgz")
-        mask = (nib.load(aseg_file).get_data() > 0).astype(int)
+        mask = (nib.load(aseg_file).get_fdata() > 0).astype(int)
 
         # Read the final registration cost
         cost = np.loadtxt(self.inputs.cost_file)[0]
@@ -1291,7 +1294,7 @@ class CoregGIF(LymanInterface):
         out_fname = self.define_output("out_file", self.inputs.out_file)
 
         if len(ref_img.shape) > 3:
-            ref_data = ref_img.get_data()[..., 0]
+            ref_data = ref_img.get_fdata()[..., 0]
             ref_img = nib.Nifti1Image(ref_data, ref_img.affine, ref_img.header)
 
         qc_title = " ".join(self.inputs.run_tuple)
