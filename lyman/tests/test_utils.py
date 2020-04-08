@@ -67,7 +67,7 @@ class TestLymanInterface(object):
 
         assert ifc._results == {field_name: abspath_file_name}
         assert isinstance(img_out, nib.Nifti1Image)
-        assert np.array_equal(img_out.get_data(), data)
+        assert np.array_equal(img_out.get_fdata(), data)
         assert np.array_equal(img_out.affine, affine)
 
         # Test writing with data and affine
@@ -76,7 +76,7 @@ class TestLymanInterface(object):
 
         assert ifc._results == {field_name: abspath_file_name}
         assert isinstance(img_out, nib.Nifti1Image)
-        assert np.array_equal(img_out.get_data(), data)
+        assert np.array_equal(img_out.get_fdata(), data)
         assert np.array_equal(img_out.affine, affine)
 
     def test_write_visualization(self, execdir):
@@ -271,13 +271,13 @@ class TestImageMatrixConversion(object):
 
         # Test 2D matrix > 4D image
         img_4d = utils.matrix_to_image(data_2d, mask_img)
-        assert np.array_equal(img_4d.get_data(), test_data["data_4d_masked"])
+        assert np.array_equal(img_4d.get_fdata(), test_data["data_4d_masked"])
         assert np.array_equal(img_4d.affine, mask_img.affine)
         assert img_4d.shape == (n_x, n_y, n_z, n_tp)
 
         # Test 1d matrix > 3D image
         img_3d = utils.matrix_to_image(data_1d, mask_img)
-        assert np.array_equal(img_3d.get_data(), test_data["data_3d_masked"])
+        assert np.array_equal(img_3d.get_fdata(), test_data["data_3d_masked"])
         assert np.array_equal(img_3d.affine, mask_img.affine)
         assert img_3d.shape == (n_x, n_y, n_z)
 
@@ -289,7 +289,7 @@ class TestImageMatrixConversion(object):
             data_seg = test_data["data_3d"][within_seg]
             img_mask = utils.matrix_to_image(data_seg, seg_mask_img)
             img_seg = utils.matrix_to_image(data_seg, seg_img, use=use)
-            assert np.array_equal(img_mask.get_data(), img_seg.get_data())
+            assert np.array_equal(img_mask.get_fdata(), img_seg.get_fdata())
 
         # Test affine and header from template image are used
         img_template = test_data["img_4d"]

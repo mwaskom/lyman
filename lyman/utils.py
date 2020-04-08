@@ -124,11 +124,11 @@ def image_to_matrix(img, mask_img, use=None):
         of the matrix (corresponding to the structure of a GLM).
 
     """
-    vol_data = img.get_data()
+    vol_data = img.get_fdata()
     if use is None:
-        mask = mask_img.get_data() > 0
+        mask = mask_img.get_fdata() > 0
     else:
-        mask = np.isin(mask_img.get_data(), use)
+        mask = np.isin(mask_img.get_fdata(), use)
     check_mask(mask, vol_data)
     data = vol_data[mask].T
     return data
@@ -173,9 +173,9 @@ def matrix_to_image(data, mask_img, template_img=None, use=None):
 
     # Put the data matrix into the volume where the mask is nonzero
     if use is None:
-        mask = mask_img.get_data() > 0
+        mask = mask_img.get_fdata() > 0
     else:
-        mask = np.isin(mask_img.get_data(), use)
+        mask = np.isin(mask_img.get_fdata(), use)
     vol_data = np.zeros(vol_shape, data.dtype)
     vol_data[mask] = data.T
     img = nib.Nifti1Image(vol_data, template_img.affine, template_img.header)

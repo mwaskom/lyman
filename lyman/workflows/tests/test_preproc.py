@@ -217,12 +217,12 @@ class TestPreprocWorkflow(object):
         assert np.array_equal(ts_img_out.affine, std_affine)
         assert ts_img_out.header.get_data_dtype() == np.dtype(np.float32)
 
-        ts_data_out = ts_img_out.get_data()
+        ts_data_out = ts_img_out.get_fdata()
         ts_data = ts_data[::-1, ::-1, :, crop_frames:].astype(np.float32)
         assert np.array_equal(ts_data_out, ts_data)
 
         for i, frame_fname in enumerate(out.ts_frames):
-            frame_data = nib.load(frame_fname).get_data()
+            frame_data = nib.load(frame_fname).get_fdata()
             assert np.array_equal(frame_data, ts_data[..., i])
 
         # Test that qc files exists
@@ -300,11 +300,11 @@ class TestPreprocWorkflow(object):
 
         fm_data = np.concatenate(fieldmap_data,
                                  axis=-1).astype(np.float32)[::-1, ::-1]
-        fm_data_out = out_fm_img.get_data()
+        fm_data_out = out_fm_img.get_fdata()
         assert np.array_equal(fm_data_out, fm_data)
 
         for i, frame in enumerate(out_frames):
-            frame_data_out = nib.load(str(frame)).get_data()
+            frame_data_out = nib.load(str(frame)).get_fdata()
             assert np.array_equal(frame_data_out, fm_data[..., i])
 
         # Test the output phase encoding information
@@ -325,11 +325,11 @@ class TestPreprocWorkflow(object):
         # Test the output images
         fm_data = np.concatenate(fieldmap_data[::-1],
                                  axis=-1).astype(np.float32)[::-1, ::-1]
-        fm_data_out = nib.load(out.fm_file).get_data()
+        fm_data_out = nib.load(out.fm_file).get_fdata()
         assert np.array_equal(fm_data_out, fm_data)
 
         for i, frame in enumerate(out_frames):
-            frame_data_out = nib.load(str(frame)).get_data()
+            frame_data_out = nib.load(str(frame)).get_fdata()
             assert np.array_equal(frame_data_out, fm_data[..., i])
 
     def test_combine_linear_transforms(self, execdir):
@@ -406,12 +406,12 @@ class TestPreprocWorkflow(object):
         assert out.unwarp_gif == execdir.join("unwarp.gif")
 
         # Test that the right frame of the raw image is selected
-        raw_data_out = nib.load(out.raw_file).get_data()
+        raw_data_out = nib.load(out.raw_file).get_fdata()
         assert np.array_equal(raw_data_out, raw_data[..., 0])
 
         # Test that the corrected image is a temporal average
         corrected_data = corrected_data.mean(axis=-1)
-        corrected_data_out = nib.load(out.corrected_file).get_data()
+        corrected_data_out = nib.load(out.corrected_file).get_fdata()
         assert corrected_data_out == pytest.approx(corrected_data)
 
         # Test that the warp image has the right geometry
@@ -419,18 +419,18 @@ class TestPreprocWorkflow(object):
         assert np.array_equal(warp_img_out.affine, affine)
 
         # Test that the warp image is the right frame
-        warp_data_out = warp_img_out.get_data()
+        warp_data_out = warp_img_out.get_fdata()
         assert np.array_equal(warp_data_out, warp_data[0])
 
         # Test the warp mask
         warp_mask = (np.abs(warp_data[0][..., 1]) < 4).astype(np.int)
-        warp_mask_out = nib.load(out.mask_file).get_data()
+        warp_mask_out = nib.load(out.mask_file).get_fdata().astype(np.int)
         assert np.array_equal(warp_mask_out, warp_mask)
 
         # Test that the jacobians have same data but new geomtery
         jacobian_data = np.stack(jacobian_data, axis=-1)
         jacobian_img_out = nib.load(out.jacobian_file)
-        jacobian_data_out = jacobian_img_out.get_data()
+        jacobian_data_out = jacobian_img_out.get_fdata()
         assert np.array_equal(jacobian_img_out.affine, affine)
         assert np.array_equal(jacobian_data_out, jacobian_data)
 
@@ -501,9 +501,9 @@ class TestPreprocWorkflow(object):
 
         # Test the output timeseries
         out_img_out = nib.load(out.out_file)
-        out_data_out = out_img_out.get_data()
+        out_data_out = out_img_out.get_fdata()
 
-        mask = nib.load(template["mask_file"]).get_data()
+        mask = nib.load(template["mask_file"]).get_fdata()
         func_mask = mask.astype(np.bool) & fov
 
         out_data = np.stack(in_data, axis=-1)
@@ -518,12 +518,12 @@ class TestPreprocWorkflow(object):
         assert out_data_out[func_mask].mean() == pytest.approx(target)
 
         # Test the output mask
-        mask_data_out = nib.load(out.mask_file).get_data()
+        mask_data_out = nib.load(out.mask_file).get_fdata()
         assert np.array_equal(mask_data_out, func_mask.astype(np.float))
 
         # Test the output temporal statistics
-        mean_out = nib.load(out.mean_file).get_data()
-        tsnr_out = nib.load(out.tsnr_file).get_data()
+        mean_out = nib.load(out.mean_file).get_fdata()
+        tsnr_out = nib.load(out.tsnr_file).get_fdata()
 
         with np.errstate(all="ignore"):
             mean = out_data.mean(axis=-1)
@@ -620,11 +620,11 @@ class TestPreprocWorkflow(object):
 
         # Test the mask conjunction
         mask = np.all(mask_data, axis=0)
-        mask_data_out = nib.load(out.mask_file).get_data()
+        mask_data_out = nib.load(out.mask_file).get_fdata()
         assert np.array_equal(mask_data_out, mask.astype(np.float))
 
         # Test the final template
-        out_data_out = nib.load(out.out_file).get_data()
+        out_data_out = nib.load(out.out_file).get_fdata()
 
         out_data = np.stack(in_data, axis=-1) * jacobian_data
         out_data[mask] *= target / out_data[mask].mean(axis=0, keepdims=True)
@@ -633,17 +633,17 @@ class TestPreprocWorkflow(object):
         assert np.array_equal(out_data_out, out_data)
 
         # Test the noise mask union
-        noise_data_out = nib.load(out.noise_file).get_data()
+        noise_data_out = nib.load(out.noise_file).get_fdata()
         noise_data = np.any(noise_data, axis=0).astype(np.float)
         assert np.array_equal(noise_data_out, noise_data)
 
         # Test the average mean image
-        mean_data_out = nib.load(out.mean_file).get_data()
+        mean_data_out = nib.load(out.mean_file).get_fdata()
         mean_data = np.mean(mean_data, axis=0) * mask
         assert np.array_equal(mean_data_out, mean_data)
 
         # Test the average tsnr image
-        tsnr_data_out = nib.load(out.tsnr_file).get_data()
+        tsnr_data_out = nib.load(out.tsnr_file).get_fdata()
         tsnr_data = np.mean(tsnr_data, axis=0) * mask
         assert np.array_equal(tsnr_data_out, tsnr_data)
 

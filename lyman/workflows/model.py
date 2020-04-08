@@ -480,8 +480,8 @@ class ModelFit(LymanInterface):
         seg_img = nib.load(self.inputs.seg_file)
         mask_img = nib.load(self.inputs.mask_file)
 
-        seg = seg_img.get_data()
-        mask = mask_img.get_data()
+        seg = seg_img.get_fdata()
+        mask = mask_img.get_fdata()
         mask = (mask > 0) & (seg > 0) & (seg < 5)
         mask_img = nib.Nifti1Image(mask.astype(np.uint8), affine, header)
         n_vox = mask.sum()
@@ -558,16 +558,16 @@ class ModelFit(LymanInterface):
                 noise_img=smooth_noise, inplace=True,
             )
 
-            ribbon = vert_img.get_data().max(axis=-1) > -1
-            filt_data = filt_img.get_data()
-            filt_data[ribbon] = ts_img.get_data()[ribbon]
+            ribbon = vert_img.get_fdata().max(axis=-1) > -1
+            filt_data = filt_img.get_fdata()
+            filt_data[ribbon] = ts_img.get_fdata()[ribbon]
             filt_img = nib.Nifti1Image(filt_data, affine, header)
 
         ts_img = filt_img
 
         # Compute the mean image for later
         # TODO limit to gray matter voxels?
-        data = ts_img.get_data()
+        data = ts_img.get_fdata()
         mean = data.mean(axis=-1)
         mean_img = nib.Nifti1Image(mean, affine, header)
 
@@ -792,9 +792,9 @@ class ModelResults(LymanInterface):
             # while matching against the list of contrast names for that run.
             for run, run_names in enumerate(name_lists):
                 if name in run_names:
-                    con_idx = run_names.index(name)
-                    con_frames.append(con_images[run].get_data()[..., con_idx])
-                    var_frames.append(var_images[run].get_data()[..., con_idx])
+                    idx = run_names.index(name)
+                    con_frames.append(con_images[run].get_fdata()[..., idx])
+                    var_frames.append(var_images[run].get_fdata()[..., idx])
 
             con_data = np.stack(con_frames, axis=-1)
             var_data = np.stack(var_frames, axis=-1)
