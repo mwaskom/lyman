@@ -104,7 +104,7 @@ class TestSignals(object):
         mask_img = nib.Nifti1Image(mask, affine)
 
         noise_img = signals.identify_noisy_voxels(data_img, mask_img)
-        noise = noise_img.get_data()
+        noise = noise_img.get_fdata()
 
         assert noise.shape == shape[:-1]
         assert np.array_equal(noise_img.affine, affine)
@@ -117,9 +117,9 @@ class TestSignals(object):
         shape = 12, 8, 4
         data_img = nib.Nifti1Image(random.normal(0, 1, shape), np.eye(4))
 
-        std_0 = data_img.get_data().std()
-        std_2 = signals.smooth_volume(data_img, 2).get_data().std()
-        std_4 = signals.smooth_volume(data_img, 4).get_data().std()
+        std_0 = data_img.get_fdata().std()
+        std_2 = signals.smooth_volume(data_img, 2).get_fdata().std()
+        std_4 = signals.smooth_volume(data_img, 4).get_fdata().std()
 
         assert std_4 < std_2 < std_0
 
@@ -128,7 +128,7 @@ class TestSignals(object):
         shape = 12, 8, 4
         orig_data = random.normal(0, 1, shape)
         orig_img = nib.Nifti1Image(orig_data, np.eye(4))
-        new_data = signals.smooth_volume(orig_img, fwhm=None,).get_data()
+        new_data = signals.smooth_volume(orig_img, fwhm=None,).get_fdata()
 
         assert np.array_equal(orig_data, new_data)
 
@@ -140,7 +140,7 @@ class TestSignals(object):
         mask = random.choice([False, True], shape)
         mask_img = nib.Nifti1Image(mask.astype(np.int), np.eye(4))
 
-        out = signals.smooth_volume(data_img, 2, mask_img).get_data()
+        out = signals.smooth_volume(data_img, 2, mask_img).get_fdata()
 
         assert out[mask].all()
         assert not out[~mask].any()
@@ -160,8 +160,8 @@ class TestSignals(object):
         out_noisy = signals.smooth_volume(data_img, 2)
         out_clean = signals.smooth_volume(data_img, 2, noise_img=noise_img)
 
-        noisy_std = out_noisy.get_data()[noise].std()
-        clean_std = out_clean.get_data()[noise].std()
+        noisy_std = out_noisy.get_fdata()[noise].std()
+        clean_std = out_clean.get_fdata()[noise].std()
 
         assert clean_std < noisy_std
 
@@ -171,18 +171,20 @@ class TestSignals(object):
         data = random.normal(0, 1, shape).astype(np.float32)
         data_img = nib.Nifti1Image(data, np.eye(4))
         out_img = signals.smooth_volume(data_img, 4, inplace=True)
-        assert np.array_equal(data_img.get_data(), out_img.get_data())
+        assert np.array_equal(data_img.get_fdata(), out_img.get_fdata())
 
     def test_smooth_segmentation(self, random):
 
         shape = 12, 8, 4
-        data = seg = random.randint(0, 4, shape)
+        seg = random.randint(0, 4, shape)
+        data = random.uniform(0, 1, shape)
+        data[seg == 2] += 3
 
         data_img = nib.Nifti1Image(data, np.eye(4))
         seg_img = nib.Nifti1Image(seg, np.eye(4))
 
         out_img = signals.smooth_segmentation(data_img, seg_img, 4)
-        assert out_img.get_data() == pytest.approx(data.astype(np.float))
+        assert out_img.get_fdata()[seg != 2].max() < 1
 
     def test_smooth_segmentation_inplace(self, random):
 
@@ -196,7 +198,7 @@ class TestSignals(object):
 
         out_img = signals.smooth_segmentation(data_img, seg_img, 4,
                                               inplace=True)
-        assert np.array_equal(out_img.get_data(), data.astype(np.float))
+        assert np.array_equal(out_img.get_fdata(), data.astype(np.float))
 
     def test_smoothing_matrix(self, meshdata):
 
@@ -276,7 +278,7 @@ class TestSignals(object):
         out_img = signals.smooth_surface(
             data_img, vert_img, fwhm, subject, surf,
         )
-        out_data = out_img.get_data()
+        out_data = out_img.get_fdata()
 
         assert out_data[ribbon].std() < data[ribbon].std()
         assert np.array_equal(out_data[~ribbon], data[~ribbon])
@@ -289,13 +291,13 @@ class TestSignals(object):
         out_img = signals.smooth_surface(
             data_img, vert_img, fwhm, subject, surf,
         )
-        out_data = out_img.get_data()
+        out_data = out_img.get_fdata()
 
         assert out_data[ribbon].std() < data[ribbon].std()
         assert np.array_equal(out_data[~ribbon], data[~ribbon])
 
         n_tp = shape[-1]
-        noise_mask = vertvol[..., 0] == vertvol.max()
+        noise_mask = (vertvol == vertvol.max()).any(axis=-1)
         data[noise_mask] = random.normal(10, 10, n_tp)
         noise_img = nib.Nifti1Image(noise_mask.astype(int), affine)
 
@@ -306,8 +308,8 @@ class TestSignals(object):
             data_img, vert_img, fwhm, subject, surf, noise_img
         )
 
-        noise_sd = noise_out_img.get_data()[noise_mask].std()
-        clean_sd = clean_out_img.get_data()[noise_mask].std()
+        noise_sd = noise_out_img.get_fdata()[noise_mask].std()
+        clean_sd = clean_out_img.get_fdata()[noise_mask].std()
 
         assert clean_sd < noise_sd
 
@@ -315,7 +317,7 @@ class TestSignals(object):
             data_img, vert_img, fwhm, subject, surf, inplace=True
         )
 
-        assert np.array_equal(out_img.get_data(), data)
+        assert np.array_equal(out_img.get_fdata(), data)
 
         with pytest.raises(ValueError):
             vert_img = nib.Nifti1Image(vertvol[..., 0], affine)

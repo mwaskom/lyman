@@ -134,8 +134,8 @@ def identify_noisy_voxels(ts_img, mask_img, neighborhood=5, threshold=1.5,
 
     """
     affine, header = ts_img.affine, ts_img.header
-    data = ts_img.get_data()
-    mask = mask_img.get_data().astype(bool)
+    data = ts_img.get_fdata()
+    mask = mask_img.get_fdata().astype(bool)
     check_mask(mask, data)
 
     # Compute temporal coefficient of variation
@@ -143,7 +143,7 @@ def identify_noisy_voxels(ts_img, mask_img, neighborhood=5, threshold=1.5,
 
     # Smooth the cov within the cortex mask
     cv_img = nib.Nifti1Image(data_cv, affine, header)
-    smooth_cv = smooth_volume(cv_img, neighborhood, mask_img).get_data()
+    smooth_cv = smooth_volume(cv_img, neighborhood, mask_img).get_fdata()
 
     # Compute the cov relative to the neighborhood
     with np.errstate(all="ignore"):
@@ -206,11 +206,11 @@ def smooth_volume(data_img, fwhm, mask_img=None, noise_img=None,
     if mask_img is None:
         mask = np.ones(data.shape[:3], np.bool)
     else:
-        mask = mask_img.get_data().astype(np.bool)
+        mask = mask_img.get_fdata().astype(np.bool)
     smooth_from = mask.copy()
 
     if noise_img is not None:
-        smooth_from &= ~noise_img.get_data().astype(np.bool)
+        smooth_from &= ~noise_img.get_fdata().astype(np.bool)
 
     sigma = voxel_sigmas(fwhm, data_img)
     norm = gaussian_filter(smooth_from.astype(np.float), sigma)
@@ -257,7 +257,7 @@ def smooth_segmentation(data_img, seg_img, fwhm, noise_img=None,
     affine, header = data_img.affine, data_img.header
     data = _load_float_data_maybe_copy(data_img, inplace)
 
-    seg = seg_img.get_data()
+    seg = seg_img.get_fdata().astype(np.int)
     seg_ids = np.sort(np.unique(seg))
 
     for id in seg_ids:
@@ -272,7 +272,7 @@ def smooth_segmentation(data_img, seg_img, fwhm, noise_img=None,
         id_mask_img = nib.Nifti1Image(id_mask.astype(np.int), affine)
         id_data_img = nib.Nifti1Image(id_data, affine)
         smooth_volume(id_data_img, fwhm, id_mask_img, noise_img, inplace=True)
-        data[id_mask] = id_data_img.get_data()[id_mask]
+        data[id_mask] = id_data_img.get_fdata()[id_mask].astype(np.int)
 
     return nib.Nifti1Image(data, affine, header)
 
@@ -395,8 +395,8 @@ def smooth_surface(data_img, vert_img, fwhm, subject, surf="graymid",
     # ---
     # Load the data
     data = _load_float_data_maybe_copy(data_img, inplace)
-    vertvol = vert_img.get_data()
-    noise = None if noise_img is None else noise_img.get_data()
+    vertvol = vert_img.get_fdata().astype(np.int)
+    noise = None if noise_img is None else noise_img.get_fdata()
 
     if not (len(vertvol.shape) == 4) and (vertvol.shape[-1] == 2):
         raise ValueError("`vert_img` must have two frames (lh and rh verts)")
@@ -435,7 +435,8 @@ def _load_float_data_maybe_copy(img, inplace):
         to_dtype = np.float
         if inplace:
             raise ValueError("Cannot operate on non-float data in place")
-    return img.get_data().astype(to_dtype, copy=not inplace)
+
+    return img.get_fdata(dtype=to_dtype).astype(to_dtype, copy=not inplace)
 
 
 def pca_transform(data, keep=None, whiten=True):
