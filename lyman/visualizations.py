@@ -62,7 +62,7 @@ class Mosaic(object):
         else:
             raise TypeError("anat type {} not understood".format(type(anat)))
         self.anat_img = nib.as_closest_canonical(anat_img)
-        self.anat_data = self.anat_img.get_data()
+        self.anat_data = self.anat_img.get_fdata()
 
         # -- Load and reorient the statistical image
 
@@ -100,14 +100,14 @@ class Mosaic(object):
 
         if mask is not None:
             self.mask_img = nib.as_closest_canonical(mask_img)
-            mask_data = self.mask_img.get_data().astype(bool)
+            mask_data = self.mask_img.get_fdata().astype(bool)
 
         if slice_dir[0] not in "sca":
             err = "Slice direction {} not understood".format(slice_dir)
             raise ValueError(err)
 
         # Find a field of view that tries to eliminate empty voxels
-        anat_fov = self.anat_img.get_data() > 1e-5
+        anat_fov = self.anat_img.get_fdata() > 1e-5
         if tight:
             self.fov = anat_fov
             if mask is not None:
@@ -177,7 +177,7 @@ class Mosaic(object):
 
     def _plot_anat(self, lims=None):
         """Plot the anatomy in grayscale."""
-        anat_data = self.anat_img.get_data()
+        anat_data = self.anat_img.get_fdata()
         if lims is None:
             vmin, vmax = 0, np.percentile(anat_data[self.fov], 99)
         else:
@@ -193,8 +193,8 @@ class Mosaic(object):
 
     def _plot_inverse_mask(self):
         """Dim the voxels outside of the statistical analysis FOV."""
-        mask_data = self.mask_img.get_data().astype(np.bool)
-        anat_data = self.anat_img.get_data()
+        mask_data = self.mask_img.get_fdata().astype(np.bool)
+        anat_data = self.anat_img.get_fdata()
         mask_data = np.where(mask_data | (anat_data < 1e-5), np.nan, 1)
         mask_fov = mask_data[self.x_slice, self.y_slice, self.z_slice]
         self._map("imshow", mask_fov, cmap="bone", vmin=0, vmax=3,
@@ -309,9 +309,9 @@ class Mosaic(object):
                                               self.y_slice,
                                               self.z_slice].copy()
         if hasattr(self, "mask_img"):
-            fov = self.mask_img.get_data()[self.x_slice,
-                                           self.y_slice,
-                                           self.z_slice].astype(bool)
+            fov = self.mask_img.get_fdata()[self.x_slice,
+                                            self.y_slice,
+                                            self.z_slice].astype(bool)
         else:
             fov = np.ones_like(stat_data).astype(bool)
 
@@ -338,9 +338,9 @@ class Mosaic(object):
 
     def plot_mask(self, color="#dd2222", alpha=.66):
         """Plot the statistical volume as a binary mask."""
-        mask_data = self.stat_img.get_data()[self.x_slice,
-                                             self.y_slice,
-                                             self.z_slice]
+        mask_data = self.stat_img.get_fdata()[self.x_slice,
+                                              self.y_slice,
+                                              self.z_slice]
         bool_mask = mask_data.astype(bool)
         mask_data = bool_mask.astype(np.float)
         mask_data[~bool_mask] = np.nan
@@ -353,9 +353,9 @@ class Mosaic(object):
         """Plot the edges of possibly multiple masks to show overlap."""
         cmap = mpl.colors.ListedColormap([color])
 
-        slices = self.stat_img.get_data()[self.x_slice,
-                                          self.y_slice,
-                                          self.z_slice]
+        slices = self.stat_img.get_fdata()[self.x_slice,
+                                           self.y_slice,
+                                           self.z_slice]
 
         self._map("contour", slices,
                   levels=[0, 1], cmap=cmap, vmin=0, vmax=1,
@@ -501,13 +501,13 @@ class CarpetPlot(object):
             img = nib.load(data)
         else:
             img = data
-        data = img.get_data().astype(np.float)
+        data = img.get_fdata()
 
         # Load the Freesurfer parcellation
         if isinstance(seg, str):
-            seg = nib.load(seg).get_data()
+            seg = nib.load(seg).get_fdata()
         else:
-            seg = seg.get_data()
+            seg = seg.get_fdata()
         masks, brain = self.define_masks(seg)
 
         # Use header geometry to convert smoothing sigma from mm to voxels

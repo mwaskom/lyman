@@ -155,7 +155,7 @@ def vol_to_surf(data_img, subject, hemi, surf="graymid",
                         "surf", "{}.{}".format(hemi, surf))
 
     # Convert input to MGH format and load volumes
-    data = data_img.get_data()
+    data = data_img.get_fdata()
     data_img = nib.MGHImage(data, data_img.affine, data_img.header)
     anat_img = nib.load(anat_file)
 
