@@ -19,7 +19,8 @@ I18NSPHINXOPTS  = $(PAPEROPT_$(PAPER)) $(SPHINXOPTS) .
 help:
 	@echo "Please use \`make <target>' where <target> is one of"
 	@echo "  commandline  to generate command line help text"
-	@echo "  graphs		  to generate nipype workflow graphs"
+	@echo "  graphs       to generate nipype workflow graphs"
+	@echo "  traits		  to generate parameter documentation"
 	@echo "  html         to make standalone HTML files"
 	@echo "  dirhtml      to make HTML files named index.html in directories"
 	@echo "  singlehtml   to make a single large HTML file"

@@ -3,8 +3,8 @@
 Release notes
 =============
 
-v2.0.0 (Unreleased)
--------------------
+v2.0.0 (April 9, 2020)
+----------------------
 
 Lyman version 2 comprises a set major change to the library (and an essentially complete rewrite of the codebase). Major aspects of the changes are summarized here; more details are available throughout the collection of related `pull requests <https://github.com/mwaskom/lyman/projects/1>`_.
 

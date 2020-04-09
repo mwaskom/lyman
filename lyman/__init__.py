@@ -6,5 +6,5 @@ from . import signals  # noqa: F401
 from . import workflows  # noqa: F401
 from . import visualizations  # noqa: F401
 
-version = "2.0.0.dev"
+version = "2.0.0"
 __version__ = version
