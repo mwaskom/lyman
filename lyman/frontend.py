@@ -447,7 +447,10 @@ def execute(wf, args, info):
     else:
 
         # TODO expose other nipype plugins as a command-line parameter
-        plugin, plugin_args = "MultiProc", {"n_procs": args.n_procs}
+        if args.n_procs == 1:
+            plugin, plugin_args = "Linear", {}
+        else:
+            plugin, plugin_args = "MultiProc", {"n_procs": args.n_procs}
         res = wf.run(plugin, plugin_args)
 
     # After successful completion of the workflow, optionally delete the

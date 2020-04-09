@@ -503,14 +503,14 @@ class TimeSeriesGIF(object):
 class SessionInput(LymanInterface):
 
     class input_spec(TraitedSpec):
-        session = traits.Tuple()
+        session = traits.Tuple(traits.Str(), traits.Str())
         data_dir = traits.Directory(exists=True)
         proc_dir = traits.Directory(exists=True)
         fm_template = traits.Str()
         phase_encoding = traits.Either("ap", "pa")
 
     class output_spec(TraitedSpec):
-        session_tuple = traits.Tuple()
+        session_tuple = traits.Tuple(traits.Str(), traits.Str())
         subject = traits.Str()
         session = traits.Str()
         fm_file = traits.File(exists=True)
@@ -596,7 +596,7 @@ class SessionInput(LymanInterface):
 class RunInput(LymanInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
-        run = traits.Tuple()
+        run = traits.Tuple(traits.Str(), traits.Str(), traits.Str())
         data_dir = traits.Directory(exists=True)
         proc_dir = traits.Directory(exists=True)
         experiment = traits.Str()
@@ -605,7 +605,7 @@ class RunInput(LymanInterface, TimeSeriesGIF):
         crop_frames = traits.Int(0, usedefault=True)
 
     class output_spec(TraitedSpec):
-        run_tuple = traits.Tuple()
+        run_tuple = traits.Tuple(traits.Str(), traits.Str(), traits.Str())
         subject = traits.Str()
         session = traits.Str()
         run = traits.Str()
@@ -725,7 +725,7 @@ class FinalizeUnwarping(LymanInterface):
         warp_files = traits.List(traits.File(exists=True))
         jacobian_files = traits.List(traits.File(Exists=True))
         phase_encoding = traits.List(traits.Str)
-        session_tuple = traits.Tuple()
+        session_tuple = traits.Tuple(traits.Str(), traits.Str())
 
     class output_spec(TraitedSpec):
         raw_file = traits.File(exists=True)
@@ -896,7 +896,7 @@ class FinalizeTimeseries(LymanInterface, TimeSeriesGIF):
 
     class input_spec(TraitedSpec):
         experiment = traits.Str()
-        run_tuple = traits.Tuple()
+        run_tuple = traits.Tuple(traits.Str(), traits.Str(), traits.Str())
         anat_file = traits.File(exists=True)
         in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
@@ -1038,7 +1038,7 @@ class FinalizeTemplate(LymanInterface):
 
     class input_spec(TraitedSpec):
         experiment = traits.Str()
-        session_tuple = traits.Tuple()
+        session_tuple = traits.Tuple(traits.Str(), traits.Str())
         in_files = traits.List(traits.File(exists=True))
         seg_file = traits.File(exists=True)
         anat_file = traits.File(exists=True)
@@ -1170,7 +1170,7 @@ class RealignmentReport(LymanInterface):
     class input_spec(TraitedSpec):
         target_file = traits.File(exists=True)
         realign_params = traits.File(exists=True)
-        run_tuple = traits.Tuple()
+        run_tuple = traits.Tuple(traits.Str(), traits.Str(), traits.Str())
 
     class output_spec(TraitedSpec):
         params_plot = traits.File(exists=True)
@@ -1237,7 +1237,7 @@ class AnatRegReport(LymanInterface):
 
     class input_spec(TraitedSpec):
         subject_id = traits.Str()
-        session_tuple = traits.Tuple()
+        session_tuple = traits.Tuple(traits.Str(), traits.Str())
         data_dir = traits.Directory(exists=True)
         in_file = traits.File(exists=True)
         cost_file = traits.File(exists=True)
@@ -1279,7 +1279,7 @@ class AnatRegReport(LymanInterface):
 class CoregGIF(LymanInterface):
 
     class input_spec(TraitedSpec):
-        run_tuple = traits.Tuple()
+        run_tuple = traits.Tuple(traits.Str(), traits.Str(), traits.Str())
         in_file = traits.File(exists=True)
         ref_file = traits.File(exists=True)
         out_file = traits.File()
