@@ -268,14 +268,30 @@ class AnatomicalSegmentation(LymanInterface):
         seg_data = np.zeros_like(fs_data, np.int8)
 
         seg_ids = [
-            np.arange(1000, 3000),  # Cortical gray matter
-            [10, 11, 12, 13, 17, 18, 49, 50, 51, 52, 53, 54],  # Subcortical
-            [16, 28, 60],  # Brain stem and ventral diencepedgen
-            [8, 47],  # Cerebellar gray matter
-            np.arange(3000, 5000),  # Superficial ("cortical") white matter
-            [5001, 5002],  # Deep white matter
-            [7, 46],  # Cerebellar white matter
-            [4, 43, 31, 63],  # Lateral ventricle CSF
+
+            # Cortical gray matter
+            np.arange(1000, 3000),
+
+            # Subcortical gray matter
+            [10, 11, 12, 13, 17, 18, 26, 49, 50, 51, 52, 53, 54, 58],
+
+            # Brain stem and ventral diencephalon
+            [16, 28, 60],
+
+            # Cerebellar gray matter
+            [8, 47],
+
+            # Superficial ("cortical") white matter
+            np.arange(3000, 5000),
+
+            # Deep white matter
+            [5001, 5002],
+
+            # Cerebellar white matter
+            [7, 46],
+
+            # Major ventricles and CSF
+            [4, 14, 15, 24, 43, 31, 63],
         ]
 
         for seg_val, id_vals in enumerate(seg_ids, 1):

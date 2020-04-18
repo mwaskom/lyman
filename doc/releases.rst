@@ -3,6 +3,12 @@
 Release notes
 =============
 
+v2.0.1 (unreleased)
+-------------------
+
+- Fixed issues with the volume segmentation: added the "Accumbens area" to the subcoritcal gray matter seg and added the 3rd and 4th ventricles to the CSF seg. This change will require rerunning workflows.
+
+
 v2.0.0 (April 9, 2020)
 ----------------------
 
