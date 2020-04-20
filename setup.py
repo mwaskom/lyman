@@ -7,7 +7,7 @@ MAINTAINER_EMAIL = 'mwaskom@nyu.edu'
 LICENSE = 'BSD (3-clause)'
 URL = 'http://www.cns.nyu.edu/~mwaskom/software/lyman/'
 DOWNLOAD_URL = 'https://github.com/mwaskom/lyman'
-VERSION = '2.0.1'
+VERSION = '2.0.1.dev0'
 PYTHON_REQUIRES = ">=3.7"
 INSTALL_REQUIRES = [
     'numpy',
